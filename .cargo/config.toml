@@ -1,0 +1,8 @@
+[alias]
+# Developer Experience (DX) helper commands
+dx = "test"
+doctor-arch = "run -- doctor architecture"
+doctor-sub = "run -- doctor substrate"
+doctor-doc = "run -- doctor doctests"
+doctor-priv = "run -- doctor privacy"
+sanity = "!./scripts/sanity.sh"

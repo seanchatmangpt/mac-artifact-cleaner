@@ -1,0 +1,41 @@
+# Build outputs
+/target/
+
+# Real audit / deletion outputs
+*.jsonocel
+cleanup-plan*.json
+cleanup-plan*.jsonocel
+deletion-plan*.json
+deletion-plan*.jsonocel
+delete-receipt*.json
+delete-receipt*.jsonocel
+disk-audit*.json
+disk-audit*.jsonocel
+disk-report*.json
+tool-root-audit*.json
+tool-root-audit*.jsonocel
+snapshot-thin-plan*.json
+snapshot-thin-receipt*.json
+tm-exclusion-plan*.json
+tm-exclusion-receipt*.json
+
+# Local logs
+*.log
+*.trace
+*.receipt
+
+# Agents and CLI tools
+.agents/
+.antigravitycli/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Local test sandboxes
+tmp/
+scratch/
+fixtures/private/
