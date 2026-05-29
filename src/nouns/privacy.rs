@@ -7,7 +7,7 @@
 //!
 //! ```
 //! use std::path::PathBuf;
-//! use mac_artifact_cleaner::nouns::privacy::{handle, PrivacyAction};
+//! use pentecost::nouns::privacy::{handle, PrivacyAction};
 //!
 //! // Negative/refusal case: Attempting to redact a non-existent file returns an error
 //! let action = PrivacyAction::Redact {
@@ -40,7 +40,7 @@ pub enum PrivacyAction {
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use mac_artifact_cleaner::nouns::privacy::{handle, PrivacyAction};
+/// use pentecost::nouns::privacy::{handle, PrivacyAction};
 ///
 /// // Positive case: redact a temporary file
 /// let temp_file = std::env::temp_dir().join("test_redact_doctest.txt");
@@ -64,7 +64,15 @@ pub fn handle(action: PrivacyAction) -> anyhow::Result<()> {
         PrivacyAction::Scan => {
             println!("Scanning workspace for privacy and sensitive leaks...");
             let workspace_root = Path::new(".");
-            let report = diagnose_privacy(workspace_root);
+            let (gitignore_exists, gitignore_content, found_sensitive_files, files_to_scan) =
+                crate::integration::doctor::read_privacy_files(workspace_root);
+
+            let report = diagnose_privacy(
+                gitignore_exists,
+                gitignore_content,
+                found_sensitive_files,
+                &files_to_scan,
+            );
 
             println!("- .gitignore exists: {}", report.gitignore_exists);
 

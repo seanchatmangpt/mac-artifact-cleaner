@@ -24,7 +24,16 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
     match action {
         DoctorAction::Architecture => {
             println!("Auditing architecture layout...");
-            let report = diagnose_architecture(workspace_root);
+            let (agents_md_exists, cargo_toml_exists, main_dirs_exist, nouns_files_exist) =
+                crate::integration::doctor::read_workspace_architecture(workspace_root);
+
+            let report = diagnose_architecture(
+                agents_md_exists,
+                cargo_toml_exists,
+                main_dirs_exist,
+                nouns_files_exist,
+            );
+
             println!("- AGENTS.md exists: {}", report.agents_md_exists);
             println!("- Cargo.toml exists: {}", report.cargo_toml_exists);
             println!("\nDirectories check:");
@@ -55,7 +64,12 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
         }
         DoctorAction::Substrate => {
             println!("Auditing system substrate...");
-            let report = diagnose_substrate();
+            let is_macos = cfg!(target_os = "macos");
+            let (tmutil_path, command_execution_works) =
+                crate::integration::doctor::query_substrate_info();
+
+            let report = diagnose_substrate(is_macos, tmutil_path, command_execution_works);
+
             println!("- Running on macOS: {}", report.is_macos);
             println!(
                 "- tmutil executable: {}",
@@ -76,7 +90,9 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
         }
         DoctorAction::Doctests => {
             println!("Auditing module and function doctests...");
-            let report = diagnose_doctests(workspace_root)?;
+            let files = crate::integration::doctor::read_doctest_files(workspace_root);
+            let report = diagnose_doctests(&files);
+
             println!("\nModule level docs found:");
             for (module, has_doc) in &report.has_module_doc {
                 println!(
@@ -107,7 +123,16 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
         }
         DoctorAction::Privacy => {
             println!("Auditing privacy constraints and sensitive leaks...");
-            let report = diagnose_privacy(workspace_root);
+            let (gitignore_exists, gitignore_content, found_sensitive_files, files_to_scan) =
+                crate::integration::doctor::read_privacy_files(workspace_root);
+
+            let report = diagnose_privacy(
+                gitignore_exists,
+                gitignore_content,
+                found_sensitive_files,
+                &files_to_scan,
+            );
+
             println!("- .gitignore exists: {}", report.gitignore_exists);
 
             if !report.gitignore_missing_patterns.is_empty() {

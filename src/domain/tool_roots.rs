@@ -1,6 +1,6 @@
 //! Root-level tool and dependency cache tracking.
 
-use crate::domain::time::{seconds_to_days, system_time_to_unix};
+use crate::domain::time::seconds_to_days;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -34,6 +34,10 @@ pub struct ToolRootAcc {
     pub dirs: AtomicU64,
     pub newest_mtime: AtomicI64,
     pub newest_mtime_path: Mutex<Option<PathBuf>>,
+    pub created_unix: AtomicI64,
+    pub accessed_unix: AtomicI64,
+    pub modified_unix: AtomicI64,
+    pub ctime_unix: AtomicI64,
 }
 
 impl Default for ToolRootAcc {
@@ -44,6 +48,10 @@ impl Default for ToolRootAcc {
             dirs: AtomicU64::new(0),
             newest_mtime: AtomicI64::new(0),
             newest_mtime_path: Mutex::new(None),
+            created_unix: AtomicI64::new(0),
+            accessed_unix: AtomicI64::new(0),
+            modified_unix: AtomicI64::new(0),
+            ctime_unix: AtomicI64::new(0),
         }
     }
 }
@@ -60,7 +68,7 @@ pub struct ToolRootDef {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::tool_roots::build_tool_root_defs;
+/// use pentecost::domain::tool_roots::build_tool_root_defs;
 ///
 /// // Positive case: builds definitions based on existing home directories
 /// let defs = build_tool_root_defs();
@@ -134,7 +142,6 @@ pub fn build_tool_root_defs() -> Vec<ToolRootDef> {
             category,
             default_disposition: disposition,
         })
-        .filter(|d| d.path.exists())
         .collect()
 }
 
@@ -143,7 +150,7 @@ pub fn build_tool_root_defs() -> Vec<ToolRootDef> {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::tool_roots::{recommend_tool_root, ToolRootDef};
+/// use pentecost::domain::tool_roots::{recommend_tool_root, ToolRootDef};
 /// use std::path::PathBuf;
 ///
 /// let def = ToolRootDef {
@@ -308,7 +315,7 @@ pub fn recommend_tool_root(
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::tool_roots::{build_tool_root_report, ToolRootDef, ToolRootAcc};
+/// use pentecost::domain::tool_roots::{build_tool_root_report, ToolRootDef, ToolRootAcc};
 /// use dashmap::DashMap;
 /// use std::path::PathBuf;
 ///
@@ -331,12 +338,7 @@ pub fn build_tool_root_report(
 ) -> Vec<ToolRootReport> {
     let now = chrono::Utc::now().timestamp();
     let mut out = Vec::new();
-
     for def in defs {
-        let Ok(meta) = std::fs::symlink_metadata(&def.path) else {
-            continue;
-        };
-
         let Some(acc) = accs.get(&def.path) else {
             continue;
         };
@@ -346,10 +348,19 @@ pub fn build_tool_root_report(
             continue;
         }
 
-        let created = meta.created().ok().map(system_time_to_unix);
-        let accessed = meta.accessed().ok().map(system_time_to_unix);
-        let modified = meta.modified().ok().map(system_time_to_unix);
-        let changed = Some(std::os::unix::fs::MetadataExt::ctime(&meta));
+        let created_val = acc.created_unix.load(Ordering::Relaxed);
+        let accessed_val = acc.accessed_unix.load(Ordering::Relaxed);
+        let modified_val = acc.modified_unix.load(Ordering::Relaxed);
+        let ctime_val = acc.ctime_unix.load(Ordering::Relaxed);
+
+        if created_val == 0 && accessed_val == 0 && modified_val == 0 && ctime_val == 0 {
+            continue;
+        }
+
+        let created = if created_val > 0 { Some(created_val) } else { None };
+        let accessed = if accessed_val > 0 { Some(accessed_val) } else { None };
+        let modified = if modified_val > 0 { Some(modified_val) } else { None };
+        let changed = if ctime_val > 0 { Some(ctime_val) } else { None };
 
         let newest_descendant = acc.newest_mtime.load(Ordering::Relaxed);
         let newest_descendant = if newest_descendant > 0 {
@@ -411,7 +422,7 @@ pub fn build_tool_root_report(
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::tool_roots::human_bytes;
+/// use pentecost::domain::tool_roots::human_bytes;
 ///
 /// // Positive case
 /// assert_eq!(human_bytes(1024), "1.00 KB");

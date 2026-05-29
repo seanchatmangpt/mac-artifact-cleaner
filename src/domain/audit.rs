@@ -28,7 +28,7 @@ impl Stats {
     /// # Examples
     ///
     /// ```
-    /// use mac_artifact_cleaner::domain::audit::Stats;
+    /// use pentecost::domain::audit::Stats;
     /// use std::sync::atomic::Ordering;
     ///
     /// // Positive case: verify counters are initialized to zero

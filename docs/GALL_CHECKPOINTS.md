@@ -1,4 +1,4 @@
-# Gall Checkpoints: The Evolution of mac-artifact-cleaner
+# Gall Checkpoints: The Evolution of Pentecost
 
 Gall’s Law states that a complex working system is almost always found to have evolved from a simple working system. The key is not the platitude "start small." The key is:
 

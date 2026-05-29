@@ -190,6 +190,8 @@ fn run_tool_roots_scan(
 
     reporter.finish("Tool roots scan complete!");
 
+    crate::integration::fs::populate_tool_roots_metadata(&tool_defs, &tool_accs);
+
     let min_bytes = min_mb * 1024 * 1024;
     let reports = build_tool_report_with_reverse_bytes(&tool_defs, &tool_accs, min_bytes);
     Ok(reports)

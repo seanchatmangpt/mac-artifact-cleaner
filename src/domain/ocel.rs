@@ -72,7 +72,7 @@ pub struct OcelRelationship {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::ocel::build_tool_roots_ocel;
+/// use pentecost::domain::ocel::build_tool_roots_ocel;
 ///
 /// // Positive case: empty input list still creates an audit run log object
 /// let log = build_tool_roots_ocel(&[]);
@@ -315,10 +315,10 @@ fn attr_def(name: &str, attr_type: &str) -> OcelAttributeDef {
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use mac_artifact_cleaner::domain::artifact::Candidate;
-/// use mac_artifact_cleaner::domain::tool_roots::ToolRootReport;
-/// use mac_artifact_cleaner::domain::audit::Stats;
-/// use mac_artifact_cleaner::domain::ocel::build_disk_audit_ocel;
+/// use pentecost::domain::artifact::Candidate;
+/// use pentecost::domain::tool_roots::ToolRootReport;
+/// use pentecost::domain::audit::Stats;
+/// use pentecost::domain::ocel::build_disk_audit_ocel;
 ///
 /// // Positive case: build audit log with empty candidates and tool roots
 /// let roots = vec![PathBuf::from("/Users/test")];
@@ -621,7 +621,7 @@ pub fn build_disk_audit_ocel(
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::ocel::build_snapshot_audit_ocel;
+/// use pentecost::domain::ocel::build_snapshot_audit_ocel;
 ///
 /// let log = build_snapshot_audit_ocel("/", &["snap1".to_string(), "snap2".to_string()]);
 /// assert_eq!(log.objects.len(), 1);
@@ -690,7 +690,7 @@ pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OcelLog 
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::ocel::build_snapshot_thin_ocel;
+/// use pentecost::domain::ocel::build_snapshot_thin_ocel;
 ///
 /// let log = build_snapshot_thin_ocel("/", 1000, &["snap1".to_string()], &[], &["snap1".to_string()]);
 /// assert_eq!(log.objects.len(), 1);
@@ -777,7 +777,7 @@ pub fn build_snapshot_thin_ocel(
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::ocel::build_exclusion_plan_ocel;
+/// use pentecost::domain::ocel::build_exclusion_plan_ocel;
 ///
 /// let log = build_exclusion_plan_ocel("/path/to/script.sh", 5);
 /// assert_eq!(log.objects.len(), 1);
@@ -882,7 +882,7 @@ fn val_matches_type(val: &serde_json::Value, type_str: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::ocel::{build_tool_roots_ocel, validate_ocel_log};
+/// use pentecost::domain::ocel::{build_tool_roots_ocel, validate_ocel_log};
 ///
 /// // Positive case: validation succeeds for standard empty audit log
 /// let log = build_tool_roots_ocel(&[]);
@@ -1131,7 +1131,7 @@ pub fn validate_ocel_log(log: &OcelLog) -> OcelValidationReport {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::ocel::{build_tool_roots_ocel, summarize_ocel_log};
+/// use pentecost::domain::ocel::{build_tool_roots_ocel, summarize_ocel_log};
 ///
 /// // Positive case: summary extracts correct counts from standard empty log
 /// let log = build_tool_roots_ocel(&[]);

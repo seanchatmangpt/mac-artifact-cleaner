@@ -9,9 +9,10 @@ use ignore::{WalkBuilder, WalkState};
 use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use anyhow::Context;
 use crate::domain::artifact::{
     artifact_candidates_from_snapshot, detect_project_from_snapshot, is_global_cache,
     is_macos_os_dir, traversal_barrier_names, ArgsSnapshot, Candidate, DirSnapshot, EntryKind,
@@ -270,6 +271,300 @@ pub fn scan_root(
     Ok(())
 }
 
+// ── Disk breakdown by top-level directory ─────────────────────────────────────
+
+/// Walks `root` in parallel and returns total byte usage bucketed by each
+/// immediate child of `root`, sorted largest-first.
+///
+/// Hidden directories are included. No artifact-specific pruning is applied —
+/// every file under every child is counted.
+pub fn breakdown_sizes(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>> {
+    let buckets: Arc<DashMap<PathBuf, AtomicU64>> = Arc::new(DashMap::new());
+
+    // Pre-populate one bucket per immediate child of root.
+    for entry in std::fs::read_dir(root)?.flatten() {
+        buckets.insert(entry.path(), AtomicU64::new(0));
+    }
+
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(8);
+
+    let mut builder = WalkBuilder::new(root);
+    builder
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .follow_links(false)
+        .same_file_system(true)
+        .threads(threads);
+
+    let root_pb = root.to_path_buf();
+    let buckets_w = buckets.clone();
+
+    builder.build_parallel().run(|| {
+        let buckets = buckets_w.clone();
+        let root = root_pb.clone();
+        Box::new(move |result| {
+            let entry = match result {
+                Ok(e) => e,
+                Err(_) => return WalkState::Continue,
+            };
+            let Ok(meta) = entry.metadata() else {
+                return WalkState::Continue;
+            };
+            if !meta.is_file() {
+                return WalkState::Continue;
+            }
+            let path = entry.path();
+            let Ok(rel) = path.strip_prefix(&root) else {
+                return WalkState::Continue;
+            };
+            if let Some(first) = rel.components().next() {
+                let top = root.join(first);
+                if let Some(bucket) = buckets.get(&top) {
+                    // Physical allocation, not logical size (handles sparse files).
+                    bucket.fetch_add(meta.blocks() * 512, Ordering::Relaxed);
+                }
+            }
+            WalkState::Continue
+        })
+    });
+
+    let mut results: Vec<(PathBuf, u64)> = buckets
+        .iter()
+        .map(|e| (e.key().clone(), e.value().load(Ordering::Relaxed)))
+        .collect();
+
+    results.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(results)
+}
+
+// ── Cargo target-dir discovery ────────────────────────────────────────────────
+
+/// Walks `root` and returns every `target/` directory whose parent contains
+/// `Cargo.toml` or `Cargo.lock`, together with its physical size on disk.
+///
+/// Uses jwalk's `process_read_dir` to prune `target/` dirs from descent so
+/// their contents are never walked — only the top-level entry is inspected.
+/// Size is computed with a second parallel walk over each found dir.
+pub fn find_cargo_target_dirs(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>> {
+    use jwalk::{Parallelism, WalkDir};
+    use rayon::prelude::*;
+
+    let found: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+    let found_w = found.clone();
+
+    WalkDir::new(root)
+        .skip_hidden(false)
+        .follow_links(false)
+        .parallelism(Parallelism::RayonNewPool(0))
+        .process_read_dir(move |_, parent, _, children| {
+            let is_cargo_project = parent.join("Cargo.toml").exists()
+                || parent.join("Cargo.lock").exists();
+
+            if is_cargo_project {
+                children.retain(|e| {
+                    let Ok(e) = e else { return true };
+                    if e.file_name() == "target" && e.file_type().is_dir() {
+                        found_w
+                            .lock()
+                            .unwrap()
+                            .push(parent.join("target"));
+                        return false; // prune — don't descend into target/
+                    }
+                    true
+                });
+            }
+        })
+        .into_iter()
+        .for_each(|_| {});
+
+    let dirs = Arc::try_unwrap(found).unwrap().into_inner().unwrap();
+
+    // Compute physical sizes in parallel across all found target dirs.
+    let mut with_sizes: Vec<(PathBuf, u64)> = dirs
+        .into_par_iter()
+        .map(|dir| {
+            let size = physical_dir_size(&dir);
+            (dir, size)
+        })
+        .collect();
+
+    with_sizes.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    Ok(with_sizes)
+}
+
+/// Computes physical disk usage of a directory tree (blocks × 512).
+pub fn physical_dir_size(path: &Path) -> u64 {
+    use jwalk::{Parallelism, WalkDir};
+    WalkDir::new(path)
+        .skip_hidden(false)
+        .follow_links(false)
+        .parallelism(Parallelism::RayonNewPool(0))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.blocks() * 512)
+        .sum()
+}
+
+// ── Fast large-file search ─────────────────────────────────────────────────────
+
+/// Finds every file >= `min_bytes` under `root` as fast as possible.
+///
+/// Uses `jwalk` (rayon work-stealing + `fstatat`) which is ~2-3× faster than
+/// `ignore::WalkBuilder` for raw traversal because there is no gitignore
+/// overhead. Directories on a different device than `root` are pruned before
+/// descent to avoid `/dev`, network mounts, and APFS snapshot volumes.
+///
+/// Returns results sorted largest-first. `progress` is called with
+/// `(files_scanned, large_files_found)` periodically so the caller can drive
+/// a live display.
+pub fn find_large_files(
+    root: &Path,
+    min_bytes: u64,
+    progress: impl Fn(u64, u64) + Send + Sync + 'static,
+) -> anyhow::Result<Vec<(PathBuf, u64)>> {
+    use jwalk::{Parallelism, WalkDir};
+    use std::os::unix::fs::MetadataExt as _;
+
+    let root_dev = std::fs::metadata(root)
+        .with_context(|| format!("Cannot stat root: {}", root.display()))?
+        .dev();
+
+    let files_scanned = Arc::new(AtomicU64::new(0));
+    let large_found = Arc::new(AtomicU64::new(0));
+
+    let files_scanned_cb = files_scanned.clone();
+    let large_found_cb = large_found.clone();
+
+    // Spawn a progress-reporting thread that fires every 250 ms.
+    let progress = Arc::new(progress);
+    let progress_cb = progress.clone();
+    let files_for_thread = files_scanned.clone();
+    let large_for_thread = large_found.clone();
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            progress_cb(
+                files_for_thread.load(Ordering::Relaxed),
+                large_for_thread.load(Ordering::Relaxed),
+            );
+        }
+    });
+
+    let mut results: Vec<(PathBuf, u64)> = WalkDir::new(root)
+        .skip_hidden(false)
+        .follow_links(false)
+        .parallelism(Parallelism::RayonNewPool(0)) // 0 = use all cores
+        .process_read_dir(move |_, _, _, children| {
+            // Prune entries on a different device before we ever descend.
+            children.retain(|e| {
+                let Ok(e) = e else { return true };
+                // DirEntry from jwalk carries metadata already read by fstatat.
+                e.metadata().map(|m| m.dev() == root_dev).unwrap_or(true)
+            });
+        })
+        .into_iter()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let ft = entry.file_type();
+            if !ft.is_file() {
+                return None;
+            }
+            let meta = entry.metadata().ok()?;
+            // Physical bytes on disk, not logical file size.
+            // APFS sparse files (Docker.raw, VM images) report a huge `len()`
+            // but only allocate the blocks they actually wrote.
+            let physical = meta.blocks() * 512;
+            files_scanned_cb.fetch_add(1, Ordering::Relaxed);
+            if physical >= min_bytes {
+                large_found_cb.fetch_add(1, Ordering::Relaxed);
+                Some((entry.path(), physical))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let _ = stop_tx.send(());
+
+    // Final progress tick.
+    progress(
+        files_scanned.load(Ordering::Relaxed),
+        large_found.load(Ordering::Relaxed),
+    );
+
+    results.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    Ok(results)
+}
+
+// ── macOS-aware force deletion ─────────────────────────────────────────────────
+
+/// Removes a directory tree, clearing macOS immutable flags (`UF_IMMUTABLE`)
+/// and making all entries user-writable before deletion.
+///
+/// Regular `std::fs::remove_dir_all` fails on paths like `~/.npm/_cacache`
+/// because npm sets the `uchg` immutable flag on blobs. This function does a
+/// two-pass fix — flags then permissions — before the final remove.
+///
+/// Returns an error with a hint to use `sudo` if files are root-owned.
+pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !path.exists() {
+        return Ok(());
+    }
+
+    // Pass 1 — clear macOS immutable flags (nouchg = user immutable, noschg = sys immutable).
+    // Ignore errors: chflags will fail on root-owned files; we surface that later.
+    let _ = std::process::Command::new("chflags")
+        .args(["-R", "nouchg,noschg"])
+        .arg(path)
+        .output();
+
+    // Pass 2 — make every entry user-writable so remove_dir_all can proceed.
+    let mut builder = WalkBuilder::new(path);
+    builder
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .follow_links(false)
+        .same_file_system(true);
+
+    for result in builder.build() {
+        let Ok(entry) = result else { continue };
+        let is_dir = entry
+            .file_type()
+            .map(|ft| ft.is_dir())
+            .unwrap_or(false);
+        let mode = if is_dir { 0o700u32 } else { 0o600u32 };
+        let _ = std::fs::set_permissions(
+            entry.path(),
+            std::fs::Permissions::from_mode(mode),
+        );
+    }
+
+    // Final removal.
+    std::fs::remove_dir_all(path).with_context(|| {
+        format!(
+            "Could not remove {}. Some entries may be root-owned — try: sudo rm -rf {}",
+            path.display(),
+            path.display()
+        )
+    })
+}
+
 // ── Plan-bound deletion ────────────────────────────────────────────────────────
 
 /// Deletes a single file from the filesystem.
@@ -346,6 +641,31 @@ fn record_tool_root_file(
                         Err(actual) => current = actual,
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Populates the tool root directories' own metadata fields inside `ToolRootAcc`
+/// by executing live OS/filesystem calls in the integration layer.
+pub fn populate_tool_roots_metadata(
+    defs: &[ToolRootDef],
+    accs: &DashMap<PathBuf, ToolRootAcc>,
+) {
+    for def in defs {
+        if let Some(acc) = accs.get(&def.path) {
+            if let Ok(meta) = std::fs::symlink_metadata(&def.path) {
+                if let Ok(created) = meta.created() {
+                    acc.created_unix.store(crate::domain::time::system_time_to_unix(created), Ordering::Relaxed);
+                }
+                if let Ok(accessed) = meta.accessed() {
+                    acc.accessed_unix.store(crate::domain::time::system_time_to_unix(accessed), Ordering::Relaxed);
+                }
+                if let Ok(modified) = meta.modified() {
+                    acc.modified_unix.store(crate::domain::time::system_time_to_unix(modified), Ordering::Relaxed);
+                }
+                let ctime = std::os::unix::fs::MetadataExt::ctime(&meta);
+                acc.ctime_unix.store(ctime, Ordering::Relaxed);
             }
         }
     }

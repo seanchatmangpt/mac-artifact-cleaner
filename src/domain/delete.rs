@@ -9,8 +9,8 @@ use std::path::Path;
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::delete::validate_plan_item;
-/// use mac_artifact_cleaner::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+/// use pentecost::domain::delete::validate_plan_item;
+/// use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
 /// use std::path::{Path, PathBuf};
 ///
 /// let plan = DeletionPlan::new(
@@ -57,8 +57,8 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::delete::validate_plan;
-/// use mac_artifact_cleaner::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+/// use pentecost::domain::delete::validate_plan;
+/// use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
 /// use std::path::PathBuf;
 ///
 /// let plan = DeletionPlan::new(

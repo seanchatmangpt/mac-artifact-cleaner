@@ -1,8 +1,27 @@
-# mac-disk-auditor
+# Pentecost (`pcst`)
 
 **A plan-bound macOS developer disk auditor and cleanup utility. It observes first, emits reviewable OCEL evidence, deletes only from approved plans, and records receipts.**
 
-Unlike traditional cleaners that blindly execute `rm -rf` from a live scan, `mac-disk-auditor` enforces a strict, multi-phase execution pipeline based on Gall's Law: never increase destructive power without simultaneously increasing receipts.
+Unlike traditional cleaners that blindly execute `rm -rf` from a live scan, `pentecost` enforces a strict, multi-phase execution pipeline: never increase destructive power without simultaneously increasing receipts.
+
+## The Old Computing Gap
+
+Since the beginning of practical computing, machines have separated syntax from consequence.
+
+A command could be valid.
+A process could be permitted.
+An exit code could be zero.
+A file could be changed.
+
+But the machine still could not publicly prove that the consequence belonged to an admitted order.
+
+Pentecost addresses this gap.
+
+It makes local command execution pass through public naming, separated powers, plan admission, bounded materialization, receipt, replay, and checkpoint promotion.
+
+> **Computing learned to execute before it learned to testify. Pentecost teaches the computer to testify before it acts.**
+
+---
 
 ## Architecture & Workflow
 
@@ -28,7 +47,8 @@ This tool is safe to publish as source code, but its generated reports are machi
 
 These files can contain absolute paths, project names, hidden tool directories, timestamps, file sizes, and local development patterns. The included `.gitignore` will protect against accidental commits of these file patterns.
 
-*(If you wish to share examples or file bug reports, a `--redact` flag is planned to sanitize local ontology paths like `/Users/user/...` into safe equivalents like `$HOME/workspace/project-a/...`)*
-
 ## Documentation
-- [Gall Checkpoints: The Evolution of mac-artifact-cleaner](docs/GALL_CHECKPOINTS.md)
+- [Gall Checkpoints: The Evolution of Pentecost](docs/GALL_CHECKPOINTS.md)
+- [Privacy Model and Redaction Guidelines](docs/PRIVACY_MODEL.md)
+- [Time Machine & APFS Snapshot Model](docs/TIME_MACHINE_MODEL.md)
+- [OCEL v2 Reporting Model](docs/OCEL_MODEL.md)

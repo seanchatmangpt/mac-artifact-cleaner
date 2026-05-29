@@ -43,7 +43,7 @@ impl EntrySnapshot {
     /// # Examples
     ///
     /// ```
-    /// use mac_artifact_cleaner::domain::artifact::{EntrySnapshot, EntryKind};
+    /// use pentecost::domain::artifact::{EntrySnapshot, EntryKind};
     /// use std::path::PathBuf;
     ///
     /// // Positive case: a Rust source file entry.
@@ -106,7 +106,7 @@ impl DirSnapshot {
     /// # Examples
     ///
     /// ```
-    /// use mac_artifact_cleaner::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
+    /// use pentecost::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
     /// use std::path::PathBuf;
     ///
     /// let snap = DirSnapshot {
@@ -132,7 +132,7 @@ impl DirSnapshot {
     /// # Examples
     ///
     /// ```
-    /// use mac_artifact_cleaner::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
+    /// use pentecost::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
     /// use std::path::PathBuf;
     ///
     /// let snap = DirSnapshot {
@@ -158,7 +158,7 @@ impl DirSnapshot {
     /// # Examples
     ///
     /// ```
-    /// use mac_artifact_cleaner::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
+    /// use pentecost::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
     /// use std::path::PathBuf;
     ///
     /// let snap = DirSnapshot {
@@ -184,7 +184,7 @@ impl DirSnapshot {
     /// # Examples
     ///
     /// ```
-    /// use mac_artifact_cleaner::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
+    /// use pentecost::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
     /// use std::path::PathBuf;
     ///
     /// let snap = DirSnapshot {
@@ -212,7 +212,7 @@ impl DirSnapshot {
     /// # Examples
     ///
     /// ```
-    /// use mac_artifact_cleaner::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
+    /// use pentecost::domain::artifact::{DirSnapshot, EntrySnapshot, EntryKind};
     /// use std::path::PathBuf;
     ///
     /// let snap = DirSnapshot {
@@ -265,7 +265,7 @@ pub struct ArgsSnapshot {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::artifact::is_macos_os_dir;
+/// use pentecost::domain::artifact::is_macos_os_dir;
 /// use std::path::Path;
 ///
 /// // Positive case: macOS/system paths are identified.
@@ -303,7 +303,7 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::artifact::is_global_cache;
+/// use pentecost::domain::artifact::is_global_cache;
 /// use std::path::Path;
 ///
 /// // Positive case: global cache paths are identified.
@@ -349,7 +349,7 @@ pub fn is_global_cache(path: &Path) -> bool {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::artifact::is_artifact_leaf_name;
+/// use pentecost::domain::artifact::is_artifact_leaf_name;
 ///
 /// // Positive cases
 /// assert!(is_artifact_leaf_name("node_modules"));
@@ -395,7 +395,7 @@ pub fn is_artifact_leaf_name(name: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::artifact::traversal_barrier_names;
+/// use pentecost::domain::artifact::traversal_barrier_names;
 ///
 /// let barriers = traversal_barrier_names();
 ///
@@ -461,7 +461,7 @@ pub fn traversal_barrier_names() -> HashSet<&'static str> {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::artifact::{
+/// use pentecost::domain::artifact::{
 ///     detect_project_from_snapshot, DirSnapshot, EntrySnapshot, EntryKind
 /// };
 /// use std::path::PathBuf;
@@ -575,7 +575,7 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::artifact::{
+/// use pentecost::domain::artifact::{
 ///     artifact_candidates_from_snapshot, DirSnapshot, EntrySnapshot, EntryKind,
 ///     ProjectKind, ArgsSnapshot,
 /// };

@@ -1,6 +1,6 @@
 # Time Machine & APFS Snapshot Model
 
-This document explains how `mac-artifact-cleaner` interacts with macOS APFS local snapshots and Time Machine exclusions.
+This document explains how `pentecost` interacts with macOS APFS local snapshots and Time Machine exclusions.
 
 ---
 
@@ -20,7 +20,7 @@ Active Directory  ────────> [ File Blocks (120 GB Target cache) 
 APFS Local Snapshot ─────────────┘ (Blocks are retained!)
 ```
 
-To solve this, `mac-artifact-cleaner` models APFS snapshots and Time Machine backup exclusions as core domain concepts.
+To solve this, `pentecost` models APFS snapshots and Time Machine backup exclusions as core domain concepts.
 
 ---
 
@@ -31,7 +31,7 @@ The cleanest way to prevent build artifacts from bloating Time Machine backups (
 ### 2.1 The `tmutil` Exclusion Plan
 We do not make direct, unchecked modifications to Time Machine configurations. Instead, the application generates a reviewable exclusion plan script.
 
-The logic in [tmutil.rs](file:///Users/sac/mac-artifact-cleaner/src/integration/tmutil.rs) implements this behavior:
+The logic in [tmutil.rs](../src/integration/tmutil.rs) implements this behavior:
 
 ```rust
 pub fn write_tm_exclusions_script(
@@ -75,10 +75,10 @@ If files are deleted and space is still pinned, local snapshots must be thinned.
 
 ```bash
 # Analyze APFS local snapshot usage and space pinned
-mac-artifact-cleaner snapshot audit
+pcst snapshot audit
 
 # Thin local snapshots to try and reclaim up to 200 GB
-mac-artifact-cleaner snapshot thin --bytes 200GB
+pcst snapshot thin --bytes 200GB
 ```
 
 Every snapshot operation is logged in the final delete receipt, showing the before-and-after free space comparison to verify successful block reclamation.

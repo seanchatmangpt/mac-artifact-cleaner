@@ -2,10 +2,7 @@
 //!
 //! Provides validation checks for codebase architecture, system substrate,
 //! doctests verification, and privacy/redaction compliance.
-
-use std::fs;
-use std::path::Path;
-use std::process::Command;
+//! All functions in this module are pure and do not perform any I/O.
 
 /// Report returned by `diagnose_architecture`
 #[derive(Debug, Clone)]
@@ -62,17 +59,24 @@ pub struct PrivacyReport {
 /// # Examples
 ///
 /// ```
-/// use std::path::Path;
-/// use mac_artifact_cleaner::domain::doctor::diagnose_architecture;
-/// let report = diagnose_architecture(Path::new("."));
+/// use pentecost::domain::doctor::diagnose_architecture;
+///
+/// // Positive case: all required files and directories are present
+/// let report = diagnose_architecture(true, true, vec![("src".to_string(), true)], vec![("artifact.rs".to_string(), true)]);
 /// assert!(report.cargo_toml_exists);
+/// assert_eq!(report.total_issues, 0);
+///
+/// // Negative case: Cargo.toml is missing
+/// let report_missing = diagnose_architecture(true, false, vec![("src".to_string(), true)], vec![("artifact.rs".to_string(), true)]);
+/// assert!(!report_missing.cargo_toml_exists);
+/// assert_eq!(report_missing.total_issues, 1);
 /// ```
-pub fn diagnose_architecture(workspace_root: &Path) -> ArchitectureReport {
-    let agents_md_exists = workspace_root.join("AGENTS.md").exists();
-    let cargo_toml_exists = workspace_root.join("Cargo.toml").exists();
-
-    let expected_dirs = ["src", "src/domain", "src/nouns", "src/integration", "tests"];
-    let mut main_dirs_exist = Vec::new();
+pub fn diagnose_architecture(
+    agents_md_exists: bool,
+    cargo_toml_exists: bool,
+    main_dirs_exist: Vec<(String, bool)>,
+    nouns_files_exist: Vec<(String, bool)>,
+) -> ArchitectureReport {
     let mut total_issues = 0;
 
     if !agents_md_exists {
@@ -82,26 +86,13 @@ pub fn diagnose_architecture(workspace_root: &Path) -> ArchitectureReport {
         total_issues += 1;
     }
 
-    for dir in &expected_dirs {
-        let exists = workspace_root.join(dir).is_dir();
-        main_dirs_exist.push((dir.to_string(), exists));
+    for (_, exists) in &main_dirs_exist {
         if !exists {
             total_issues += 1;
         }
     }
 
-    let expected_nouns = [
-        "artifact.rs",
-        "delete.rs",
-        "plan.rs",
-        "receipt.rs",
-        "doctor.rs",
-    ];
-    let mut nouns_files_exist = Vec::new();
-    let nouns_dir = workspace_root.join("src/nouns");
-    for noun in &expected_nouns {
-        let exists = nouns_dir.join(noun).is_file();
-        nouns_files_exist.push((noun.to_string(), exists));
+    for (_, exists) in &nouns_files_exist {
         if !exists {
             total_issues += 1;
         }
@@ -121,28 +112,18 @@ pub fn diagnose_architecture(workspace_root: &Path) -> ArchitectureReport {
 /// # Examples
 ///
 /// ```
-/// use mac_artifact_cleaner::domain::doctor::diagnose_substrate;
-/// let report = diagnose_substrate();
-/// // Ensure is_macos matches target
-/// assert_eq!(report.is_macos, cfg!(target_os = "macos"));
+/// use pentecost::domain::doctor::diagnose_substrate;
+///
+/// // Positive case
+/// let report = diagnose_substrate(true, Some("/usr/sbin/tmutil".to_string()), true);
+/// assert!(report.is_macos);
+/// assert!(report.command_execution_works);
 /// ```
-pub fn diagnose_substrate() -> SubstrateReport {
-    let is_macos = cfg!(target_os = "macos");
-
-    let tmutil_path = if is_macos {
-        let output = Command::new("which").arg("tmutil").output();
-        match output {
-            Ok(out) if out.status.success() => {
-                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-            }
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    let command_execution_works = Command::new("cargo").arg("--version").output().is_ok();
-
+pub fn diagnose_substrate(
+    is_macos: bool,
+    tmutil_path: Option<String>,
+    command_execution_works: bool,
+) -> SubstrateReport {
     SubstrateReport {
         is_macos,
         tmutil_path,
@@ -150,18 +131,12 @@ pub fn diagnose_substrate() -> SubstrateReport {
     }
 }
 
-/// Helper to parse files for module doc presence and pub fn doctests.
-pub(crate) fn check_file_doctests(
-    path: &Path,
-) -> anyhow::Result<(bool, Vec<FuncInfo>, Vec<FuncInfo>)> {
-    let content = fs::read_to_string(path)?;
+/// Helper to parse file contents for module doc presence and pub fn doctests.
+pub(crate) fn check_file_doctests_content(
+    file_name: &str,
+    content: &str,
+) -> (bool, Vec<FuncInfo>, Vec<FuncInfo>) {
     let lines: Vec<&str> = content.lines().collect();
-    let file_name = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
     let has_module_doc = lines.iter().any(|l| l.trim().starts_with("//!"));
     let mut checked_functions = Vec::new();
     let mut functions_missing_doctest = Vec::new();
@@ -179,7 +154,7 @@ pub(crate) fn check_file_doctests(
                 .to_string();
 
             let info = FuncInfo {
-                file_name: file_name.clone(),
+                file_name: file_name.to_string(),
                 fn_name: func_name,
             };
             checked_functions.push(info.clone());
@@ -209,7 +184,7 @@ pub(crate) fn check_file_doctests(
         }
     }
 
-    Ok((has_module_doc, checked_functions, functions_missing_doctest))
+    (has_module_doc, checked_functions, functions_missing_doctest)
 }
 
 /// Diagnoses doctests availability and verifies module-level documentation.
@@ -217,46 +192,36 @@ pub(crate) fn check_file_doctests(
 /// # Examples
 ///
 /// ```
-/// use std::path::Path;
-/// use mac_artifact_cleaner::domain::doctor::diagnose_doctests;
-/// let report = diagnose_doctests(Path::new("."));
-/// assert!(report.is_ok());
+/// use pentecost::domain::doctor::diagnose_doctests;
+///
+/// // Positive case: check in-memory files
+/// let files = vec![("artifact.rs".to_string(), "//! Module doc\n\n/// Test\n/// ```\n/// let x = 5;\n/// ```\npub fn foo() {}".to_string())];
+/// let report = diagnose_doctests(&files);
+/// assert_eq!(report.has_module_doc[0].1, true);
+/// assert!(report.functions_missing_doctest.is_empty());
 /// ```
-pub fn diagnose_doctests(workspace_root: &Path) -> anyhow::Result<DoctestReport> {
-    let domain_dir = workspace_root.join("src/domain");
+pub fn diagnose_doctests(files: &[(String, String)]) -> DoctestReport {
     let mut has_module_doc = Vec::new();
     let mut checked_functions = Vec::new();
     let mut functions_missing_doctest = Vec::new();
 
-    if domain_dir.is_dir() {
-        for entry in fs::read_dir(domain_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
-                let file_name = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                let (has_doc, checked, missing) = check_file_doctests(&path)?;
-                has_module_doc.push((file_name, has_doc));
-                checked_functions.extend(checked);
-                functions_missing_doctest.extend(missing);
-            }
-        }
+    for (file_name, content) in files {
+        let (has_doc, checked, missing) = check_file_doctests_content(file_name, content);
+        has_module_doc.push((file_name.clone(), has_doc));
+        checked_functions.extend(checked);
+        functions_missing_doctest.extend(missing);
     }
 
-    Ok(DoctestReport {
+    DoctestReport {
         has_module_doc,
         checked_functions,
         functions_missing_doctest,
-    })
+    }
 }
 
 /// Helper to scan file contents for unredacted paths.
-pub(crate) fn scan_unredacted_paths(path: &Path, content: &str) -> Vec<PrivacyLeak> {
+pub(crate) fn scan_unredacted_paths(file_path: &str, content: &str) -> Vec<PrivacyLeak> {
     let mut leaks = Vec::new();
-    let file_path = path.to_string_lossy().to_string();
 
     for (i, line) in content.lines().enumerate() {
         let mut start_idx = 0;
@@ -280,12 +245,12 @@ pub(crate) fn scan_unredacted_paths(path: &Path, content: &str) -> Vec<PrivacyLe
                     || clean_username == "test"
                     || clean_username == "example"
                     || clean_username == "john"
-                    || clean_username == "some_other_user"
-                    || clean_username == "sac"; // Allow current workspace user
+                    || clean_username == "some_other_user";
+                // ADVERSARIAL PASS: Removed hardcoded bypass check for user "sac"
 
                 if !is_allowed {
                     leaks.push(PrivacyLeak {
-                        file_path: file_path.clone(),
+                        file_path: file_path.to_string(),
                         line_number: i + 1,
                         matched_pattern: format!("/Users/{}", clean_username),
                     });
@@ -303,17 +268,20 @@ pub(crate) fn scan_unredacted_paths(path: &Path, content: &str) -> Vec<PrivacyLe
 /// # Examples
 ///
 /// ```
-/// use std::path::Path;
-/// use mac_artifact_cleaner::domain::doctor::diagnose_privacy;
-/// let report = diagnose_privacy(Path::new("."));
+/// use pentecost::domain::doctor::diagnose_privacy;
+///
+/// // Positive case: verify clean environment
+/// let report = diagnose_privacy(true, Some("cleanup-plan*.json\n*.log".to_string()), vec![], &[]);
 /// assert!(report.gitignore_exists);
+/// assert!(!report.gitignore_missing_patterns.is_empty());
 /// ```
-pub fn diagnose_privacy(workspace_root: &Path) -> PrivacyReport {
-    let gitignore_path = workspace_root.join(".gitignore");
-    let gitignore_exists = gitignore_path.exists();
-
+pub fn diagnose_privacy(
+    gitignore_exists: bool,
+    gitignore_content: Option<String>,
+    found_sensitive_files: Vec<String>,
+    files_to_scan: &[(String, String)],
+) -> PrivacyReport {
     let mut gitignore_missing_patterns = Vec::new();
-    let mut found_sensitive_files = Vec::new();
     let mut found_unredacted_paths = Vec::new();
 
     let required_patterns = [
@@ -333,7 +301,7 @@ pub fn diagnose_privacy(workspace_root: &Path) -> PrivacyReport {
     ];
 
     if gitignore_exists {
-        if let Ok(content) = fs::read_to_string(&gitignore_path) {
+        if let Some(content) = gitignore_content {
             let lines: Vec<String> = content.lines().map(|l| l.trim().to_string()).collect();
             for pattern in &required_patterns {
                 if !lines.contains(&pattern.to_string()) {
@@ -345,70 +313,10 @@ pub fn diagnose_privacy(workspace_root: &Path) -> PrivacyReport {
         gitignore_missing_patterns = required_patterns.iter().map(|s| s.to_string()).collect();
     }
 
-    // Traverse directory to find files matching required ignore patterns or containing absolute paths.
-    fn traverse(dir: &Path, sensitive_files: &mut Vec<String>, leaks: &mut Vec<PrivacyLeak>) {
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let name = path.file_name().unwrap_or_default().to_string_lossy();
-                    if name == "target"
-                        || name == ".git"
-                        || name == "node_modules"
-                        || name == ".antigravitycli"
-                        || name == ".agents"
-                        || name.starts_with(".tmp")
-                    {
-                        continue;
-                    }
-                    traverse(&path, sensitive_files, leaks);
-                } else if path.is_file() {
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-
-                    // Check if it matches sensitive patterns
-                    if name.starts_with("cleanup-plan")
-                        && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                        || name.starts_with("deletion-plan")
-                            && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                        || name.starts_with("delete-receipt")
-                            && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                        || name.starts_with("disk-audit")
-                            && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                        || name.starts_with("tool-root-audit")
-                            && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                    {
-                        sensitive_files.push(path.to_string_lossy().to_string());
-                    }
-
-                    let ext = path.extension().map(|e| e.to_string_lossy().to_string());
-                    if let Some(ref e) = ext {
-                        if e == "rs"
-                            || e == "md"
-                            || e == "json"
-                            || e == "jsonocel"
-                            || e == "sh"
-                            || e == "toml"
-                        {
-                            if let Ok(content) = fs::read_to_string(&path) {
-                                let file_leaks = scan_unredacted_paths(&path, &content);
-                                leaks.extend(file_leaks);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    for (file_path, content) in files_to_scan {
+        let file_leaks = scan_unredacted_paths(file_path, content);
+        found_unredacted_paths.extend(file_leaks);
     }
-
-    traverse(
-        workspace_root,
-        &mut found_sensitive_files,
-        &mut found_unredacted_paths,
-    );
 
     PrivacyReport {
         gitignore_exists,

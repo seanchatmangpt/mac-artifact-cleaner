@@ -1,6 +1,6 @@
 # OCEL v2 Reporting Model
 
-`mac-artifact-cleaner` implements the **Object-Centric Event Log (OCEL v2)** standard to record system audits, cleanup plans, and execution receipts. Rather than unstructured text logs, OCEL v2 projects filesystem structures and mutations as a queryable event-object graph.
+`pentecost` implements the **Object-Centric Event Log (OCEL v2)** standard to record system audits, cleanup plans, and execution receipts. Rather than unstructured text logs, OCEL v2 projects filesystem structures and mutations as a queryable event-object graph.
 
 ---
 
@@ -17,7 +17,7 @@ OCEL v2 models these entities as **Objects** and mutations/observations as **Eve
 
 ## 2. The Log Structure
 
-The core log schema is defined in [ocel.rs](file:///Users/sac/mac-artifact-cleaner/src/domain/ocel.rs). An OCEL log consists of:
+The core log schema is defined in [ocel.rs](../src/domain/ocel.rs). An OCEL log consists of:
 1.  **Event Types & Object Types**: Schema definitions declaring attributes and their types (e.g., `string`, `integer`).
 2.  **Objects**: Entities with unique IDs, types, and timed attributes.
 3.  **Events**: Named transitions with timestamps, attributes, and relationships referencing objects.

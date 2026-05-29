@@ -1,6 +1,6 @@
 # Privacy Model and Redaction Guidelines
 
-This document outlines the privacy design and repository safety standards for `mac-artifact-cleaner`. 
+This document outlines the privacy design and repository safety standards for `pentecost`. 
 
 Developer machines contain highly sensitive data: usernames, private repository paths, proprietary directory layouts, and API keys. Because this project produces reviewable plan files, OCEL event logs, and cleanup receipts, it is crucial that the tool and its contributors enforce a strict privacy boundary.
 
@@ -21,7 +21,7 @@ Redacted Path: /Users/<user>/dev/company-x/auth-service/node_modules
 
 ## 2. Redaction Architecture
 
-The core of the privacy boundary is implemented in [redaction.rs](file:///Users/sac/mac-artifact-cleaner/src/domain/redaction.rs). It defines how path strings are rewritten to hide local user profiles.
+The core of the privacy boundary is implemented in [redaction.rs](../src/domain/redaction.rs). It defines how path strings are rewritten to hide local user profiles.
 
 ### 2.1 Redaction Strategy
 
@@ -35,7 +35,7 @@ The primary function `redact_path` targets macOS user directories under `/Users/
 
 ### 2.2 Domain Code Reference
 
-Here is the logic in [redaction.rs](file:///Users/sac/mac-artifact-cleaner/src/domain/redaction.rs):
+Here is the logic in [redaction.rs](../src/domain/redaction.rs):
 
 ```rust
 pub fn redact_path(path: &str) -> String {
@@ -70,7 +70,7 @@ We categorize metadata according to its risk level:
 
 ## 4. Repository Exclusion Rules
 
-To guarantee that developers do not accidentally check in their live local plans or receipts, the repository's [.gitignore](file:///Users/sac/mac-artifact-cleaner/.gitignore) explicitly excludes all execution artifacts:
+To guarantee that developers do not accidentally check in their live local plans or receipts, the repository's [.gitignore](../.gitignore) explicitly excludes all execution artifacts:
 
 ```text
 cleanup-plan*.json

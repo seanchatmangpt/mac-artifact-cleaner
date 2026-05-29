@@ -13,7 +13,9 @@ use crate::domain::ocel::build_disk_audit_ocel;
 use crate::domain::tool_roots::{
     build_tool_root_defs, build_tool_root_report, ToolRootAcc, ToolRootReport,
 };
-use crate::integration::fs::scan_root;
+use crate::integration::fs::{
+    breakdown_sizes, find_cargo_target_dirs, find_large_files, force_remove_dir_all, scan_root,
+};
 use crate::integration::progress::human_bytes;
 use crate::integration::progress::ProgressReporter;
 
@@ -54,6 +56,45 @@ pub enum AuditAction {
         /// Include major tool-root analysis
         #[arg(long)]
         tool_roots: bool,
+    },
+    /// Run cargo clean on all Rust target/ directories under a root
+    CargoClean {
+        /// Root to search (default: home directory)
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Dry-run: show what would be deleted without deleting
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Find every file larger than a size threshold, sorted largest-first
+    FindLarge {
+        /// Root path to search (default: home directory)
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Minimum file size in MB (default: 100)
+        #[arg(long, default_value = "100")]
+        min_mb: u64,
+        /// Show top N results (default: 60)
+        #[arg(long, default_value = "60")]
+        top: usize,
+    },
+    /// Delete one or more cache/tool directories, handling macOS immutable flags
+    CacheClean {
+        /// Paths to remove (supports ~/ expansion)
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
+    /// Show disk usage broken down by top-level directory (includes hidden dirs)
+    Breakdown {
+        /// Root to scan (defaults to home directory)
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Show only the top N entries (default: 40)
+        #[arg(long, default_value = "40")]
+        top: usize,
+        /// Hide entries smaller than this many MB (default: 0)
+        #[arg(long, default_value = "0")]
+        min_mb: u64,
     },
 }
 
@@ -133,6 +174,169 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 println!("\nWrote OCEL v2 log to: {}", o_path.display());
             }
         }
+        AuditAction::CargoClean { root, dry_run } => {
+            let search_root = match root {
+                Some(p) => p,
+                None => dirs::home_dir()
+                    .ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
+            };
+
+            eprintln!("Scanning {} for Rust target/ directories…", search_root.display());
+            let targets = find_cargo_target_dirs(&search_root)?;
+
+            if targets.is_empty() {
+                println!("No Rust target/ directories found.");
+                return Ok(());
+            }
+
+            let total: u64 = targets.iter().map(|(_, s)| s).sum();
+            println!(
+                "\n  Found {} target/ directories  ({}  physical)\n",
+                targets.len(),
+                human_bytes(total)
+            );
+            println!("  {:<65}  {:>10}", "Path", "Size");
+            println!("  {}", "─".repeat(78));
+            for (path, size) in &targets {
+                let display = format_path_for_display(&path.to_string_lossy());
+                let display = if display.len() > 65 {
+                    format!("…{}", &display[display.len() - 64..])
+                } else {
+                    display
+                };
+                println!("  {:<65}  {:>10}", display, human_bytes(*size));
+            }
+            println!("  {}", "─".repeat(78));
+            println!("  Total reclaimable: {}\n", human_bytes(total));
+
+            if dry_run {
+                println!("  (dry-run — nothing deleted)");
+                return Ok(());
+            }
+
+            let mut freed = 0u64;
+            let mut errors: Vec<String> = Vec::new();
+            for (path, size) in &targets {
+                let display = format_path_for_display(&path.to_string_lossy());
+                eprint!("  del  {} … ", display);
+                match force_remove_dir_all(path) {
+                    Ok(()) => {
+                        freed += size;
+                        eprintln!("done  ({})", human_bytes(*size));
+                    }
+                    Err(e) => {
+                        eprintln!("FAILED");
+                        errors.push(format!("{}: {}", path.display(), e));
+                    }
+                }
+            }
+            println!("\n  Freed: {}", human_bytes(freed));
+            if !errors.is_empty() {
+                eprintln!("\nErrors:");
+                for e in &errors {
+                    eprintln!("  {e}");
+                }
+            }
+        }
+        AuditAction::FindLarge { root, min_mb, top } => {
+            let search_root = match root {
+                Some(p) => p,
+                None => dirs::home_dir()
+                    .ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
+            };
+            let min_bytes = min_mb * 1024 * 1024;
+
+            eprint!(
+                "Searching {} for files >= {} MB …\r",
+                search_root.display(),
+                min_mb
+            );
+
+            let results = find_large_files(
+                &search_root,
+                min_bytes,
+                |files, found| {
+                    eprint!(
+                        "  scanned {:>10} files  |  found {:>6} large files\r",
+                        files, found
+                    );
+                },
+            )?;
+
+            // Clear progress line.
+            eprintln!("{:80}", "");
+
+            print_large_files(&results, top, min_mb);
+        }
+        AuditAction::CacheClean { paths } => {
+            let mut total_freed: u64 = 0;
+            let mut errors: Vec<String> = Vec::new();
+
+            for raw in &paths {
+                // Expand leading ~
+                let path = if raw.starts_with("~") {
+                    let home = dirs::home_dir()
+                        .ok_or_else(|| anyhow::anyhow!("Home dir not found"))?;
+                    let stripped = raw.strip_prefix("~").unwrap_or(raw);
+                    home.join(stripped.strip_prefix("/").unwrap_or(stripped))
+                } else {
+                    raw.clone()
+                };
+
+                if !path.exists() {
+                    eprintln!("  skip  {} (not found)", path.display());
+                    continue;
+                }
+
+                // Measure size before deletion for the report.
+                let before: u64 = {
+                    let mut builder = ignore::WalkBuilder::new(&path);
+                    builder.hidden(false).ignore(false).git_ignore(false)
+                        .git_global(false).git_exclude(false).follow_links(false)
+                        .same_file_system(true);
+                    let mut sz = 0u64;
+                    for e in builder.build().flatten() {
+                        if let Ok(m) = e.metadata() {
+                            if m.is_file() { sz += m.len(); }
+                        }
+                    }
+                    sz
+                };
+
+                eprint!("  del   {} ({}) … ", path.display(), human_bytes(before));
+                match force_remove_dir_all(&path) {
+                    Ok(()) => {
+                        total_freed += before;
+                        eprintln!("done");
+                    }
+                    Err(e) => {
+                        eprintln!("FAILED");
+                        errors.push(format!("{}: {}", path.display(), e));
+                    }
+                }
+            }
+
+            println!("\nTotal freed: {}", human_bytes(total_freed));
+            if !errors.is_empty() {
+                eprintln!("\nErrors:");
+                for e in &errors {
+                    eprintln!("  {e}");
+                }
+            }
+        }
+        AuditAction::Breakdown { root, top, min_mb } => {
+            let scan_root_path = match root {
+                Some(p) => p,
+                None => dirs::home_dir()
+                    .ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
+            };
+            eprintln!(
+                "Scanning {} for disk usage (including hidden dirs)…",
+                scan_root_path.display()
+            );
+            let results = breakdown_sizes(&scan_root_path)?;
+            print_breakdown(&scan_root_path, &results, top, min_mb);
+        }
         AuditAction::Summarize {
             root,
             deps,
@@ -199,6 +403,7 @@ fn run_audit_scan(
     let cand_list: Vec<Candidate> = candidates.lock().unwrap().iter().cloned().collect();
 
     let tool_reports = if tool_roots_enabled {
+        crate::integration::fs::populate_tool_roots_metadata(&tool_defs, &tool_accs);
         build_tool_root_report(&tool_defs, &tool_accs, 0)
     } else {
         Vec::new()
@@ -215,6 +420,157 @@ fn format_path_for_display(path: &str) -> String {
         }
     }
     path.to_string()
+}
+
+fn print_large_files(results: &[(PathBuf, u64)], top: usize, min_mb: u64) {
+    let visible: Vec<_> = results.iter().take(top).collect();
+    let total_large: u64 = results.iter().map(|(_, b)| b).sum();
+
+    println!(
+        "\n\x1b[1m\x1b[36m┌─────────────────────────────────────────────────────────────────────────────┐\x1b[0m"
+    );
+    println!(
+        "\x1b[1m\x1b[36m│  Large Files  (>= {} MB)  —  {} files  —  {} total                \x1b[0m",
+        min_mb,
+        results.len(),
+        human_bytes(total_large)
+    );
+    println!(
+        "\x1b[1m\x1b[36m└─────────────────────────────────────────────────────────────────────────────┘\x1b[0m"
+    );
+
+    println!(
+        "\n  {:<10}  {}",
+        "Size", "Path"
+    );
+    println!("  {}", "─".repeat(78));
+
+    for (path, bytes) in &visible {
+        let display = format_path_for_display(&path.to_string_lossy());
+        let display = if display.len() > 65 {
+            format!("…{}", &display[display.len() - 64..])
+        } else {
+            display
+        };
+
+        let size_str = human_bytes(*bytes);
+        let color = if *bytes >= 1024 * 1024 * 1024 {
+            "\x1b[31m" // red for >= 1 GB
+        } else if *bytes >= 500 * 1024 * 1024 {
+            "\x1b[33m" // yellow for >= 500 MB
+        } else {
+            "\x1b[0m"
+        };
+
+        println!("  {}{:<10}\x1b[0m  {}", color, size_str, display);
+    }
+
+    println!("  {}", "─".repeat(78));
+    if results.len() > top {
+        println!(
+            "  … {} more files not shown (pass --top {} to see all)\n",
+            results.len() - top,
+            results.len()
+        );
+    } else {
+        println!();
+    }
+}
+
+fn print_breakdown(root: &std::path::Path, results: &[(PathBuf, u64)], top: usize, min_mb: u64) {
+    let min_bytes = min_mb * 1024 * 1024;
+    let visible: Vec<_> = results
+        .iter()
+        .filter(|(_, b)| *b >= min_bytes)
+        .take(top)
+        .collect();
+
+    let total_bytes: u64 = results.iter().map(|(_, b)| b).sum();
+    let total_shown: u64 = visible.iter().map(|(_, b)| b).sum();
+
+    println!("\n\x1b[1m\x1b[36m┌─────────────────────────────────────────────────────────────┐\x1b[0m");
+    println!(
+        "\x1b[1m\x1b[36m│  Disk Breakdown: {:<43}│\x1b[0m",
+        format_path_for_display(&root.to_string_lossy())
+    );
+    println!("\x1b[1m\x1b[36m└─────────────────────────────────────────────────────────────┘\x1b[0m");
+    println!(
+        "  Total scanned: \x1b[1m\x1b[32m{}\x1b[0m across {} top-level entries\n",
+        human_bytes(total_bytes),
+        results.len()
+    );
+
+    println!(
+        "  {:<50} {:>10}  {:>6}  {}",
+        "Path", "Size", "% of ~", "Category"
+    );
+    println!("  {}", "─".repeat(80));
+
+    for (path, bytes) in &visible {
+        let pct = if total_bytes > 0 {
+            (*bytes as f64 / total_bytes as f64) * 100.0
+        } else {
+            0.0
+        };
+        let display = format_path_for_display(&path.to_string_lossy());
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| display.clone());
+
+        let category = categorize_dir(&name);
+        let cat_color = match category {
+            "tool cache" => "\x1b[33m",
+            "build artifact" => "\x1b[31m",
+            "data" => "\x1b[32m",
+            _ => "\x1b[0m",
+        };
+
+        println!(
+            "  {:<50} {:>10}  {:>5.1}%  {}{}  \x1b[0m",
+            if display.len() > 50 {
+                format!("…{}", &display[display.len() - 49..])
+            } else {
+                display
+            },
+            human_bytes(*bytes),
+            pct,
+            cat_color,
+            category,
+        );
+    }
+
+    println!("  {}", "─".repeat(80));
+    println!(
+        "  Shown: \x1b[1m{}\x1b[0m of total \x1b[1m{}\x1b[0m  ({} entries hidden)\n",
+        human_bytes(total_shown),
+        human_bytes(total_bytes),
+        results.len() - visible.len(),
+    );
+    println!("  Legend: \x1b[33m■ tool cache\x1b[0m  \x1b[31m■ build artifact\x1b[0m  \x1b[32m■ data\x1b[0m  ■ project/other");
+    println!();
+}
+
+fn categorize_dir(name: &str) -> &'static str {
+    // Hidden dirs that are tool caches / runtimes
+    let tool_caches = [
+        ".ollama", ".cache", ".cargo", ".rustup", ".npm", ".pnpm-store", ".yarn", ".bun",
+        ".deno", ".gradle", ".m2", ".pyenv", ".rbenv", ".asdf", ".sdkman", ".local",
+        ".colima", ".docker", ".minikube", ".gemini", ".codeium", ".claude", ".codex",
+        ".conda", ".venv", "miniconda3", ".multipass",
+    ];
+    if tool_caches.contains(&name) {
+        return "tool cache";
+    }
+    // Well-known data dirs
+    let data_dirs = [
+        "Documents", "Downloads", "Desktop", "Pictures", "Movies", "Music",
+        "Library", "Public",
+    ];
+    if data_dirs.contains(&name) {
+        return "data";
+    }
+    "project/other"
 }
 
 fn print_premium_audit_summary(

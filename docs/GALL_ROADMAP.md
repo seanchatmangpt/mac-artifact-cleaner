@@ -1,15 +1,15 @@
 # Gall Checkpoint Roadmap: Path to G9 Completion
 
-This roadmap defines the remaining steps to transition `mac-artifact-cleaner` from its current state (G0-G3 complete) to a fully realized G9 implementation. It incorporates findings from the Multi-Agent Review (May 2026).
+This roadmap defines the remaining steps to transition `pentecost` from its current state (Phase 1 proven, checkpoints G0-G3 complete) to a fully realized G9 implementation.
 
 ## Current Status Summary
-- **M1 (G0-G3):** Functional, but requires architectural cleanup to remove domain side-effects.
+- **M1 (G0-G3):** Phase 1 proven! The domain layer is fully pure, destructive calls are isolated, and traversal barriers are verified.
 - **M2 (G4-G6):** Logic largely present in `src/domain/`, but integration and CLI wiring are incomplete.
 - **M3 (G7-G9):** OCEL v2 and Privacy frameworks exist but are not yet used as the primary execution gates.
 
 ---
 
-## Phase 1: Architectural Alignment & Performance
+## Phase 1: Architectural Alignment & Performance (COMPLETE)
 **Target: G0-G3 Refinement & Foundation for G4**
 
 1.  **Purge Domain Side-Effects**:
