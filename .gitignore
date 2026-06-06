@@ -38,4 +38,4 @@ tm-exclusion-receipt*.json
 # Local test sandboxes
 tmp/
 scratch/
-fixtures/private/
+fixtures/private/*-plan.json\n*-receipt.json

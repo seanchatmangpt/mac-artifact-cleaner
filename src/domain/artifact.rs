@@ -360,6 +360,9 @@ pub fn is_global_cache(path: &Path) -> bool {
 /// assert!(!is_artifact_leaf_name("src"));
 /// ```
 pub fn is_artifact_leaf_name(name: &str) -> bool {
+    if name.starts_with("target_") {
+        return true;
+    }
     matches!(
         name,
         "node_modules"
@@ -388,6 +391,15 @@ pub fn is_artifact_leaf_name(name: &str) -> bool {
             | "bin"
             | "obj"
     )
+}
+
+/// Returns true if the given directory name represents a traversal barrier.
+/// This includes standard barrier names and custom prefix barriers (e.g. `target_`).
+pub fn is_traversal_barrier_name(name: &str) -> bool {
+    if name.starts_with("target_") {
+        return true;
+    }
+    traversal_barrier_names().contains(name)
 }
 
 /// Returns a set of default traversal barrier directory names.
@@ -677,6 +689,12 @@ pub fn artifact_candidates_from_snapshot(
 
             "rust" => {
                 add_dir(&mut out, root, "target", "rust target", snap);
+                for e in snap.dirs_with_prefix("target_") {
+                    out.push(Candidate {
+                        path: e.path.clone(),
+                        reason: format!("rust target ({})", e.file_name),
+                    });
+                }
             }
 
             "go" => {

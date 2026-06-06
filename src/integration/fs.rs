@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use crate::domain::artifact::{
     artifact_candidates_from_snapshot, detect_project_from_snapshot, is_global_cache,
-    is_macos_os_dir, traversal_barrier_names, ArgsSnapshot, Candidate, DirSnapshot, EntryKind,
+    is_macos_os_dir, is_traversal_barrier_name, ArgsSnapshot, Candidate, DirSnapshot, EntryKind,
     EntrySnapshot,
 };
 use crate::domain::audit::Stats;
@@ -144,7 +144,6 @@ pub fn scan_root(
         .map(|n| n.get())
         .unwrap_or(8);
 
-    let traversal_barriers = traversal_barrier_names();
     let root_for_filter = root.to_path_buf();
     let stats_for_filter = stats.clone();
 
@@ -176,7 +175,7 @@ pub fn scan_root(
         }
 
         if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-            if traversal_barriers.contains(name) {
+            if is_traversal_barrier_name(name) {
                 stats_for_filter.pruned_dirs.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
@@ -368,11 +367,12 @@ pub fn find_cargo_target_dirs(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>
             if is_cargo_project {
                 children.retain(|e| {
                     let Ok(e) = e else { return true };
-                    if e.file_name() == "target" && e.file_type().is_dir() {
+                    let fname = e.file_name().to_string_lossy();
+                    if e.file_type().is_dir() && (fname == "target" || fname.starts_with("target_")) {
                         found_w
                             .lock()
                             .unwrap()
-                            .push(parent.join("target"));
+                            .push(parent.join(e.file_name()));
                         return false; // prune — don't descend into target/
                     }
                     true
