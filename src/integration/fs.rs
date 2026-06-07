@@ -597,7 +597,11 @@ pub fn delete_dir_all(path: &Path) -> anyhow::Result<()> {
             path.display()
         );
     }
-    std::fs::remove_dir_all(path)?;
+    // Try standard removal first as it's fastest.
+    if let Err(_) = std::fs::remove_dir_all(path) {
+        // Fallback to macOS-specific force removal if standard fails (e.g. immutable flags).
+        force_remove_dir_all(path)?;
+    }
     Ok(())
 }
 

@@ -8,6 +8,7 @@ use crate::domain::plan::{DeletionPlan, PlanItemKind};
 use crate::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
 use crate::integration::fs::{delete_dir_all, delete_file};
 use clap::Subcommand;
+use rayon::prelude::*;
 use std::path::PathBuf;
 
 #[derive(Subcommand, Debug)]
@@ -45,8 +46,6 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 .unwrap_or_default()
                 .as_secs();
 
-            let mut results = Vec::new();
-
             let pb = ProgressBar::new(plan.items.len() as u64);
             pb.set_style(
                 ProgressStyle::with_template(
@@ -55,50 +54,50 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 .unwrap()
                 .progress_chars("#>-"),
             );
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-            for item in &plan.items {
-                pb.set_message(format!("Deleting {}", item.path.display()));
+            // Concurrent deletion using Rayon
+            let results: Vec<DeletionResult> = plan.items.par_iter().map(|item| {
+                pb.set_message(format!("Deleting {} ...", item.path.display()));
 
-                if !item.path.exists() {
-                    results.push(DeletionResult {
+                let res = if !item.path.exists() {
+                    DeletionResult {
                         path: item.path.clone(),
                         status: DeletionStatus::SkippedMissing,
                         error: None,
-                    });
-                    pb.inc(1);
-                    continue;
-                }
-
-                // Delegate all filesystem mutations to the integration layer.
-                let res = match item.kind {
-                    PlanItemKind::File => match delete_file(&item.path) {
-                        Ok(()) => DeletionResult {
-                            path: item.path.clone(),
-                            status: DeletionStatus::Deleted,
-                            error: None,
+                    }
+                } else {
+                    // Delegate all filesystem mutations to the integration layer.
+                    match item.kind {
+                        PlanItemKind::File => match delete_file(&item.path) {
+                            Ok(()) => DeletionResult {
+                                path: item.path.clone(),
+                                status: DeletionStatus::Deleted,
+                                error: None,
+                            },
+                            Err(e) => DeletionResult {
+                                path: item.path.clone(),
+                                status: DeletionStatus::Failed,
+                                error: Some(e.to_string()),
+                            },
                         },
-                        Err(e) => DeletionResult {
-                            path: item.path.clone(),
-                            status: DeletionStatus::Failed,
-                            error: Some(e.to_string()),
+                        PlanItemKind::Dir => match delete_dir_all(&item.path) {
+                            Ok(()) => DeletionResult {
+                                path: item.path.clone(),
+                                status: DeletionStatus::Deleted,
+                                error: None,
+                            },
+                            Err(e) => DeletionResult {
+                                path: item.path.clone(),
+                                status: DeletionStatus::Failed,
+                                error: Some(e.to_string()),
+                            },
                         },
-                    },
-                    PlanItemKind::Dir => match delete_dir_all(&item.path) {
-                        Ok(()) => DeletionResult {
-                            path: item.path.clone(),
-                            status: DeletionStatus::Deleted,
-                            error: None,
-                        },
-                        Err(e) => DeletionResult {
-                            path: item.path.clone(),
-                            status: DeletionStatus::Failed,
-                            error: Some(e.to_string()),
-                        },
-                    },
+                    }
                 };
-                results.push(res);
                 pb.inc(1);
-            }
+                res
+            }).collect();
 
             pb.finish_with_message("Deletion execution complete.");
 
