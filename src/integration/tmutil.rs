@@ -42,6 +42,21 @@ pub fn apply_exclusions_script(script_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Applies a Time Machine exclusion directly to a single path.
+///
+/// This tells macOS to avoid backing up this directory and prevents its contents
+/// from bloating APFS snapshots. It is sticky, so if the directory is recreated
+/// (e.g. `target/`), the exclusion remains active.
+pub fn apply_single_exclusion(path: &Path) -> anyhow::Result<()> {
+    // Note: We ignore the exit status because tmutil chokes on files that don't exist,
+    // or if the volume doesn't support exclusions, but we don't want to block deletion.
+    let _ = std::process::Command::new("tmutil")
+        .args(["addexclusion", "-p"]) // -p makes it path-independent (sticky)
+        .arg(path)
+        .output();
+    Ok(())
+}
+
 /// Lists all local APFS snapshots on the target mount point using `tmutil`.
 pub fn list_local_snapshots(mount_point: &str) -> anyhow::Result<Vec<String>> {
     let output = std::process::Command::new("tmutil")

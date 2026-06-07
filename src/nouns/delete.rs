@@ -7,6 +7,7 @@ use crate::domain::delete::validate_plan;
 use crate::domain::plan::{DeletionPlan, PlanItemKind};
 use crate::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
 use crate::integration::fs::{delete_dir_all, delete_file};
+use crate::integration::tmutil::apply_single_exclusion;
 use clap::Subcommand;
 use rayon::prelude::*;
 use std::path::PathBuf;
@@ -67,6 +68,11 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                         error: None,
                     }
                 } else {
+                    // Apply sticky Time Machine exclusion before deletion so APFS ignores future recreations
+                    if item.kind == PlanItemKind::Dir {
+                        let _ = apply_single_exclusion(&item.path);
+                    }
+
                     // Delegate all filesystem mutations to the integration layer.
                     match item.kind {
                         PlanItemKind::File => match delete_file(&item.path) {
