@@ -440,8 +440,8 @@ fn print_large_files(results: &[(PathBuf, u64)], top: usize, min_mb: u64) {
     );
 
     println!(
-        "\n  {:<10}  Path",
-        "Size"
+        "\n  {:<10}  {}",
+        "Size", "Path"
     );
     println!("  {}", "─".repeat(78));
 
@@ -501,8 +501,8 @@ fn print_breakdown(root: &std::path::Path, results: &[(PathBuf, u64)], top: usiz
     );
 
     println!(
-        "  {:<50} {:>10}  {:>6}  Category",
-        "Path", "Size", "% of ~"
+        "  {:<50} {:>10}  {:>6}  {}",
+        "Path", "Size", "% of ~", "Category"
     );
     println!("  {}", "─".repeat(80));
 
