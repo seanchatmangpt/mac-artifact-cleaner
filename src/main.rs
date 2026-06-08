@@ -1,5 +1,5 @@
-//! pentecost CLI binary entrypoint.
+//! osx-clnr CLI binary entrypoint.
 
 fn main() -> anyhow::Result<()> {
-    pentecost::nouns::handle_cli()
+    osx_clnr::nouns::handle_cli()
 }

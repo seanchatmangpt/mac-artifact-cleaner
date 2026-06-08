@@ -4,7 +4,7 @@
 
 For the execution-trust pipeline to function, the codebase itself must be structurally isolated. If the logic that decides *what* to delete is intertwined with the OS calls that *perform* the deletion, the system is impossible to verify.
 
-`mac-artifact-cleaner` enforces a tripartite architecture:
+`osx-clnr` enforces a tripartite architecture:
 1.  **CLI (Noun) Layer:** Validates user intent, orchestrates workflows, and delegates commands. It holds no policy.
 2.  **Domain Layer:** The pure, side-effect-free Rust core. It contains the rules for artifact classification, plan building, and OCEL structure. Every public function must be secured by executable documentation (Doctests / Gall Locks).
 3.  **Integration Layer:** The boundary that touches the real world. It handles `std::fs` traversal, `tmutil` invocations, and UI progress reporting.

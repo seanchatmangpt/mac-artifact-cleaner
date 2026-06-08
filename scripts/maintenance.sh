@@ -1,5 +1,5 @@
 #!/bin/bash
-# mac-artifact-cleaner automated maintenance loop
+# osx-clnr automated maintenance loop
 #
 # This script orchestrates the strict Gall Checkpoint pipeline:
 # Observation -> Plan -> Exclusions -> Deletion -> Receipt
@@ -20,7 +20,7 @@ EXCLUSION_SCRIPT="tm-exclusions.sh"
 RECEIPT_FILE="maintenance-receipt.json"
 
 echo -e "${BLUE}=====================================================${NC}"
-echo -e "${BLUE}     mac-artifact-cleaner Maintenance Loop           ${NC}"
+echo -e "${BLUE}     osx-clnr Maintenance Loop           ${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 
 echo -e "\n${BLUE}[1/4] Scanning disk & building deletion plan...${NC}"

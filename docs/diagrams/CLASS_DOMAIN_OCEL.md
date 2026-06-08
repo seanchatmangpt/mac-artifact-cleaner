@@ -1,6 +1,6 @@
 # Domain & OCEL v2 Class Diagram
 
-This diagram illustrates the core entities of the `mac-artifact-cleaner`, focusing on the **Inert DTOs** that isolate the Domain layer from side-effects and the **OCEL v2** objects that represent the system's audit and execution state.
+This diagram illustrates the core entities of the `osx-clnr`, focusing on the **Inert DTOs** that isolate the Domain layer from side-effects and the **OCEL v2** objects that represent the system's audit and execution state.
 
 ```mermaid
 classDiagram

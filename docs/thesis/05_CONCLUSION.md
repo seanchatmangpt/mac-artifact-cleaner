@@ -2,7 +2,7 @@
 
 ## 5.1 Synthesis
 
-The development of `mac-artifact-cleaner` serves as a practical blueprint for constructing high-stakes automation tools. By rejecting improvisational destruction and embracing a plan-bound architecture, we solve the inherent unreliability of real-time state mutation.
+The development of `osx-clnr` serves as a practical blueprint for constructing high-stakes automation tools. By rejecting improvisational destruction and embracing a plan-bound architecture, we solve the inherent unreliability of real-time state mutation.
 
 Gall’s Law dictates that we must not build the complex capability before proving the simple one. The Gall Checkpoints (G0-G9) formalized this by enforcing a strict requirement for capability, evidence, constraint, and receipt at every stage of the project's evolution. 
 

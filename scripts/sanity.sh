@@ -1,5 +1,5 @@
 #!/bin/bash
-# mac-artifact-cleaner developer experience sanity script.
+# osx-clnr developer experience sanity script.
 #
 # Runs rustfmt, clippy, unit/integration tests, and all doctor commands.
 set -e
@@ -11,7 +11,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${BLUE}=====================================================${NC}"
-echo -e "${BLUE}     mac-artifact-cleaner DX Sanity Suite            ${NC}"
+echo -e "${BLUE}     osx-clnr DX Sanity Suite            ${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 
 echo -e "\n${BLUE}[1/7] Checking code formatting (cargo fmt)...${NC}"

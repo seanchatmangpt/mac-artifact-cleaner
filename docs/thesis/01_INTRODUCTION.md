@@ -13,7 +13,7 @@ The consequences of improvisational destruction on developer machines include:
 
 ## 1.2 The Plan-Bound Architecture
 
-To address these perils, `mac-artifact-cleaner` abandons improvisational destruction in favor of a **Plan-Bound Architecture**.
+To address these perils, `osx-clnr` abandons improvisational destruction in favor of a **Plan-Bound Architecture**.
 
 The core premise is that a utility must never increase its destructive power without simultaneously increasing its capacity to produce verifiable receipts. The system must:
 1. **Observe first:** Perform a read-only scan.

@@ -1,17 +1,17 @@
-# mac-artifact-cleaner Architecture
+# osx-clnr Architecture
 
-This document provides a comprehensive overview of the `mac-artifact-cleaner` architecture using the C4 model.
+This document provides a comprehensive overview of the `osx-clnr` architecture using the C4 model.
 
 ## 1. System Context Diagram
 
-The System Context diagram provides a high-level view of the `mac-artifact-cleaner` and its relationship with the external environment.
+The System Context diagram provides a high-level view of the `osx-clnr` and its relationship with the external environment.
 
 ```mermaid
 C4Context
-    title System Context Diagram for mac-artifact-cleaner
+    title System Context Diagram for osx-clnr
 
     Person(developer, "Developer", "A user wishing to audit and clean up developer artifacts on macOS.")
-    System(mac_artifact_cleaner, "mac-artifact-cleaner", "macOS developer disk auditor and cleanup utility.")
+    System(mac_artifact_cleaner, "osx-clnr", "macOS developer disk auditor and cleanup utility.")
 
     System_Ext(filesystem, "macOS Filesystem", "Local storage containing artifacts, caches, and plans.")
     System_Ext(tmutil, "Time Machine (tmutil)", "macOS utility for snapshots and exclusions.")
@@ -29,11 +29,11 @@ The Container diagram decomposes the system into its primary logical building bl
 
 ```mermaid
 C4Container
-    title Container Diagram for mac-artifact-cleaner
+    title Container Diagram for osx-clnr
 
     Person(developer, "Developer", "Uses CLI commands")
 
-    System_Boundary(mac_artifact_cleaner_system, "mac-artifact-cleaner") {
+    System_Boundary(mac_artifact_cleaner_system, "osx-clnr") {
         Container(cli_noun, "CLI (Noun Layer)", "Rust / Clap", "Handles user input, parses commands, and orchestrates workflows for audit, plan, delete, and doctor diagnostics.")
         Container(domain_layer, "Domain Layer", "Pure Rust", "Contains core logic, artifact rules, project detection, plan validation, OCEL formatting, and architectural diagnostics (Doctor).")
         Container(integration_layer, "Integration Layer", "Rust", "Interacts with external systems (FS, Docker, Time Machine) and handles terminal progress visualization.")

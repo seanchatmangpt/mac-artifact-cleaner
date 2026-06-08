@@ -9,8 +9,8 @@ use std::path::Path;
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::delete::validate_plan_item;
-/// use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+/// use osx_clnr::domain::delete::validate_plan_item;
+/// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
 /// use std::path::{Path, PathBuf};
 ///
 /// let plan = DeletionPlan::new(
@@ -57,8 +57,8 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::delete::validate_plan;
-/// use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+/// use osx_clnr::domain::delete::validate_plan;
+/// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
 /// use std::path::PathBuf;
 ///
 /// let plan = DeletionPlan::new(

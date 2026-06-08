@@ -75,10 +75,10 @@ If files are deleted and space is still pinned, local snapshots must be thinned.
 
 ```bash
 # Analyze APFS local snapshot usage and space pinned
-pcst snapshot audit
+oclnr snapshot audit
 
 # Thin local snapshots to try and reclaim up to 200 GB
-pcst snapshot thin --bytes 200GB
+oclnr snapshot thin --bytes 200GB
 ```
 
 Every snapshot operation is logged in the final delete receipt, showing the before-and-after free space comparison to verify successful block reclamation.

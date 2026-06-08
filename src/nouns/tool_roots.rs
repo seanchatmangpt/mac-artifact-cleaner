@@ -147,7 +147,7 @@ fn print_premium_tool_roots_summary(
     }
 
     println!("\n\x1b[1m\x1b[35m [3] SUGGESTED COMMANDS\x1b[0m");
-    println!("  \x1b[1m👉 Action:\x1b[0m Run `mac-artifact-cleaner tool-roots audit` to see full details of each tool cache.");
+    println!("  \x1b[1m👉 Action:\x1b[0m Run `osx-clnr tool-roots audit` to see full details of each tool cache.");
     println!();
 }
 

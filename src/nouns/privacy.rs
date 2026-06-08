@@ -7,7 +7,7 @@
 //!
 //! ```
 //! use std::path::PathBuf;
-//! use pentecost::nouns::privacy::{handle, PrivacyAction};
+//! use osx_clnr::nouns::privacy::{handle, PrivacyAction};
 //!
 //! // Negative/refusal case: Attempting to redact a non-existent file returns an error
 //! let action = PrivacyAction::Redact {
@@ -40,7 +40,7 @@ pub enum PrivacyAction {
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use pentecost::nouns::privacy::{handle, PrivacyAction};
+/// use osx_clnr::nouns::privacy::{handle, PrivacyAction};
 ///
 /// // Positive case: redact a temporary file
 /// let temp_file = std::env::temp_dir().join("test_redact_doctest.txt");

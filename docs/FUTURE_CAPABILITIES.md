@@ -1,6 +1,6 @@
-# Future Capabilities Report: mac-artifact-cleaner Ecosystem Review
+# Future Capabilities Report: osx-clnr Ecosystem Review
 
-This report summarizes the research conducted by five specialized sub-agents (May 2026) to identify potential directions for the `mac-artifact-cleaner` project.
+This report summarizes the research conducted by five specialized sub-agents (May 2026) to identify potential directions for the `osx-clnr` project.
 
 ---
 

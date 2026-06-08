@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::time::system_time_to_unix;
+/// use osx_clnr::domain::time::system_time_to_unix;
 /// use std::time::{UNIX_EPOCH, Duration};
 ///
 /// // Positive case: epoch corresponds to 0
@@ -30,7 +30,7 @@ pub fn system_time_to_unix(t: SystemTime) -> i64 {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::time::seconds_to_days;
+/// use osx_clnr::domain::time::seconds_to_days;
 ///
 /// // Positive case: 24 hours corresponds to 1 day
 /// assert_eq!(seconds_to_days(86400), 1);
@@ -47,7 +47,7 @@ pub fn seconds_to_days(seconds: i64) -> i64 {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::time::parse_snapshot_date;
+/// use osx_clnr::domain::time::parse_snapshot_date;
 ///
 /// // Positive case
 /// assert_eq!(
@@ -73,7 +73,7 @@ pub fn parse_snapshot_date(name: &str) -> Option<String> {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::time::identify_thinned_snapshots;
+/// use osx_clnr::domain::time::identify_thinned_snapshots;
 ///
 /// let before = vec![
 ///     "com.apple.TimeMachine.2026-05-26-135630.local".to_string(),
@@ -106,7 +106,7 @@ pub fn identify_thinned_snapshots(before: &[String], after: &[String]) -> Vec<St
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::time::parse_size_in_bytes;
+/// use osx_clnr::domain::time::parse_size_in_bytes;
 ///
 /// // Positive cases
 /// assert_eq!(parse_size_in_bytes("10GB"), Ok(10_000_000_000));
@@ -169,7 +169,7 @@ impl SnapshotThinReceipt {
     /// # Examples
     ///
     /// ```
-    /// use pentecost::domain::time::SnapshotThinReceipt;
+    /// use osx_clnr::domain::time::SnapshotThinReceipt;
     ///
     /// // Positive case: snapshot was thinned
     /// let receipt = SnapshotThinReceipt::new(

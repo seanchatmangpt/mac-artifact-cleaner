@@ -57,7 +57,7 @@ impl DeletionReceipt {
     /// # Examples
     ///
     /// ```
-    /// use pentecost::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
+    /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
     /// use std::path::PathBuf;
     ///
     /// // Positive case: construct a receipt and verify properties
@@ -90,7 +90,7 @@ impl DeletionReceipt {
     /// # Examples
     ///
     /// ```
-    /// use pentecost::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
+    /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
     /// use std::path::PathBuf;
     ///
     /// // Positive case: a correct, consistent receipt for nonexistent files

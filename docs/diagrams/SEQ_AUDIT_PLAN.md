@@ -1,4 +1,4 @@
-# mac-artifact-cleaner: Audit & Plan Sequence Diagrams
+# osx-clnr: Audit & Plan Sequence Diagrams
 
 This document details the flow of the **Audit** and **Plan** phases, highlighting the interaction between the CLI Noun layer, the Integration layer's parallel traversal, and the pure Domain classification.
 

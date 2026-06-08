@@ -8,7 +8,7 @@
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::redaction::redact_path;
+/// use osx_clnr::domain::redaction::redact_path;
 ///
 /// // Positive case: user path is redacted
 /// assert_eq!(redact_path("/Users/user/dev/project"), "/Users/<user>/dev/project");
@@ -35,7 +35,7 @@ pub fn redact_path(path: &str) -> String {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::redaction::redact_content;
+/// use osx_clnr::domain::redaction::redact_content;
 ///
 /// // Positive case: redacting user home directories and credentials
 /// let raw = "path: /Users/user/dev/project, password: \"super_secret_123\"";

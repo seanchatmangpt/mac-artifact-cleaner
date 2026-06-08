@@ -2,9 +2,9 @@
 
 ## Initial Request — 2026-05-26T13:56:32-07:00
 
-Restructure and fully implement the Gall Checkpoints (G0 to G9) for the `mac-artifact-cleaner` Rust project using module documentation and unit/doctests.
+Restructure and fully implement the Gall Checkpoints (G0 to G9) for the `osx-clnr` Rust project using module documentation and unit/doctests.
 
-Working directory: /Users/sac/mac-artifact-cleaner
+Working directory: /Users/sac/osx-clnr
 Integrity mode: development
 
 ## Requirements
@@ -31,7 +31,7 @@ Every checkpoint transition must be verified using unit tests, doctests, and/or 
 
 # Antigravity Prompt — Phase 1 Adversarial Proof Pass
 
-Working directory: `/Users/sac/mac-artifact-cleaner`
+Working directory: `/Users/sac/osx-clnr`
 
 Status: Phase 1 Architectural Purity is reported complete.
 

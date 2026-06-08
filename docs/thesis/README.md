@@ -1,12 +1,12 @@
 # Thesis Abstract & Table of Contents
 
 **Title:** Gall’s Law in Systems Engineering: The Evolution of Receipt-Driven Disk Management
-**Author:** mac-artifact-cleaner Architectural AI
+**Author:** osx-clnr Architectural AI
 **Date:** May 2026
 
 ## Abstract
 
-This thesis explores the application of Gall's Law—"A complex system that works is invariably found to have evolved from a simple system that worked"—within the context of a modern, plan-bound macOS disk cleanup utility (`mac-artifact-cleaner`). Unlike traditional disk scanners that couple discovery with immediate destructive action (e.g., `rm -rf`), this system enforces an "execution-trust pipeline." This thesis argues that by treating the filesystem as an untrusted domain and enforcing strict layer isolation, systems can achieve higher reliability. We define a novel concept, the "Gall Checkpoint," which acts as an evolutionary gate requiring capability, evidence, constraint, and receipt before allowing architectural progression. Through the lens of this project, we demonstrate that system complexity should only advance when the preceding operational layer has produced verifiable, object-centric evidence (OCEL v2).
+This thesis explores the application of Gall's Law—"A complex system that works is invariably found to have evolved from a simple system that worked"—within the context of a modern, plan-bound macOS disk cleanup utility (`osx-clnr`). Unlike traditional disk scanners that couple discovery with immediate destructive action (e.g., `rm -rf`), this system enforces an "execution-trust pipeline." This thesis argues that by treating the filesystem as an untrusted domain and enforcing strict layer isolation, systems can achieve higher reliability. We define a novel concept, the "Gall Checkpoint," which acts as an evolutionary gate requiring capability, evidence, constraint, and receipt before allowing architectural progression. Through the lens of this project, we demonstrate that system complexity should only advance when the preceding operational layer has produced verifiable, object-centric evidence (OCEL v2).
 
 ## Table of Contents
 

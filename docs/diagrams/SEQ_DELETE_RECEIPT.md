@@ -1,6 +1,6 @@
 # Sequence Diagram: Delete and Receipt Phase
 
-This diagram details the strict plan-bound execution of the `mac-artifact-cleaner` delete phase, ensuring no destructive behavior occurs without a validated plan and that all consequences are recorded in an OCEL-compliant receipt.
+This diagram details the strict plan-bound execution of the `osx-clnr` delete phase, ensuring no destructive behavior occurs without a validated plan and that all consequences are recorded in an OCEL-compliant receipt.
 
 ```mermaid
 sequenceDiagram
@@ -15,7 +15,7 @@ sequenceDiagram
     participant O as OCEL Domain (domain::ocel)
     participant D as Disk (Filesystem)
 
-    U->>C: mac-artifact-cleaner delete execute --plan <path> --receipt <path>
+    U->>C: osx-clnr delete execute --plan <path> --receipt <path>
     C->>N: handle(DeleteAction::Execute)
     
     Note over N, D: Phase 1: Strict Plan Loading & Validation

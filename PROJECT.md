@@ -1,7 +1,7 @@
-# Project: mac-artifact-cleaner
+# Project: osx-clnr
 
 ## Architecture
-`mac-artifact-cleaner` is a plan-bound macOS disk auditor and cleanup utility. It runs in three distinct layers to isolate domain policy from CLI and I/O integration:
+`osx-clnr` is a plan-bound macOS disk auditor and cleanup utility. It runs in three distinct layers to isolate domain policy from CLI and I/O integration:
 1. **Domain Layer (`src/domain/`)**: Pure Rust domain logic that is side-effect-free. Contains core definitions of artifacts, audits, plans, deletion receipts, OCEL v2 format, privacy redaction, and Time Machine policies. Every public function has doctests.
 2. **Noun/CLI Layer (`src/nouns/`)**: Handles parsing, validating, and formatting. Uses `clap-noun-verb` structure where each CLI command maps to a noun-verb pair (e.g. `plan build`, `delete execute`). Delegates all policy decisions immediately to the Domain Layer.
 3. **Integration Layer (`src/integration/`)**: Handles actual interactions with the external environment, including filesystem walking, invoking `tmutil`, communicating with container runtimes (docker), and progress-bar rendering.

@@ -40,7 +40,7 @@ Absolute markdown links referencing local filesystem paths (containing the absol
 
 ### Remediation
 1. Rewrite all absolute links to relative markdown links:
-   - For example, `[tmutil.rs](file:///Users/sac/mac-artifact-cleaner/src/integration/tmutil.rs)` becomes `[tmutil.rs](../src/integration/tmutil.rs)`.
+   - For example, `[tmutil.rs](file:///Users/sac/osx-clnr/src/integration/tmutil.rs)` becomes `[tmutil.rs](../src/integration/tmutil.rs)`.
    - Replace absolute links to the `.gitignore` or other sources with relative workspace paths.
 
 ---

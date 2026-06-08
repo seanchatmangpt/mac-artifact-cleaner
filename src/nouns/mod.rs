@@ -16,7 +16,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "pcst",
+    name = "oclnr",
     about = "Pentecost: macOS developer disk auditor and cleanup utility"
 )]
 pub struct Cli {

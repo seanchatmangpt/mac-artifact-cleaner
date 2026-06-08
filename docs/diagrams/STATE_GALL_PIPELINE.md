@@ -1,6 +1,6 @@
 # Gall Checkpoint Execution Pipeline
 
-This diagram illustrates the state machine for the `mac-artifact-cleaner` execution pipeline, following Gall's Law: "Do not advance system complexity until the previous operational layer has produced evidence."
+This diagram illustrates the state machine for the `osx-clnr` execution pipeline, following Gall's Law: "Do not advance system complexity until the previous operational layer has produced evidence."
 
 ```mermaid
 stateDiagram-v2

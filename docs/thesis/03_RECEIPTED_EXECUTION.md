@@ -2,7 +2,7 @@
 
 ## 3.1 Observation vs. Action
 
-The fundamental law of the `mac-artifact-cleaner` is:
+The fundamental law of the `osx-clnr` is:
 
 > **Never increase destructive power without simultaneously increasing receipts.**
 

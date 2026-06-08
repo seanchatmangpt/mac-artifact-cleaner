@@ -59,7 +59,7 @@ pub struct PrivacyReport {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::doctor::diagnose_architecture;
+/// use osx_clnr::domain::doctor::diagnose_architecture;
 ///
 /// // Positive case: all required files and directories are present
 /// let report = diagnose_architecture(true, true, vec![("src".to_string(), true)], vec![("artifact.rs".to_string(), true)]);
@@ -112,7 +112,7 @@ pub fn diagnose_architecture(
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::doctor::diagnose_substrate;
+/// use osx_clnr::domain::doctor::diagnose_substrate;
 ///
 /// // Positive case
 /// let report = diagnose_substrate(true, Some("/usr/sbin/tmutil".to_string()), true);
@@ -192,7 +192,7 @@ pub(crate) fn check_file_doctests_content(
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::doctor::diagnose_doctests;
+/// use osx_clnr::domain::doctor::diagnose_doctests;
 ///
 /// // Positive case: check in-memory files
 /// let files = vec![("artifact.rs".to_string(), "//! Module doc\n\n/// Test\n/// ```\n/// let x = 5;\n/// ```\npub fn foo() {}".to_string())];
@@ -268,7 +268,7 @@ pub(crate) fn scan_unredacted_paths(file_path: &str, content: &str) -> Vec<Priva
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::doctor::diagnose_privacy;
+/// use osx_clnr::domain::doctor::diagnose_privacy;
 ///
 /// // Positive case: verify clean environment
 /// let report = diagnose_privacy(true, Some("cleanup-plan*.json\n*.log".to_string()), vec![], &[]);

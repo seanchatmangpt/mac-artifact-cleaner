@@ -36,7 +36,7 @@ impl DeletionPlan {
     /// # Examples
     ///
     /// ```
-    /// use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
     /// use std::path::PathBuf;
     ///
     /// let items = vec![PlanItem {
@@ -85,8 +85,8 @@ impl DeletionPlan {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind, extract_exclusion_candidates};
-/// use pentecost::domain::tool_roots::ToolRootReport;
+/// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind, extract_exclusion_candidates};
+/// use osx_clnr::domain::tool_roots::ToolRootReport;
 /// use std::path::PathBuf;
 ///
 /// let items = vec![

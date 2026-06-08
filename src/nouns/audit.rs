@@ -736,6 +736,6 @@ fn print_premium_audit_summary(
     if total_potential > 0 {
         println!("  \x1b[1m💡 Reclaimable space:\x1b[0m You could reclaim up to \x1b[1m\x1b[32m{}\x1b[0m from cache & build targets.", human_bytes(total_potential));
     }
-    println!("  \x1b[1m👉 Action:\x1b[0m Run `mac-artifact-cleaner plan build --output plan.json` to prepare a safe deletion plan.");
+    println!("  \x1b[1m👉 Action:\x1b[0m Run `osx-clnr plan build --output plan.json` to prepare a safe deletion plan.");
     println!();
 }

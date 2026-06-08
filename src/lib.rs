@@ -1,4 +1,4 @@
-//! mac-artifact-cleaner library.
+//! osx-clnr library.
 //!
 //! Exposes domain-level modules, nouns (CLI commands), and integration layers.
 

@@ -1,10 +1,10 @@
 [package]
-name = "pentecost"
+name = "osx-clnr"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "pcst"
+name = "oclnr"
 path = "src/main.rs"
 
 [dependencies]

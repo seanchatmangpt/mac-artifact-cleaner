@@ -68,7 +68,7 @@ pub struct ToolRootDef {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::tool_roots::build_tool_root_defs;
+/// use osx_clnr::domain::tool_roots::build_tool_root_defs;
 ///
 /// // Positive case: builds definitions based on existing home directories
 /// let defs = build_tool_root_defs();
@@ -150,7 +150,7 @@ pub fn build_tool_root_defs() -> Vec<ToolRootDef> {
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::tool_roots::{recommend_tool_root, ToolRootDef};
+/// use osx_clnr::domain::tool_roots::{recommend_tool_root, ToolRootDef};
 /// use std::path::PathBuf;
 ///
 /// let def = ToolRootDef {
@@ -315,7 +315,7 @@ pub fn recommend_tool_root(
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::tool_roots::{build_tool_root_report, ToolRootDef, ToolRootAcc};
+/// use osx_clnr::domain::tool_roots::{build_tool_root_report, ToolRootDef, ToolRootAcc};
 /// use dashmap::DashMap;
 /// use std::path::PathBuf;
 ///
@@ -422,7 +422,7 @@ pub fn build_tool_root_report(
 /// # Examples
 ///
 /// ```
-/// use pentecost::domain::tool_roots::human_bytes;
+/// use osx_clnr::domain::tool_roots::human_bytes;
 ///
 /// // Positive case
 /// assert_eq!(human_bytes(1024), "1.00 KB");

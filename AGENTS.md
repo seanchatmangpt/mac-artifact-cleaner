@@ -1,8 +1,8 @@
 # AGENTS.md — Developer Agent Playbook
 
-This document is the operating contract for AI developer agents and human pair-programmers working on or with `mac-artifact-cleaner`.
+This document is the operating contract for AI developer agents and human pair-programmers working on or with `osx-clnr`.
 
-`mac-artifact-cleaner` is not a raw cleanup script. It is a **plan-bound macOS developer disk auditor and cleanup utility** that observes first, emits evidence, manufactures reviewable plans, executes only from those plans, and records receipts.
+`osx-clnr` is not a raw cleanup script. It is a **plan-bound macOS developer disk auditor and cleanup utility** that observes first, emits evidence, manufactures reviewable plans, executes only from those plans, and records receipts.
 
 ---
 
@@ -30,7 +30,7 @@ No agent may add a path from a live scan directly into deletion behavior.
 
 ## 1. System Philosophy & Architecture
 
-`mac-artifact-cleaner` follows **Gall Checkpoint development**: complex behavior is admitted only after a simpler working layer has produced operational evidence.
+`osx-clnr` follows **Gall Checkpoint development**: complex behavior is admitted only after a simpler working layer has produced operational evidence.
 
 The execution-trust pipeline is:
 
@@ -93,16 +93,16 @@ Agents must never implement destructive behavior that depends on a fresh scan at
 Allowed:
 
 ```text
-mac-artifact-cleaner --write-plan cleanup-plan.jsonocel
-mac-artifact-cleaner --delete-plan cleanup-plan.jsonocel --receipt deletion-receipt.jsonocel
+osx-clnr --write-plan cleanup-plan.jsonocel
+osx-clnr --delete-plan cleanup-plan.jsonocel --receipt deletion-receipt.jsonocel
 ```
 
 Forbidden:
 
 ```text
-mac-artifact-cleaner --scan-and-delete
-mac-artifact-cleaner --delete --root ~
-mac-artifact-cleaner --delete-matching target
+osx-clnr --scan-and-delete
+osx-clnr --delete --root ~
+osx-clnr --delete-matching target
 ```
 
 ### 2.3 Receipt-Before-Confidence
@@ -683,7 +683,7 @@ A change is done only when all applicable checks are satisfied.
 ## 14. Recommended Repository Shape
 
 ```text
-mac-artifact-cleaner/
+osx-clnr/
   Cargo.toml
   README.md
   AGENTS.md

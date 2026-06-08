@@ -4,15 +4,15 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use pentecost::domain::artifact::{
+use osx_clnr::domain::artifact::{
     artifact_candidates_from_snapshot, detect_project_from_snapshot, ArgsSnapshot, Candidate,
 };
-use pentecost::domain::audit::Stats;
-use pentecost::domain::delete::{validate_plan, validate_plan_item};
-use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-use pentecost::domain::receipt::{DeletionReceipt, DeletionStatus};
-use pentecost::integration::fs::scan_root;
-use pentecost::integration::fs::{delete_dir_all, delete_file, read_dir_snapshot};
+use osx_clnr::domain::audit::Stats;
+use osx_clnr::domain::delete::{validate_plan, validate_plan_item};
+use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+use osx_clnr::domain::receipt::{DeletionReceipt, DeletionStatus};
+use osx_clnr::integration::fs::scan_root;
+use osx_clnr::integration::fs::{delete_dir_all, delete_file, read_dir_snapshot};
 
 #[test]
 fn test_project_detection_and_candidates() {
@@ -160,7 +160,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
         assert!(validate_plan_item(&item.path, &plan));
 
         if !item.path.exists() {
-            results.push(pentecost::domain::receipt::DeletionResult {
+            results.push(osx_clnr::domain::receipt::DeletionResult {
                 path: item.path.clone(),
                 status: DeletionStatus::SkippedMissing,
                 error: None,
@@ -171,24 +171,24 @@ fn test_end_to_end_artifact_scan_build_delete() {
         // Delegate all filesystem mutations to the integration layer.
         let res = match item.kind {
             PlanItemKind::File => match delete_file(&item.path) {
-                Ok(()) => pentecost::domain::receipt::DeletionResult {
+                Ok(()) => osx_clnr::domain::receipt::DeletionResult {
                     path: item.path.clone(),
                     status: DeletionStatus::Deleted,
                     error: None,
                 },
-                Err(e) => pentecost::domain::receipt::DeletionResult {
+                Err(e) => osx_clnr::domain::receipt::DeletionResult {
                     path: item.path.clone(),
                     status: DeletionStatus::Failed,
                     error: Some(e.to_string()),
                 },
             },
             PlanItemKind::Dir => match delete_dir_all(&item.path) {
-                Ok(()) => pentecost::domain::receipt::DeletionResult {
+                Ok(()) => osx_clnr::domain::receipt::DeletionResult {
                     path: item.path.clone(),
                     status: DeletionStatus::Deleted,
                     error: None,
                 },
-                Err(e) => pentecost::domain::receipt::DeletionResult {
+                Err(e) => osx_clnr::domain::receipt::DeletionResult {
                     path: item.path.clone(),
                     status: DeletionStatus::Failed,
                     error: Some(e.to_string()),
@@ -217,7 +217,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
 
 #[test]
 fn test_snapshot_query_thin_parsing() {
-    use pentecost::domain::time::{
+    use osx_clnr::domain::time::{
         identify_thinned_snapshots, parse_snapshot_date, SnapshotThinReceipt,
     };
 
@@ -244,7 +244,7 @@ fn test_snapshot_query_thin_parsing() {
 
 #[test]
 fn test_size_parsing() {
-    use pentecost::domain::time::parse_size_in_bytes;
+    use osx_clnr::domain::time::parse_size_in_bytes;
 
     assert_eq!(parse_size_in_bytes("10GB").unwrap(), 10_000_000_000);
     assert_eq!(parse_size_in_bytes("500mb").unwrap(), 500_000_000);
@@ -259,7 +259,7 @@ fn test_size_parsing() {
 
 #[test]
 fn test_exclusions_plan_writing() {
-    use pentecost::integration::tmutil::write_tm_exclusions_script;
+    use osx_clnr::integration::tmutil::write_tm_exclusions_script;
 
     let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
     let script_path = tmp.path().join("tm-exclusions.sh");
@@ -291,7 +291,7 @@ fn test_exclusions_plan_writing() {
 
 #[test]
 fn test_tool_root_recommendation_logic() {
-    use pentecost::domain::tool_roots::{recommend_tool_root, ToolRootDef};
+    use osx_clnr::domain::tool_roots::{recommend_tool_root, ToolRootDef};
 
     let npm_def = ToolRootDef {
         path: PathBuf::from("/Users/user/.npm"),
@@ -348,8 +348,8 @@ fn test_tool_root_recommendation_logic() {
 
 #[test]
 fn test_receipt_verification_and_plan_correlation() {
-    use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-    use pentecost::domain::receipt::{
+    use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    use osx_clnr::domain::receipt::{
         DeletionReceipt, DeletionResult, DeletionStatus, IssueType,
     };
     use std::fs;
@@ -423,7 +423,7 @@ fn test_receipt_verification_and_plan_correlation() {
 
 #[test]
 fn test_ocel_validation_and_summarization() {
-    use pentecost::domain::ocel::{
+    use osx_clnr::domain::ocel::{
         build_tool_roots_ocel, summarize_ocel_log, validate_ocel_log, OcelRelationship,
     };
 
@@ -463,7 +463,7 @@ fn test_ocel_validation_and_summarization() {
 
 #[test]
 fn test_snapshot_and_exclusion_ocel_generation() {
-    use pentecost::domain::ocel::{
+    use osx_clnr::domain::ocel::{
         build_exclusion_plan_ocel, build_snapshot_audit_ocel, build_snapshot_thin_ocel,
         validate_ocel_log,
     };
@@ -515,9 +515,9 @@ fn test_snapshot_and_exclusion_ocel_generation() {
 
 #[test]
 fn test_exclusion_planning_and_application() {
-    use pentecost::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-    use pentecost::domain::tool_roots::ToolRootReport;
-    use pentecost::nouns::exclusion::{handle, ExclusionAction};
+    use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    use osx_clnr::domain::tool_roots::ToolRootReport;
+    use osx_clnr::nouns::exclusion::{handle, ExclusionAction};
 
     let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
     let plan_path = tmp.path().join("deletion-plan.json");
@@ -583,7 +583,7 @@ fn test_exclusion_planning_and_application() {
 
 #[test]
 fn test_privacy_subcommands() {
-    use pentecost::nouns::privacy::{handle, PrivacyAction};
+    use osx_clnr::nouns::privacy::{handle, PrivacyAction};
 
     let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
     let file_to_redact = tmp.path().join("leak.txt");

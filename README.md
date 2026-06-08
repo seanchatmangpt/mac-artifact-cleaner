@@ -1,8 +1,8 @@
-# Pentecost (`pcst`)
+# Pentecost (`oclnr`)
 
 **A plan-bound macOS developer disk auditor and cleanup utility. It observes first, emits reviewable OCEL evidence, deletes only from approved plans, and records receipts.**
 
-Unlike traditional cleaners that blindly execute `rm -rf` from a live scan, `pentecost` enforces a strict, multi-phase execution pipeline: never increase destructive power without simultaneously increasing receipts.
+Unlike traditional cleaners that blindly execute `rm -rf` from a live scan, `osx-clnr` enforces a strict, multi-phase execution pipeline: never increase destructive power without simultaneously increasing receipts.
 
 ## The Old Computing Gap
 

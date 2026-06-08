@@ -8,7 +8,7 @@ In modern software engineering, this is often interpreted merely as an agile end
 
 ## 2.2 The Gall Checkpoint Model
 
-To operationalize Gall's Law in the `mac-artifact-cleaner` architecture, we define the concept of the **Gall Checkpoint**. A checkpoint is an evolutionary lock. It prevents the system from advancing to a more complex state until the current state has proven its reliability through evidence.
+To operationalize Gall's Law in the `osx-clnr` architecture, we define the concept of the **Gall Checkpoint**. A checkpoint is an evolutionary lock. It prevents the system from advancing to a more complex state until the current state has proven its reliability through evidence.
 
 A Gall Checkpoint consists of five gates:
 1.  **Capability:** The new operational power (e.g., deleting a file).

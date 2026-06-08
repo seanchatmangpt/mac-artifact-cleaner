@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Identity
 
-**Binary:** `pcst` — package name is `pentecost` (`Cargo.toml` → `[[bin]] name = "pcst"`)
+**Binary:** `oclnr` — package name is `pentecost` (`Cargo.toml` → `[[bin]] name = "oclnr"`)
 
 **Purpose:** macOS developer disk auditor and cleanup utility. Enforces the invariant: *never increase destructive power without simultaneously increasing receipts.* Deletion is always plan-bound — the scanner cannot delete; the deleter cannot scan.
 
@@ -67,10 +67,10 @@ Each `Command` variant maps to a nouns submodule with its own `Action` enum and 
 ### Execution pipeline (plan-bound by design)
 
 ```
-pcst audit scan     →  disk-audit.json + disk-audit.jsonocel
-pcst plan create    →  cleanup-plan.json  (human reviews this)
-pcst delete run     →  reads plan only; scanner is disabled
-pcst receipt verify →  deletion-receipt.jsonocel
+oclnr audit scan     →  disk-audit.json + disk-audit.jsonocel
+oclnr plan create    →  cleanup-plan.json  (human reviews this)
+oclnr delete run     →  reads plan only; scanner is disabled
+oclnr receipt verify →  deletion-receipt.jsonocel
 ```
 
 ### OCEL v2 (`src/domain/ocel.rs`)
@@ -93,7 +93,7 @@ Every operation emits an Object-Centric Event Log v2. `build_disk_audit_ocel`, `
 
 ## Doctests are specification
 
-Domain functions carry doctests with positive + negative + refusal cases. These are the functional specification, not just examples. Run them via `cargo test --doc` or `pcst doctor doctests`. Do not remove or weaken them.
+Domain functions carry doctests with positive + negative + refusal cases. These are the functional specification, not just examples. Run them via `cargo test --doc` or `oclnr doctor doctests`. Do not remove or weaken them.
 
 ## Output files (never commit)
 
