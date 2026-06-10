@@ -3,7 +3,7 @@
 ## 1.1 The Entropic Nature of Modern Filesystems
 The modern polyglot software engineering ecosystem is characterized by an unprecedented velocity of artifact generation. Package managers, build systems, and container runtimes function as isolated, sovereign actors operating upon a shared, stateful medium: the local developer filesystem. Because these tools lack a unified protocol for lifecycle management, they collectively induce a state of unbounded systemic entropy, which we define as the "Bloat Cascade."
 
-Historically, the mitigation of this entropy has relied on heuristic-based, static analysis tools (e.g., `ncdu`, `DaisyDisk`, or ad-hoc `bash` scripts). These tools operate on a snapshot of the filesystem's current state, performing arbitrary size-based aggregations and offering candidates for manual deletion.
+Historically, the mitigation of this entropy has relied on heuristic-based, static analysis tools. These tools operate on a snapshot of the filesystem's current state, performing arbitrary size-based aggregations and offering candidates for manual deletion.
 
 ## 1.2 The Order Parameter is Standing
 The decisive failure of static state governance is not that it is "inefficient," but that it produces the wrong output type. Tools like `ncdu` produce **measurements**: bytes, paths, sizes, and timestamps. 

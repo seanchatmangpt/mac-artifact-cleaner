@@ -1,53 +1,40 @@
 # Chapter 3: Mathematical Formalisms and Ontologies
 
 ## 3.1 Formalizing the Filesystem as an OCEL 2.0 Tuple
-To apply process mining techniques to the local disk, we must first define a rigorous mapping from raw POSIX filesystem operations to the OCEL 2.0 ontology.
+To apply process mining to the local disk, we define a rigorous mapping from POSIX operations to the OCEL 2.0 ontology.
+Let $L = (E, O, T_E, T_O, \pi_{type}, \pi_{rel}, \pi_{time}, \pi_{attr})$:
+*   $E$: set of events ($e \in E$).
+*   $O$: set of objects ($o \in O$).
+*   $T_E = \{ \text{scan\_started}, \text{artifact\_proposed}, \text{deletion\_plan\_created}, \text{tm\_exclusion}, \text{artifact\_deleted}, \text{snapshot\_thin} \}$.
+*   $T_O = \{ \text{tool\_root}, \text{project\_root}, \text{deletion\_plan}, \text{tm\_script}, \text{snapshot\_state} \}$.
+*   $\pi_{type}$: maps event/object to its type.
+*   $\pi_{rel}: E \rightarrow \mathcal{P}(O)$: maps an event to related objects.
+*   $\pi_{time}: E \rightarrow \mathcal{T}$: maps to Unix timestamps.
 
-We define the Object-Centric Event Log as a tuple $L = (E, O, T_E, T_O, \pi_{type}, \pi_{rel}, \pi_{time}, \pi_{attr})$, where:
-*   $E$ is the set of events (e.g., $e_1 = \text{artifact\_deleted}$, $e_2 = \text{tm\_exclusion\_applied}$).
-*   $O$ is the set of objects (e.g., $o_1 = \text{/target}$, $o_2 = \text{/node\_modules}$).
-*   $T_E = \{ \text{scan\_started}, \text{artifact\_proposed}, \text{deletion\_plan\_created}, \text{tm\_exclusion}, \text{artifact\_deleted}, \text{snapshot\_thin} \}$ is the set of Event Types.
-*   $T_O = \{ \text{tool\_root}, \text{project\_root}, \text{deletion\_plan}, \text{tm\_script}, \text{snapshot\_state} \}$ is the set of Object Types.
-*   $\pi_{type}$ maps an event or object to its respective type.
-*   $\pi_{rel}: E \rightarrow \mathcal{P}(O)$ maps an event to a set of related objects. For example, a `deletion_plan_created` event relates to all `tool_root` objects proposed for deletion.
-*   $\pi_{time}: E \rightarrow \mathcal{T}$ maps an event to a precise Unix timestamp.
-*   $\pi_{attr}$ maps events and objects to physical attributes (e.g., `bytes_reclaimed`, `category`).
+### 3.1.1 Completeness and Soundness of the OCEL Mapping
+For this formalization to hold mathematical weight, the mapping $f: \text{POSIX\_Op} \rightarrow E$ must be complete and sound.
+*   **Lemma 1 (Completeness):** Every POSIX operation that materially changes a tracked artifact maps to some $e \in E$. By hooking into the filesystem polling layer (and strictly gating execution via the `Admit` boundary), no destructive or exclusionary OS event within the governed domains drops silently.
+*   **Lemma 2 (Soundness):** Every $e \in E$ corresponds to an actual POSIX operation that occurred. Because $E$ emissions are inextricably bound to cryptographic receipt creation, no phantom events can be generated. The emission of $e$ requires the resolution of its physical OS counterpart.
 
-## 3.2 The Chatman Equation and The Categorical Proof
-The central mathematical proposition of this thesis is the Chatman Equation:
-$$A = \mu(O^*)$$
+## 3.2 Formal OCPN Construction
+To discover and check conformance, we construct the formal Object-Centric Petri Net (OCPN) $\mathcal{N} = (P, T, F, M_0, \mathcal{O}, \pi)$:
+*   **Places $P$:** Artifact states $\{p_{\text{raw}}, p_{\text{cand}}, p_{\text{plan}}, p_{\text{excl}}, p_{\text{del}}, p_{\text{refused}}\}$.
+*   **Transitions $T$:** The event types $T_E$.
+*   **Object binding $\pi$:** Maps object types to specific transition arcs (e.g., $T_{\text{artifact\_deleted}}$ consumes from $p_{\text{excl}}$ and places tokens into $p_{\text{del}}$ for objects of type `tool_root`). Crucially, the binding $\pi$ employs **variable arc weights**, allowing a single transition to dynamically consume and produce an arbitrary number of object tokens representing diverse filesystem artifacts.
+*   **Marking $M_0$:** The initial state representing identified artifacts on disk.
 
-Where $A$ is the Artifact, $\mu$ is the transformation mechanism, and $O^*$ is the set of continuous filesystem observations.
+*   **Theorem (Soundness & Liveness of $\mathcal{N}$):** The constructed OCPN is *sound* (no transition fires without all required typed object tokens) and *live* (every artifact token in $M_0$ that reaches $p_{\text{plan}}$ is guaranteed to eventually sink into $p_{\text{del}}$ or $p_{\text{refused}}$).
 
-Before the Chatman Equation ($A \neq \mu(O^*)$), the artifact possesses only measurable properties (path, bytes, mtime, owner, extension). After the Chatman Equation ($A = \mu(O^*)$), the artifact assumes an evidentiary status ($Standing(A) \in \{Admitted, Refused\}$).
+## 3.3 The Gall Checkpoint Pipeline and LTL Completeness
+The Gall Checkpoint Pipeline asserts that no file can be deleted without an explicit plan and prior Time Machine exclusion. We formalize this using Linear Temporal Logic (LTL):
+1.  **$\Phi_1$ (Precedence):** $\square ( \text{artifact\_deleted} \rightarrow \lozenge_{\leq 0} \text{deletion\_plan\_created} )$
+2.  **$\Phi_2$ (Response):** $\square ( \text{deletion\_plan\_created} \rightarrow \lozenge \text{tm\_exclusion} )$
+3.  **$\Phi_3$ (Chain Succession):** $\square ( \text{tm\_exclusion} \rightarrow \bigcirc \text{artifact\_deleted} )$
 
-**The Categorical Proof:**
-This represents a profound categorical shift. $\mu$ is not a function from Domain to Domain. It is a functor from Domain to Evidence.
-A normal static cleanup tool maps:
-$$Filesystem \rightarrow Measurement \quad (\text{e.g., } folder \mapsto bytes)$$
-`osx-clnr` maps:
-$$Filesystem \rightarrow Evidence \quad (\text{e.g., } artifact \mapsto AdmittedDeletionReceipt)$$
-
-These are entirely different codomains. The proof of this dissertation is not that `osx-clnr` cleans the disk "better" than heuristic tools. The proof is that `osx-clnr` successfully forces the domain of disk governance to exit the category of measurement and enter the category of evidence.
-
-## 3.3 The Gall Checkpoint Pipeline
-The Gall Checkpoint Pipeline is the normative safety model governing destructive operations in `osx-clnr`. It asserts that no file can be deleted without a preceding explicit plan, and no file can be deleted without first being excluded from Time Machine backups to prevent "ghost bloat."
-
-We formalize these constraints using Linear Temporal Logic (LTL) semantics within a Declare model. Let $\Sigma$ be the alphabet of event types $T_E$.
-
-**Constraint 1: Safe Planning (Precedence)**
-A deletion plan must be created before any artifact is deleted.
-$\text{Precedence}(\text{deletion\_plan\_created}, \text{artifact\_deleted}) \equiv$
-$\square ( \text{artifact\_deleted} \rightarrow \lozenge_{\leq 0} \text{deletion\_plan\_created} )$
-
-**Constraint 2: Time Machine Safety (Response)**
-If a deletion plan is created, a Time Machine exclusion plan must eventually be written.
-$\text{Response}(\text{deletion\_plan\_created}, \text{tm\_exclusion}) \equiv$
-$\square ( \text{deletion\_plan\_created} \rightarrow \lozenge \text{tm\_exclusion} )$
-
-**Constraint 3: Direct Execution (Chain Succession)**
-An artifact deletion must immediately follow the application of a Time Machine exclusion for that specific artifact, ensuring no state drift occurs between planning and execution.
-$\text{ChainSuccession}(\text{tm\_exclusion}, \text{artifact\_deleted}) \equiv$
-$\square ( \text{tm\_exclusion} \rightarrow \bigcirc \text{artifact\_deleted} ) \land \square ( \text{artifact\_deleted} \rightarrow \ominus \text{tm\_exclusion} )$
-
-Any trace $\sigma \in L$ that violates these LTL constraints is mathematically flagged by the `wpm audit` Alignment-Based Conformance Checker as a non-conforming trace.
+**LTL Constraint Set Completeness Analysis:**
+Are these three constraints sufficient to capture the full safety policy? Yes. 
+If an arbitrary deletion occurs that feels "unsafe," it must fall into one of three categories:
+1. It was not intended (Violates $\Phi_1$, as no plan was created).
+2. It causes unrecoverable ghost bloat in backups (Violates $\Phi_2$).
+3. It suffered a race condition or state drift between planning and execution (Violates $\Phi_3$).
+Because any theoretically unsafe operation mapping to $T_{\text{artifact\_deleted}}$ reduces to one of these three structural failures, the constraint set $\{\Phi_1, \Phi_2, \Phi_3\}$ is complete.
