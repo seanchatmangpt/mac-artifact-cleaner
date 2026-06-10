@@ -4,42 +4,42 @@ use crate::domain::tool_roots::ToolRootReport;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OcelLog {
+pub struct OCEL {
     #[serde(rename = "eventTypes")]
     pub event_types: Vec<OcelTypeDef>,
 
     #[serde(rename = "objectTypes")]
     pub object_types: Vec<OcelTypeDef>,
 
-    pub events: Vec<OcelEvent>,
-    pub objects: Vec<OcelObject>,
+    pub events: Vec<OCELEvent>,
+    pub objects: Vec<OCELObject>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OcelTypeDef {
     pub name: String,
-    pub attributes: Vec<OcelAttributeDef>,
+    pub attributes: Vec<OCELEventAttributeDef>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OcelAttributeDef {
+pub struct OCELEventAttributeDef {
     pub name: String,
     #[serde(rename = "type")]
     pub attr_type: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OcelEvent {
+pub struct OCELEvent {
     pub id: String,
     #[serde(rename = "type")]
     pub event_type: String,
     pub time: String,
-    pub attributes: Vec<OcelAttributeValue>,
+    pub attributes: Vec<OCELEventAttributeValue>,
     pub relationships: Vec<OcelRelationship>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OcelObject {
+pub struct OCELObject {
     pub id: String,
     #[serde(rename = "type")]
     pub object_type: String,
@@ -48,7 +48,7 @@ pub struct OcelObject {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OcelAttributeValue {
+pub struct OCELEventAttributeValue {
     pub name: String,
     pub value: serde_json::Value,
 }
@@ -79,13 +79,13 @@ pub struct OcelRelationship {
 /// assert_eq!(log.objects.len(), 1); // includes disk_audit object
 /// assert_eq!(log.objects[0].object_type, "disk_audit");
 /// ```
-pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OcelLog {
+pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
     let now = chrono::Utc::now().to_rfc3339();
     let mut objects = Vec::new();
     let mut events = Vec::new();
     let audit_obj_id = format!("audit-{}", chrono::Utc::now().timestamp());
 
-    objects.push(OcelObject {
+    objects.push(OCELObject {
         id: audit_obj_id.clone(),
         object_type: "disk_audit".to_string(),
         attributes: vec![OcelTimedAttributeValue {
@@ -96,11 +96,11 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OcelLog {
         relationships: vec![],
     });
 
-    events.push(OcelEvent {
+    events.push(OCELEvent {
         id: format!("event-audit-started-{}", chrono::Utc::now().timestamp()),
         event_type: "disk_audit_started".to_string(),
         time: now.clone(),
-        attributes: vec![OcelAttributeValue {
+        attributes: vec![OCELEventAttributeValue {
             name: "tool".to_string(),
             value: serde_json::json!("mac-disk-auditor"),
         }],
@@ -114,7 +114,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OcelLog {
         let object_id = stable_object_id("tool-root", &root.path);
         let observed_time = unix_to_rfc3339(root.newest_descendant_modified_unix);
 
-        objects.push(OcelObject {
+        objects.push(OCELObject {
             id: object_id.clone(),
             object_type: "tool_root".to_string(),
             attributes: vec![
@@ -166,7 +166,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OcelLog {
             }],
         });
 
-        events.push(OcelEvent {
+        events.push(OCELEvent {
             id: format!("event-tool-root-observed-{:06}", idx),
             event_type: "tool_root_observed".to_string(),
             time: observed_time.clone(),
@@ -195,7 +195,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OcelLog {
             || root.recommendation.contains("review")
             || root.recommendation.contains("delete")
         {
-            events.push(OcelEvent {
+            events.push(OCELEvent {
                 id: format!("event-tool-root-review-proposed-{:06}", idx),
                 event_type: "tool_root_review_proposed".to_string(),
                 time: now.clone(),
@@ -218,7 +218,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OcelLog {
         }
     }
 
-    OcelLog {
+    OCEL {
         event_types: vec![
             OcelTypeDef {
                 name: "disk_audit_started".to_string(),
@@ -287,8 +287,8 @@ fn unix_to_rfc3339(t: Option<i64>) -> String {
         .to_rfc3339()
 }
 
-fn attr(name: &str, value: serde_json::Value) -> OcelAttributeValue {
-    OcelAttributeValue {
+fn attr(name: &str, value: serde_json::Value) -> OCELEventAttributeValue {
+    OCELEventAttributeValue {
         name: name.to_string(),
         value,
     }
@@ -302,8 +302,8 @@ fn timed_attr(name: &str, time: &str, value: serde_json::Value) -> OcelTimedAttr
     }
 }
 
-fn attr_def(name: &str, attr_type: &str) -> OcelAttributeDef {
-    OcelAttributeDef {
+fn attr_def(name: &str, attr_type: &str) -> OCELEventAttributeDef {
+    OCELEventAttributeDef {
         name: name.to_string(),
         attr_type: attr_type.to_string(),
     }
@@ -340,7 +340,7 @@ pub fn build_disk_audit_ocel(
     candidates: &[crate::domain::artifact::Candidate],
     tool_roots: &[crate::domain::tool_roots::ToolRootReport],
     stats: &crate::domain::audit::Stats,
-) -> OcelLog {
+) -> OCEL {
     let now = chrono::Utc::now().to_rfc3339();
     let audit_obj_id = format!("audit-{}", chrono::Utc::now().timestamp());
 
@@ -360,7 +360,7 @@ pub fn build_disk_audit_ocel(
     let errors = stats.errors.load(std::sync::atomic::Ordering::Relaxed) as i64;
 
     // 1. Audit Object
-    objects.push(OcelObject {
+    objects.push(OCELObject {
         id: audit_obj_id.clone(),
         object_type: "disk_audit".to_string(),
         attributes: vec![
@@ -377,7 +377,7 @@ pub fn build_disk_audit_ocel(
     });
 
     // 2. Audit Started Event
-    events.push(OcelEvent {
+    events.push(OCELEvent {
         id: format!("event-audit-started-{}", chrono::Utc::now().timestamp()),
         event_type: "disk_audit_started".to_string(),
         time: now.clone(),
@@ -393,7 +393,7 @@ pub fn build_disk_audit_ocel(
         let r_str = r.display().to_string();
         let root_obj_id = stable_object_id("scan-root", &r_str);
 
-        objects.push(OcelObject {
+        objects.push(OCELObject {
             id: root_obj_id.clone(),
             object_type: "scan_root".to_string(),
             attributes: vec![timed_attr("path", &now, serde_json::json!(r_str))],
@@ -403,7 +403,7 @@ pub fn build_disk_audit_ocel(
             }],
         });
 
-        events.push(OcelEvent {
+        events.push(OCELEvent {
             id: format!("event-scan-root-started-{}", idx),
             event_type: "scan_root_started".to_string(),
             time: now.clone(),
@@ -432,7 +432,7 @@ pub fn build_disk_audit_ocel(
             "directory"
         };
 
-        objects.push(OcelObject {
+        objects.push(OCELObject {
             id: fs_obj_id.clone(),
             object_type: "filesystem_object".to_string(),
             attributes: vec![
@@ -445,7 +445,7 @@ pub fn build_disk_audit_ocel(
             }],
         });
 
-        objects.push(OcelObject {
+        objects.push(OCELObject {
             id: cand_obj_id.clone(),
             object_type: "artifact_candidate".to_string(),
             attributes: vec![
@@ -458,7 +458,7 @@ pub fn build_disk_audit_ocel(
             }],
         });
 
-        events.push(OcelEvent {
+        events.push(OCELEvent {
             id: format!("event-fs-observed-{:06}", idx),
             event_type: "filesystem_object_observed".to_string(),
             time: now.clone(),
@@ -478,7 +478,7 @@ pub fn build_disk_audit_ocel(
             ],
         });
 
-        events.push(OcelEvent {
+        events.push(OCELEvent {
             id: format!("event-candidate-proposed-{:06}", idx),
             event_type: "artifact_candidate_proposed".to_string(),
             time: now.clone(),
@@ -507,7 +507,7 @@ pub fn build_disk_audit_ocel(
     for (idx, tr) in tool_roots.iter().enumerate() {
         let tr_obj_id = stable_object_id("tool-root", &tr.path);
 
-        objects.push(OcelObject {
+        objects.push(OCELObject {
             id: tr_obj_id.clone(),
             object_type: "tool_root".to_string(),
             attributes: vec![
@@ -524,7 +524,7 @@ pub fn build_disk_audit_ocel(
             }],
         });
 
-        events.push(OcelEvent {
+        events.push(OCELEvent {
             id: format!("event-tool-root-observed-{:06}", idx),
             event_type: "tool_root_observed".to_string(),
             time: now.clone(),
@@ -546,7 +546,7 @@ pub fn build_disk_audit_ocel(
         });
     }
 
-    OcelLog {
+    OCEL {
         event_types: vec![
             OcelTypeDef {
                 name: "disk_audit_started".to_string(),
@@ -628,14 +628,14 @@ pub fn build_disk_audit_ocel(
 /// assert_eq!(log.objects[0].object_type, "snapshot_state");
 /// assert_eq!(log.events[0].event_type, "snapshot_state_observed");
 /// ```
-pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OcelLog {
+pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OCEL {
     let now = chrono::Utc::now().to_rfc3339();
     let state_obj_id = format!("snapshot-state-{}", chrono::Utc::now().timestamp());
 
     let mut objects = Vec::new();
     let mut events = Vec::new();
 
-    objects.push(OcelObject {
+    objects.push(OCELObject {
         id: state_obj_id.clone(),
         object_type: "snapshot_state".to_string(),
         attributes: vec![
@@ -650,7 +650,7 @@ pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OcelLog 
         relationships: vec![],
     });
 
-    events.push(OcelEvent {
+    events.push(OCELEvent {
         id: format!("event-snapshot-observed-{}", chrono::Utc::now().timestamp()),
         event_type: "snapshot_state_observed".to_string(),
         time: now.clone(),
@@ -664,7 +664,7 @@ pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OcelLog 
         }],
     });
 
-    OcelLog {
+    OCEL {
         event_types: vec![OcelTypeDef {
             name: "snapshot_state_observed".to_string(),
             attributes: vec![
@@ -703,14 +703,14 @@ pub fn build_snapshot_thin_ocel(
     before: &[String],
     after: &[String],
     thinned: &[String],
-) -> OcelLog {
+) -> OCEL {
     let now = chrono::Utc::now().to_rfc3339();
     let state_obj_id = format!("snapshot-state-{}", chrono::Utc::now().timestamp());
 
     let mut objects = Vec::new();
     let mut events = Vec::new();
 
-    objects.push(OcelObject {
+    objects.push(OCELObject {
         id: state_obj_id.clone(),
         object_type: "snapshot_state".to_string(),
         attributes: vec![
@@ -725,7 +725,7 @@ pub fn build_snapshot_thin_ocel(
         relationships: vec![],
     });
 
-    events.push(OcelEvent {
+    events.push(OCELEvent {
         id: format!("event-snapshot-thin-{}", chrono::Utc::now().timestamp()),
         event_type: "snapshot_thin_requested".to_string(),
         time: now.clone(),
@@ -748,7 +748,7 @@ pub fn build_snapshot_thin_ocel(
         }],
     });
 
-    OcelLog {
+    OCEL {
         event_types: vec![OcelTypeDef {
             name: "snapshot_thin_requested".to_string(),
             attributes: vec![
@@ -784,14 +784,14 @@ pub fn build_snapshot_thin_ocel(
 /// assert_eq!(log.objects[0].object_type, "tm_exclusion_plan");
 /// assert_eq!(log.events[0].event_type, "tm_exclusion_plan_written");
 /// ```
-pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> OcelLog {
+pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> OCEL {
     let now = chrono::Utc::now().to_rfc3339();
     let plan_obj_id = format!("tm-exclusion-plan-{}", chrono::Utc::now().timestamp());
 
     let mut objects = Vec::new();
     let mut events = Vec::new();
 
-    objects.push(OcelObject {
+    objects.push(OCELObject {
         id: plan_obj_id.clone(),
         object_type: "tm_exclusion_plan".to_string(),
         attributes: vec![
@@ -805,7 +805,7 @@ pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> O
         relationships: vec![],
     });
 
-    events.push(OcelEvent {
+    events.push(OCELEvent {
         id: format!("event-exclusion-written-{}", chrono::Utc::now().timestamp()),
         event_type: "tm_exclusion_plan_written".to_string(),
         time: now.clone(),
@@ -819,7 +819,7 @@ pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> O
         }],
     });
 
-    OcelLog {
+    OCEL {
         event_types: vec![OcelTypeDef {
             name: "tm_exclusion_plan_written".to_string(),
             attributes: vec![
@@ -897,7 +897,7 @@ fn val_matches_type(val: &serde_json::Value, type_str: &str) -> bool {
 /// assert!(!report.is_valid);
 /// assert!(!report.errors.is_empty());
 /// ```
-pub fn validate_ocel_log(log: &OcelLog) -> OcelValidationReport {
+pub fn validate_ocel_log(log: &OCEL) -> OcelValidationReport {
     let mut errors = Vec::new();
 
     let event_schema: std::collections::HashMap<&str, &OcelTypeDef> = log
@@ -1141,7 +1141,7 @@ pub fn validate_ocel_log(log: &OcelLog) -> OcelValidationReport {
 /// assert_eq!(summary.event_counts.get("disk_audit_started"), Some(&1));
 /// assert_eq!(summary.object_counts.get("disk_audit"), Some(&1));
 /// ```
-pub fn summarize_ocel_log(log: &OcelLog) -> OcelSummary {
+pub fn summarize_ocel_log(log: &OCEL) -> OcelSummary {
     let mut event_counts = std::collections::HashMap::new();
     for e in &log.events {
         *event_counts.entry(e.event_type.clone()).or_insert(0) += 1;

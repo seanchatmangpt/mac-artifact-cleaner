@@ -1,6 +1,6 @@
 //! OCEL v2 CLI noun implementation.
 
-use crate::domain::ocel::{summarize_ocel_log, validate_ocel_log, OcelLog};
+use crate::domain::ocel::{summarize_ocel_log, validate_ocel_log, OCEL};
 use clap::Subcommand;
 use std::path::PathBuf;
 
@@ -25,7 +25,7 @@ pub fn handle(action: OcelAction) -> anyhow::Result<()> {
         OcelAction::Validate { log } => {
             println!("Reading OCEL log from: {}", log.display());
             let content = std::fs::read_to_string(&log)?;
-            let ocel_log: OcelLog = serde_json::from_str(&content)?;
+            let ocel_log: OCEL = serde_json::from_str(&content)?;
 
             println!("Validating OCEL log...");
             let report = validate_ocel_log(&ocel_log);
@@ -42,7 +42,7 @@ pub fn handle(action: OcelAction) -> anyhow::Result<()> {
         OcelAction::Summarize { log } => {
             println!("Reading OCEL log from: {}", log.display());
             let content = std::fs::read_to_string(&log)?;
-            let ocel_log: OcelLog = serde_json::from_str(&content)?;
+            let ocel_log: OCEL = serde_json::from_str(&content)?;
 
             let summary = summarize_ocel_log(&ocel_log);
             println!("\n=== OCEL v2 Log Summary ===");
