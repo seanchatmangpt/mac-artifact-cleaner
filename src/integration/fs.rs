@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::Context;
 use crate::domain::artifact::{
     artifact_candidates_from_snapshot, detect_project_from_snapshot, is_global_cache,
     is_macos_os_dir, is_traversal_barrier_name, ArgsSnapshot, Candidate, DirSnapshot, EntryKind,
@@ -20,6 +19,7 @@ use crate::domain::artifact::{
 };
 use crate::domain::audit::Stats;
 use crate::domain::tool_roots::{ToolRootAcc, ToolRootDef};
+use anyhow::Context;
 
 // ── DirSnapshot builder ────────────────────────────────────────────────────────
 
@@ -361,18 +361,16 @@ pub fn find_cargo_target_dirs(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>
         .follow_links(false)
         .parallelism(Parallelism::RayonNewPool(0))
         .process_read_dir(move |_, parent, _, children| {
-            let is_cargo_project = parent.join("Cargo.toml").exists()
-                || parent.join("Cargo.lock").exists();
+            let is_cargo_project =
+                parent.join("Cargo.toml").exists() || parent.join("Cargo.lock").exists();
 
             if is_cargo_project {
                 children.retain(|e| {
                     let Ok(e) = e else { return true };
                     let fname = e.file_name().to_string_lossy();
-                    if e.file_type().is_dir() && (fname == "target" || fname.starts_with("target_")) {
-                        found_w
-                            .lock()
-                            .unwrap()
-                            .push(parent.join(e.file_name()));
+                    if e.file_type().is_dir() && (fname == "target" || fname.starts_with("target_"))
+                    {
+                        found_w.lock().unwrap().push(parent.join(e.file_name()));
                         return false; // prune — don't descend into target/
                     }
                     true
@@ -448,17 +446,15 @@ pub fn find_large_files(
     let files_for_thread = files_scanned.clone();
     let large_for_thread = large_found.clone();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            if stop_rx.try_recv().is_ok() {
-                break;
-            }
-            progress_cb(
-                files_for_thread.load(Ordering::Relaxed),
-                large_for_thread.load(Ordering::Relaxed),
-            );
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if stop_rx.try_recv().is_ok() {
+            break;
         }
+        progress_cb(
+            files_for_thread.load(Ordering::Relaxed),
+            large_for_thread.load(Ordering::Relaxed),
+        );
     });
 
     let mut results: Vec<(PathBuf, u64)> = WalkDir::new(root)
@@ -544,15 +540,9 @@ pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
 
     for result in builder.build() {
         let Ok(entry) = result else { continue };
-        let is_dir = entry
-            .file_type()
-            .map(|ft| ft.is_dir())
-            .unwrap_or(false);
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
         let mode = if is_dir { 0o700u32 } else { 0o600u32 };
-        let _ = std::fs::set_permissions(
-            entry.path(),
-            std::fs::Permissions::from_mode(mode),
-        );
+        let _ = std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(mode));
     }
 
     // Final removal.
@@ -652,21 +642,27 @@ fn record_tool_root_file(
 
 /// Populates the tool root directories' own metadata fields inside `ToolRootAcc`
 /// by executing live OS/filesystem calls in the integration layer.
-pub fn populate_tool_roots_metadata(
-    defs: &[ToolRootDef],
-    accs: &DashMap<PathBuf, ToolRootAcc>,
-) {
+pub fn populate_tool_roots_metadata(defs: &[ToolRootDef], accs: &DashMap<PathBuf, ToolRootAcc>) {
     for def in defs {
         if let Some(acc) = accs.get(&def.path) {
             if let Ok(meta) = std::fs::symlink_metadata(&def.path) {
                 if let Ok(created) = meta.created() {
-                    acc.created_unix.store(crate::domain::time::system_time_to_unix(created), Ordering::Relaxed);
+                    acc.created_unix.store(
+                        crate::domain::time::system_time_to_unix(created),
+                        Ordering::Relaxed,
+                    );
                 }
                 if let Ok(accessed) = meta.accessed() {
-                    acc.accessed_unix.store(crate::domain::time::system_time_to_unix(accessed), Ordering::Relaxed);
+                    acc.accessed_unix.store(
+                        crate::domain::time::system_time_to_unix(accessed),
+                        Ordering::Relaxed,
+                    );
                 }
                 if let Ok(modified) = meta.modified() {
-                    acc.modified_unix.store(crate::domain::time::system_time_to_unix(modified), Ordering::Relaxed);
+                    acc.modified_unix.store(
+                        crate::domain::time::system_time_to_unix(modified),
+                        Ordering::Relaxed,
+                    );
                 }
                 let ctime = std::os::unix::fs::MetadataExt::ctime(&meta);
                 acc.ctime_unix.store(ctime, Ordering::Relaxed);

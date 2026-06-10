@@ -57,9 +57,12 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 /// # Examples
 ///
 /// ```
-/// use osx_clnr::domain::delete::validate_plan;
+/// use osx_clnr::domain::delete::{DeletionPlanAdjudicator, PlanSafetyWitness};
 /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
 /// use std::path::PathBuf;
+/// use wasm4pm_compat::admission::Admit;
+/// use wasm4pm_compat::evidence::Evidence;
+/// use wasm4pm_compat::state::Raw;
 ///
 /// let plan = DeletionPlan::new(
 ///     vec![PathBuf::from("/Users/user")],
@@ -74,7 +77,7 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 /// );
 ///
 /// // Positive case: plan is version 1 and has no system directory violations.
-/// assert!(validate_plan(&plan).is_ok());
+/// assert!(DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(plan.clone())).is_ok());
 ///
 /// // Refusal case 1: system directory violation.
 /// let bad_item_plan = DeletionPlan::new(
@@ -88,24 +91,52 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 ///     }],
 ///     vec![],
 /// );
-/// assert!(validate_plan(&bad_item_plan).is_err());
+/// assert!(DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(bad_item_plan)).is_err());
 ///
 /// // Refusal case 2: unsupported plan version.
 /// let mut bad_version_plan = plan.clone();
 /// bad_version_plan.version = 2;
-/// assert!(validate_plan(&bad_version_plan).is_err());
+/// assert!(DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(bad_version_plan)).is_err());
 /// ```
-pub fn validate_plan(plan: &DeletionPlan) -> Result<(), String> {
-    if plan.version != 1 {
-        return Err(format!("Unsupported plan version: {}", plan.version));
-    }
-    for item in &plan.items {
-        if is_macos_os_dir(&item.path) {
-            return Err(format!(
-                "Safety violation: system path in deletion plan: {}",
-                item.path.display()
-            ));
+use wasm4pm_compat::admission::{Admission, Admit, Refusal};
+use wasm4pm_compat::evidence::Evidence;
+use wasm4pm_compat::state::Raw;
+
+/// The witness for verifying a deletion plan against macOS safety rules and scope constraints.
+pub struct PlanSafetyWitness;
+
+pub struct DeletionPlanAdjudicator;
+
+impl Admit for DeletionPlanAdjudicator {
+    type Raw = DeletionPlan;
+    type Admitted = DeletionPlan;
+    type Reason = String;
+    type Witness = PlanSafetyWitness;
+
+    fn admit(
+        raw: Evidence<Self::Raw, Raw, Self::Witness>,
+    ) -> Result<Admission<Self::Admitted, Self::Witness>, Refusal<Self::Reason, Self::Witness>>
+    {
+        let plan = &raw.value;
+        let mut errors = Vec::new();
+
+        if plan.version != 1 {
+            errors.push(format!("Unsupported plan version: {}", plan.version));
+        }
+
+        for item in &plan.items {
+            if is_macos_os_dir(&item.path) {
+                errors.push(format!(
+                    "Safety violation: system path in deletion plan: {}",
+                    item.path.display()
+                ));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(Admission::new(raw.value.clone()))
+        } else {
+            Err(Refusal::new(errors.join("; ")))
         }
     }
-    Ok(())
 }

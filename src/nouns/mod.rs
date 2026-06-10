@@ -2,6 +2,7 @@
 
 pub mod artifact;
 pub mod audit;
+pub mod completion;
 pub mod delete;
 pub mod doctor;
 pub mod exclusion;
@@ -11,6 +12,9 @@ pub mod privacy;
 pub mod receipt;
 pub mod snapshot;
 pub mod tool_roots;
+pub mod wizard;
+pub mod wpm;
+pub mod wpm_use_cases;
 
 use clap::{Parser, Subcommand};
 
@@ -26,6 +30,14 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Interactive maintenance wizard (Audit -> Plan -> Delete -> Thin)
+    #[command(alias = "clean")]
+    Wizard,
+    /// Generate shell completions
+    Completion {
+        #[command(subcommand)]
+        action: completion::CompletionAction,
+    },
     /// Audit actions
     Audit {
         #[command(subcommand)]
@@ -82,11 +94,18 @@ pub enum Command {
         #[command(subcommand)]
         action: privacy::PrivacyAction,
     },
+    /// wasm4pm process mining capabilities (Pillars 1-4)
+    Wpm {
+        #[command(subcommand)]
+        action: wpm::WpmAction,
+    },
 }
 
 pub fn handle_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Wizard => wizard::handle(),
+        Command::Completion { action } => completion::handle(action),
         Command::Audit { action } => audit::handle(action),
         Command::Artifact { action } => artifact::handle(action),
         Command::Plan { action } => plan::handle(action),
@@ -98,5 +117,6 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::ToolRoots { action } => tool_roots::handle(action),
         Command::Ocel { action } => ocel::handle(action),
         Command::Privacy { action } => privacy::handle(action),
+        Command::Wpm { action } => wpm::handle(action),
     }
 }

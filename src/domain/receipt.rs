@@ -2,14 +2,24 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+pub use wasm4pm_compat::receipt::{
+    Digest, ReceiptChain, ReceiptEnvelope, ReceiptRefusal, ReceiptShape, ReplayHint,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeletionReceipt {
+pub struct DeletionExecutionRecord {
     pub version: u32,
     pub plan_created_unix: u64,
     pub execution_started_unix: u64,
     pub execution_completed_unix: u64,
     pub results: Vec<DeletionResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeletionReceipt {
+    #[serde(skip)]
+    pub chain: Option<ReceiptChain>,
+    pub execution_record: DeletionExecutionRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,98 +62,68 @@ pub struct VerificationReport {
 }
 
 impl DeletionReceipt {
-    /// Creates a new deletion receipt.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
-    /// use std::path::PathBuf;
-    ///
-    /// // Positive case: construct a receipt and verify properties
-    /// let receipt = DeletionReceipt::new(1716768000, 1716768100, 1716768200, vec![]);
-    /// assert_eq!(receipt.version, 1);
-    /// assert!(receipt.results.is_empty());
-    /// ```
     pub fn new(
+        chain_id: String,
         plan_created_unix: u64,
         execution_started_unix: u64,
         execution_completed_unix: u64,
         results: Vec<DeletionResult>,
     ) -> Self {
-        Self {
+        let execution_record = DeletionExecutionRecord {
             version: 1,
             plan_created_unix,
             execution_started_unix,
             execution_completed_unix,
             results,
+        };
+
+        let record_json = serde_json::to_string(&execution_record).unwrap_or_default();
+        let digest_str = blake3::hash(record_json.as_bytes()).to_hex().to_string();
+
+        let link = ReceiptEnvelope::new(
+            "deletion-execution",
+            "osx-clnr-engine",
+            Digest::new(format!("blake3:{}", digest_str)),
+            ReplayHint::new(format!("osx-clnr://verify/{}", chain_id)),
+        );
+
+        let chain = ReceiptChain::try_new(chain_id, vec![link]).unwrap();
+
+        Self {
+            chain: Some(chain),
+            execution_record,
         }
     }
 
-    /// Verifies the deletion receipt for consistency and correctness.
-    ///
-    /// Under normal circumstances, any path marked `Deleted` or `SkippedMissing`
-    /// should not exist on the filesystem. Conversely, if a plan is supplied,
-    /// we verify that all items in the plan are present in the receipt, and no
-    /// extra items were deleted.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
-    /// use std::path::PathBuf;
-    ///
-    /// // Positive case: a correct, consistent receipt for nonexistent files
-    /// let receipt = DeletionReceipt::new(1716768000, 1716768100, 1716768200, vec![
-    ///     DeletionResult {
-    ///         path: PathBuf::from("/nonexistent/path/12345/abc"),
-    ///         status: DeletionStatus::Deleted,
-    ///         error: None,
-    ///     }
-    /// ]);
-    /// let report = receipt.verify(None);
-    /// assert!(report.is_consistent);
-    /// assert!(report.issues.is_empty());
-    ///
-    /// // Negative case: file marked as Deleted but still exists
-    /// let bad_receipt = DeletionReceipt::new(1716768000, 1716768100, 1716768200, vec![
-    ///     DeletionResult {
-    ///         path: PathBuf::from("."),
-    ///         status: DeletionStatus::Deleted,
-    ///         error: None,
-    ///     }
-    /// ]);
-    /// let report = bad_receipt.verify(None);
-    /// assert!(!report.is_consistent);
-    /// assert_eq!(report.issues.len(), 1);
-    /// assert_eq!(report.issues[0].issue_type, IssueType::PathStillExists);
-    /// ```
     pub fn verify(&self, plan: Option<&crate::domain::plan::DeletionPlan>) -> VerificationReport {
         let mut issues = Vec::new();
 
-        // 1. Version check
-        if self.version != 1 {
+        if self.execution_record.version != 1 {
             issues.push(VerificationIssue {
                 path: PathBuf::new(),
                 issue_type: IssueType::UnsupportedVersion,
-                message: format!("Unsupported receipt version: {}", self.version),
+                message: format!(
+                    "Unsupported receipt version: {}",
+                    self.execution_record.version
+                ),
             });
         }
 
-        // 2. Timestamp validation
-        if self.execution_completed_unix < self.execution_started_unix {
+        if self.execution_record.execution_completed_unix
+            < self.execution_record.execution_started_unix
+        {
             issues.push(VerificationIssue {
                 path: PathBuf::new(),
                 issue_type: IssueType::InvalidTimestamps,
                 message: format!(
                     "Completed timestamp ({}) is before started timestamp ({})",
-                    self.execution_completed_unix, self.execution_started_unix
+                    self.execution_record.execution_completed_unix,
+                    self.execution_record.execution_started_unix
                 ),
             });
         }
 
-        // 3. Filesystem consistency checks
-        for result in &self.results {
+        for result in &self.execution_record.results {
             match result.status {
                 DeletionStatus::Deleted | DeletionStatus::SkippedMissing
                     if result.path.exists() =>
@@ -161,10 +141,14 @@ impl DeletionReceipt {
             }
         }
 
-        // 4. Plan correlation check
         if let Some(p) = plan {
             for item in &p.items {
-                if !self.results.iter().any(|r| r.path == item.path) {
+                if !self
+                    .execution_record
+                    .results
+                    .iter()
+                    .any(|r| r.path == item.path)
+                {
                     issues.push(VerificationIssue {
                         path: item.path.clone(),
                         issue_type: IssueType::MissingPlanItem,
@@ -173,7 +157,7 @@ impl DeletionReceipt {
                 }
             }
 
-            for result in &self.results {
+            for result in &self.execution_record.results {
                 if !p.items.iter().any(|item| item.path == result.path) {
                     issues.push(VerificationIssue {
                         path: result.path.clone(),

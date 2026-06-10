@@ -357,9 +357,21 @@ pub fn build_tool_root_report(
             continue;
         }
 
-        let created = if created_val > 0 { Some(created_val) } else { None };
-        let accessed = if accessed_val > 0 { Some(accessed_val) } else { None };
-        let modified = if modified_val > 0 { Some(modified_val) } else { None };
+        let created = if created_val > 0 {
+            Some(created_val)
+        } else {
+            None
+        };
+        let accessed = if accessed_val > 0 {
+            Some(accessed_val)
+        } else {
+            None
+        };
+        let modified = if modified_val > 0 {
+            Some(modified_val)
+        } else {
+            None
+        };
         let changed = if ctime_val > 0 { Some(ctime_val) } else { None };
 
         let newest_descendant = acc.newest_mtime.load(Ordering::Relaxed);

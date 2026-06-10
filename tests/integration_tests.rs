@@ -8,11 +8,14 @@ use osx_clnr::domain::artifact::{
     artifact_candidates_from_snapshot, detect_project_from_snapshot, ArgsSnapshot, Candidate,
 };
 use osx_clnr::domain::audit::Stats;
-use osx_clnr::domain::delete::{validate_plan, validate_plan_item};
+use osx_clnr::domain::delete::{validate_plan_item, DeletionPlanAdjudicator, PlanSafetyWitness};
 use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
 use osx_clnr::domain::receipt::{DeletionReceipt, DeletionStatus};
 use osx_clnr::integration::fs::scan_root;
 use osx_clnr::integration::fs::{delete_dir_all, delete_file, read_dir_snapshot};
+use wasm4pm_compat::admission::Admit;
+use wasm4pm_compat::evidence::Evidence;
+use wasm4pm_compat::state::Raw;
 
 #[test]
 fn test_project_detection_and_candidates() {
@@ -78,7 +81,10 @@ fn test_plan_bound_deletion_validation() {
         kind: PlanItemKind::Dir,
         reason: "fake target".to_string(),
     });
-    assert!(validate_plan(&bad_plan).is_err());
+    assert!(
+        DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(bad_plan))
+            .is_err()
+    );
 }
 
 #[test]
@@ -147,7 +153,10 @@ fn test_end_to_end_artifact_scan_build_delete() {
     }
 
     let plan = DeletionPlan::new(vec![root.to_path_buf()], true, true, plan_items, vec![]);
-    assert!(validate_plan(&plan).is_ok());
+    assert!(
+        DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(plan.clone()))
+            .is_ok()
+    );
 
     // 4. Execute deletion strictly matching domain deletion rules
     let start_time = std::time::SystemTime::now()
@@ -203,9 +212,16 @@ fn test_end_to_end_artifact_scan_build_delete() {
         .unwrap_or_default()
         .as_secs();
 
-    let receipt = DeletionReceipt::new(plan.created_unix, start_time, end_time, results);
-    assert_eq!(receipt.results.len(), 2);
+    let receipt = DeletionReceipt::new(
+        "test-chain".to_string(),
+        plan.created_unix,
+        start_time,
+        end_time,
+        results,
+    );
+    assert_eq!(receipt.execution_record.results.len(), 2);
     assert!(receipt
+        .execution_record
         .results
         .iter()
         .all(|r| r.status == DeletionStatus::Deleted));
@@ -349,9 +365,7 @@ fn test_tool_root_recommendation_logic() {
 #[test]
 fn test_receipt_verification_and_plan_correlation() {
     use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-    use osx_clnr::domain::receipt::{
-        DeletionReceipt, DeletionResult, DeletionStatus, IssueType,
-    };
+    use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
     use std::fs;
 
     let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
@@ -373,6 +387,7 @@ fn test_receipt_verification_and_plan_correlation() {
     // 1. Consistent receipt case: file is deleted (doesn't exist)
     fs::remove_file(&file_to_delete).unwrap();
     let consistent_receipt = DeletionReceipt::new(
+        "test-chain-1".to_string(),
         plan.created_unix,
         1716768000,
         1716768100,
@@ -397,6 +412,7 @@ fn test_receipt_verification_and_plan_correlation() {
     // 3. Plan mismatch case: extra receipt item not in plan
     fs::remove_file(&file_to_delete).unwrap();
     let mismatched_receipt = DeletionReceipt::new(
+        "test-chain-2".to_string(),
         plan.created_unix,
         1716768000,
         1716768100,
@@ -424,14 +440,15 @@ fn test_receipt_verification_and_plan_correlation() {
 #[test]
 fn test_ocel_validation_and_summarization() {
     use osx_clnr::domain::ocel::{
-        build_tool_roots_ocel, summarize_ocel_log, validate_ocel_log, OcelRelationship,
+        build_tool_roots_ocel, summarize_ocel_log, OCELRelationship, OcelLogAdjudicator,
     };
+    use wasm4pm_compat::admission::Admit;
+    use wasm4pm_compat::evidence::Evidence;
 
     // 1. Valid empty log
     let log = build_tool_roots_ocel(&[]);
-    let report = validate_ocel_log(&log);
-    assert!(report.is_valid);
-    assert!(report.errors.is_empty());
+    let report = OcelLogAdjudicator::admit(Evidence::raw(log.clone()));
+    assert!(report.is_ok());
 
     let summary = summarize_ocel_log(&log);
     assert_eq!(summary.total_events, 1);
@@ -440,33 +457,35 @@ fn test_ocel_validation_and_summarization() {
     // 2. Schema violation - undefined event type
     let mut invalid_log = log.clone();
     invalid_log.events[0].event_type = "non_existent_event_type".to_string();
-    let report2 = validate_ocel_log(&invalid_log);
-    assert!(!report2.is_valid);
+    let report2 = OcelLogAdjudicator::admit(Evidence::raw(invalid_log));
+    assert!(report2.is_err());
     assert!(report2
-        .errors
-        .iter()
-        .any(|e| e.contains("is not defined in eventTypes schema")));
+        .unwrap_err()
+        .reason
+        .contains("is not defined in eventTypes schema"));
 
     // 3. Referential integrity violation - dangling object reference
     let mut invalid_log2 = log.clone();
-    invalid_log2.events[0].relationships.push(OcelRelationship {
+    invalid_log2.events[0].relationships.push(OCELRelationship {
         object_id: "non_existent_object_id".to_string(),
         qualifier: "test-ref".to_string(),
     });
-    let report3 = validate_ocel_log(&invalid_log2);
-    assert!(!report3.is_valid);
+    let report3 = OcelLogAdjudicator::admit(Evidence::raw(invalid_log2));
+    assert!(report3.is_err());
     assert!(report3
-        .errors
-        .iter()
-        .any(|e| e.contains("pointing to non-existent object")));
+        .unwrap_err()
+        .reason
+        .contains("pointing to non-existent object"));
 }
 
 #[test]
 fn test_snapshot_and_exclusion_ocel_generation() {
     use osx_clnr::domain::ocel::{
         build_exclusion_plan_ocel, build_snapshot_audit_ocel, build_snapshot_thin_ocel,
-        validate_ocel_log,
+        OcelLogAdjudicator,
     };
+    use wasm4pm_compat::admission::Admit;
+    use wasm4pm_compat::evidence::Evidence;
 
     // Test snapshot audit OCEL
     let audit_log = build_snapshot_audit_ocel(
@@ -478,12 +497,14 @@ fn test_snapshot_and_exclusion_ocel_generation() {
         "AUDIT_LOG_JSON: {}",
         serde_json::to_string_pretty(&audit_log).unwrap()
     );
-    let audit_report = validate_ocel_log(&audit_log);
-    if !audit_report.is_valid {
-        println!("OCEL Validation Errors: {:?}", audit_report.errors);
+    let audit_report = OcelLogAdjudicator::admit(Evidence::raw(audit_log.clone()));
+    if audit_report.is_err() {
+        println!(
+            "OCEL Validation Errors: {:?}",
+            audit_report.as_ref().err().unwrap().reason
+        );
     }
-    assert!(audit_report.is_valid);
-    assert!(audit_report.errors.is_empty());
+    assert!(audit_report.is_ok());
     assert_eq!(audit_log.objects[0].object_type, "snapshot_state");
     assert_eq!(audit_log.events[0].event_type, "snapshot_state_observed");
 
@@ -495,17 +516,15 @@ fn test_snapshot_and_exclusion_ocel_generation() {
         &["snap2".to_string()],
         &["snap1".to_string()],
     );
-    let thin_report = validate_ocel_log(&thin_log);
-    assert!(thin_report.is_valid);
-    assert!(thin_report.errors.is_empty());
+    let thin_report = OcelLogAdjudicator::admit(Evidence::raw(thin_log.clone()));
+    assert!(thin_report.is_ok());
     assert_eq!(thin_log.objects[0].object_type, "snapshot_state");
     assert_eq!(thin_log.events[0].event_type, "snapshot_thin_requested");
 
     // Test exclusion plan OCEL
     let exclusion_log = build_exclusion_plan_ocel("/Users/user/tm-exclusions.sh", 3);
-    let exclusion_report = validate_ocel_log(&exclusion_log);
-    assert!(exclusion_report.is_valid);
-    assert!(exclusion_report.errors.is_empty());
+    let exclusion_report = OcelLogAdjudicator::admit(Evidence::raw(exclusion_log.clone()));
+    assert!(exclusion_report.is_ok());
     assert_eq!(exclusion_log.objects[0].object_type, "tm_exclusion_plan");
     assert_eq!(
         exclusion_log.events[0].event_type,
@@ -611,25 +630,25 @@ fn test_privacy_subcommands() {
 fn test_traversal_barriers() {
     let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
     let root = tmp.path();
-    
+
     // Create a mock directory with node_modules and a nested project structure inside it
     let node_modules_dir = root.join("node_modules");
     let nested_dist = node_modules_dir.join("nested-pkg/dist");
     fs::create_dir_all(&nested_dist).unwrap();
     fs::write(nested_dist.join("index.js"), "console.log('test')").unwrap();
-    
+
     let args = ArgsSnapshot {
         deps: true,
         aggressive: false,
         verbose: false,
         tool_roots: false,
     };
-    
+
     let candidates = Arc::new(Mutex::new(BTreeSet::new()));
     let stats = Arc::new(Stats::default());
     let tool_defs = vec![];
     let tool_accs = Arc::new(DashMap::new());
-    
+
     scan_root(
         root,
         &args,
@@ -637,9 +656,13 @@ fn test_traversal_barriers() {
         stats.clone(),
         &tool_defs,
         tool_accs,
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     // Traversal should stop at node_modules and NOT enter nested-pkg/dist
     let pruned = stats.pruned_dirs.load(std::sync::atomic::Ordering::Relaxed);
-    assert!(pruned >= 1, "Expected traversal barrier to prune node_modules");
+    assert!(
+        pruned >= 1,
+        "Expected traversal barrier to prune node_modules"
+    );
 }

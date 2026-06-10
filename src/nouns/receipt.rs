@@ -71,39 +71,61 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
             println!("\n==================================================");
             println!("             DELETION RECEIPT SUMMARY             ");
             println!("==================================================");
-            println!("  Receipt Version:   {}", receipt_data.version);
+            println!(
+                "  Receipt Version:   {}",
+                receipt_data.execution_record.version
+            );
             println!(
                 "  Plan Created:      {}",
-                chrono::DateTime::from_timestamp(receipt_data.plan_created_unix as i64, 0)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_else(|| receipt_data.plan_created_unix.to_string())
+                chrono::DateTime::from_timestamp(
+                    receipt_data.execution_record.plan_created_unix as i64,
+                    0
+                )
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| receipt_data.execution_record.plan_created_unix.to_string())
             );
             println!(
                 "  Execution Started: {}",
-                chrono::DateTime::from_timestamp(receipt_data.execution_started_unix as i64, 0)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_else(|| receipt_data.execution_started_unix.to_string())
+                chrono::DateTime::from_timestamp(
+                    receipt_data.execution_record.execution_started_unix as i64,
+                    0
+                )
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| receipt_data
+                    .execution_record
+                    .execution_started_unix
+                    .to_string())
             );
             println!(
                 "  Execution Ended:   {}",
-                chrono::DateTime::from_timestamp(receipt_data.execution_completed_unix as i64, 0)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_else(|| receipt_data.execution_completed_unix.to_string())
+                chrono::DateTime::from_timestamp(
+                    receipt_data.execution_record.execution_completed_unix as i64,
+                    0
+                )
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| receipt_data
+                    .execution_record
+                    .execution_completed_unix
+                    .to_string())
             );
             println!(
                 "  Elapsed Time:      {} seconds",
                 receipt_data
+                    .execution_record
                     .execution_completed_unix
-                    .saturating_sub(receipt_data.execution_started_unix)
+                    .saturating_sub(receipt_data.execution_record.execution_started_unix)
             );
-            println!("  Total Items:       {}", receipt_data.results.len());
+            println!(
+                "  Total Items:       {}",
+                receipt_data.execution_record.results.len()
+            );
 
             let mut deleted = 0;
             let mut skipped = 0;
             let mut failed = 0;
             let mut refused = 0;
 
-            for r in &receipt_data.results {
+            for r in &receipt_data.execution_record.results {
                 match r.status {
                     crate::domain::receipt::DeletionStatus::Deleted => deleted += 1,
                     crate::domain::receipt::DeletionStatus::SkippedMissing => skipped += 1,

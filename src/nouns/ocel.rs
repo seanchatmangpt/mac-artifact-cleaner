@@ -1,8 +1,11 @@
 //! OCEL v2 CLI noun implementation.
 
-use crate::domain::ocel::{summarize_ocel_log, validate_ocel_log, OCEL};
+use crate::domain::ocel::{summarize_ocel_log, OcelLogAdjudicator};
 use clap::Subcommand;
 use std::path::PathBuf;
+use wasm4pm_compat::admission::Admit;
+use wasm4pm_compat::evidence::Evidence;
+use wasm4pm_compat::ocel::OCEL;
 
 #[derive(Subcommand, Debug)]
 pub enum OcelAction {
@@ -28,15 +31,16 @@ pub fn handle(action: OcelAction) -> anyhow::Result<()> {
             let ocel_log: OCEL = serde_json::from_str(&content)?;
 
             println!("Validating OCEL log...");
-            let report = validate_ocel_log(&ocel_log);
-            if report.is_valid {
-                println!("✅ OCEL log is structurally valid!");
-            } else {
-                println!("❌ OCEL log has validation errors:");
-                for err in &report.errors {
-                    println!("  - {}", err);
+            let raw_evidence = Evidence::raw(ocel_log);
+            match OcelLogAdjudicator::admit(raw_evidence) {
+                Ok(_admitted) => {
+                    println!("✅ OCEL log is structurally valid!");
                 }
-                anyhow::bail!("OCEL validation failed");
+                Err(refusal) => {
+                    println!("❌ OCEL log has validation errors:");
+                    println!("  - {}", refusal.reason);
+                    anyhow::bail!("OCEL validation failed");
+                }
             }
         }
         OcelAction::Summarize { log } => {

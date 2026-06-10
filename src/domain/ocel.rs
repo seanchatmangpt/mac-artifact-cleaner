@@ -1,71 +1,9 @@
 //! Object-Centric Event Log (OCEL v2) exporter.
 
 use crate::domain::tool_roots::ToolRootReport;
+use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OCEL {
-    #[serde(rename = "eventTypes")]
-    pub event_types: Vec<OcelTypeDef>,
-
-    #[serde(rename = "objectTypes")]
-    pub object_types: Vec<OcelTypeDef>,
-
-    pub events: Vec<OCELEvent>,
-    pub objects: Vec<OCELObject>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OcelTypeDef {
-    pub name: String,
-    pub attributes: Vec<OCELEventAttributeDef>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OCELEventAttributeDef {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub attr_type: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OCELEvent {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub event_type: String,
-    pub time: String,
-    pub attributes: Vec<OCELEventAttributeValue>,
-    pub relationships: Vec<OcelRelationship>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OCELObject {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub object_type: String,
-    pub attributes: Vec<OcelTimedAttributeValue>,
-    pub relationships: Vec<OcelRelationship>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OCELEventAttributeValue {
-    pub name: String,
-    pub value: serde_json::Value,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OcelTimedAttributeValue {
-    pub name: String,
-    pub time: String,
-    pub value: serde_json::Value,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OcelRelationship {
-    #[serde(rename = "objectId")]
-    pub object_id: String,
-    pub qualifier: String,
-}
+pub use wasm4pm_compat::ocel::*;
 
 /// Builds an OCEL log structure for the collected tool roots.
 ///
@@ -80,7 +18,7 @@ pub struct OcelRelationship {
 /// assert_eq!(log.objects[0].object_type, "disk_audit");
 /// ```
 pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
     let mut objects = Vec::new();
     let mut events = Vec::new();
     let audit_obj_id = format!("audit-{}", chrono::Utc::now().timestamp());
@@ -88,23 +26,20 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
     objects.push(OCELObject {
         id: audit_obj_id.clone(),
         object_type: "disk_audit".to_string(),
-        attributes: vec![OcelTimedAttributeValue {
-            name: "created_at".to_string(),
-            time: now.clone(),
-            value: serde_json::json!(now),
-        }],
+        attributes: vec![timed_attr(
+            "created_at",
+            &now,
+            serde_json::json!(now.to_rfc3339()),
+        )],
         relationships: vec![],
     });
 
     events.push(OCELEvent {
         id: format!("event-audit-started-{}", chrono::Utc::now().timestamp()),
         event_type: "disk_audit_started".to_string(),
-        time: now.clone(),
-        attributes: vec![OCELEventAttributeValue {
-            name: "tool".to_string(),
-            value: serde_json::json!("mac-disk-auditor"),
-        }],
-        relationships: vec![OcelRelationship {
+        time: now,
+        attributes: vec![attr("tool", serde_json::json!("mac-disk-auditor"))],
+        relationships: vec![OCELRelationship {
             object_id: audit_obj_id.clone(),
             qualifier: "audit-run".to_string(),
         }],
@@ -112,7 +47,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
 
     for (idx, root) in tool_roots.iter().enumerate() {
         let object_id = stable_object_id("tool-root", &root.path);
-        let observed_time = unix_to_rfc3339(root.newest_descendant_modified_unix);
+        let observed_time = unix_to_datetime(root.newest_descendant_modified_unix);
 
         objects.push(OCELObject {
             id: object_id.clone(),
@@ -160,7 +95,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
                     serde_json::json!(root.rationale),
                 ),
             ],
-            relationships: vec![OcelRelationship {
+            relationships: vec![OCELRelationship {
                 object_id: audit_obj_id.clone(),
                 qualifier: "observed-in".to_string(),
             }],
@@ -180,11 +115,11 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
                 attr("rationale", serde_json::json!(root.rationale)),
             ],
             relationships: vec![
-                OcelRelationship {
+                OCELRelationship {
                     object_id: audit_obj_id.clone(),
                     qualifier: "audit-run".to_string(),
                 },
-                OcelRelationship {
+                OCELRelationship {
                     object_id: object_id.clone(),
                     qualifier: "observed-tool-root".to_string(),
                 },
@@ -198,18 +133,18 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
             events.push(OCELEvent {
                 id: format!("event-tool-root-review-proposed-{:06}", idx),
                 event_type: "tool_root_review_proposed".to_string(),
-                time: now.clone(),
+                time: now,
                 attributes: vec![
                     attr("path", serde_json::json!(root.path)),
                     attr("recommendation", serde_json::json!(root.recommendation)),
                     attr("rationale", serde_json::json!(root.rationale)),
                 ],
                 relationships: vec![
-                    OcelRelationship {
+                    OCELRelationship {
                         object_id: audit_obj_id.clone(),
                         qualifier: "audit-run".to_string(),
                     },
-                    OcelRelationship {
+                    OCELRelationship {
                         object_id,
                         qualifier: "review-target".to_string(),
                     },
@@ -220,11 +155,11 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
 
     OCEL {
         event_types: vec![
-            OcelTypeDef {
+            OCELType {
                 name: "disk_audit_started".to_string(),
                 attributes: vec![attr_def("tool", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "tool_root_observed".to_string(),
                 attributes: vec![
                     attr_def("path", "string"),
@@ -236,7 +171,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
                     attr_def("rationale", "string"),
                 ],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "tool_root_review_proposed".to_string(),
                 attributes: vec![
                     attr_def("path", "string"),
@@ -246,11 +181,11 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
             },
         ],
         object_types: vec![
-            OcelTypeDef {
+            OCELType {
                 name: "disk_audit".to_string(),
                 attributes: vec![attr_def("created_at", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "tool_root".to_string(),
                 attributes: vec![
                     attr_def("path", "string"),
@@ -280,32 +215,59 @@ fn stable_object_id(prefix: &str, path: &str) -> String {
     format!("{}-{}", prefix, safe)
 }
 
-fn unix_to_rfc3339(t: Option<i64>) -> String {
+fn unix_to_datetime(t: Option<i64>) -> DateTime<FixedOffset> {
     let ts = t.unwrap_or_else(|| chrono::Utc::now().timestamp());
     chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
         .unwrap_or_else(chrono::Utc::now)
-        .to_rfc3339()
+        .with_timezone(&chrono::FixedOffset::east_opt(0).unwrap())
 }
 
-fn attr(name: &str, value: serde_json::Value) -> OCELEventAttributeValue {
-    OCELEventAttributeValue {
-        name: name.to_string(),
-        value,
+fn value_to_ocel(val: serde_json::Value) -> OCELAttributeValue {
+    match val {
+        serde_json::Value::String(s) => OCELAttributeValue::String(s),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                OCELAttributeValue::Integer(i)
+            } else if let Some(f) = n.as_f64() {
+                OCELAttributeValue::Float(f)
+            } else {
+                OCELAttributeValue::Null
+            }
+        }
+        serde_json::Value::Bool(b) => OCELAttributeValue::Boolean(b),
+        serde_json::Value::Array(a) => {
+            OCELAttributeValue::String(serde_json::to_string(&a).unwrap_or_default())
+        }
+        serde_json::Value::Object(o) => {
+            OCELAttributeValue::String(serde_json::to_string(&o).unwrap_or_default())
+        }
+        _ => OCELAttributeValue::Null,
     }
 }
 
-fn timed_attr(name: &str, time: &str, value: serde_json::Value) -> OcelTimedAttributeValue {
-    OcelTimedAttributeValue {
+fn attr(name: &str, value: serde_json::Value) -> OCELEventAttribute {
+    OCELEventAttribute {
         name: name.to_string(),
-        time: time.to_string(),
-        value,
+        value: value_to_ocel(value),
     }
 }
 
-fn attr_def(name: &str, attr_type: &str) -> OCELEventAttributeDef {
-    OCELEventAttributeDef {
+fn timed_attr(
+    name: &str,
+    time: &DateTime<FixedOffset>,
+    value: serde_json::Value,
+) -> OCELObjectAttribute {
+    OCELObjectAttribute {
         name: name.to_string(),
-        attr_type: attr_type.to_string(),
+        time: *time,
+        value: value_to_ocel(value),
+    }
+}
+
+fn attr_def(name: &str, value_type: &str) -> OCELTypeAttribute {
+    OCELTypeAttribute {
+        name: name.to_string(),
+        value_type: value_type.to_string(),
     }
 }
 
@@ -341,7 +303,7 @@ pub fn build_disk_audit_ocel(
     tool_roots: &[crate::domain::tool_roots::ToolRootReport],
     stats: &crate::domain::audit::Stats,
 ) -> OCEL {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
     let audit_obj_id = format!("audit-{}", chrono::Utc::now().timestamp());
 
     let mut objects = Vec::new();
@@ -380,9 +342,9 @@ pub fn build_disk_audit_ocel(
     events.push(OCELEvent {
         id: format!("event-audit-started-{}", chrono::Utc::now().timestamp()),
         event_type: "disk_audit_started".to_string(),
-        time: now.clone(),
+        time: now,
         attributes: vec![attr("tool", serde_json::json!("osx-clnr"))],
-        relationships: vec![OcelRelationship {
+        relationships: vec![OCELRelationship {
             object_id: audit_obj_id.clone(),
             qualifier: "audit-run".to_string(),
         }],
@@ -397,7 +359,7 @@ pub fn build_disk_audit_ocel(
             id: root_obj_id.clone(),
             object_type: "scan_root".to_string(),
             attributes: vec![timed_attr("path", &now, serde_json::json!(r_str))],
-            relationships: vec![OcelRelationship {
+            relationships: vec![OCELRelationship {
                 object_id: audit_obj_id.clone(),
                 qualifier: "root-of-audit".to_string(),
             }],
@@ -406,14 +368,14 @@ pub fn build_disk_audit_ocel(
         events.push(OCELEvent {
             id: format!("event-scan-root-started-{}", idx),
             event_type: "scan_root_started".to_string(),
-            time: now.clone(),
+            time: now,
             attributes: vec![attr("path", serde_json::json!(r_str))],
             relationships: vec![
-                OcelRelationship {
+                OCELRelationship {
                     object_id: audit_obj_id.clone(),
                     qualifier: "audit-run".to_string(),
                 },
-                OcelRelationship {
+                OCELRelationship {
                     object_id: root_obj_id.clone(),
                     qualifier: "started-root".to_string(),
                 },
@@ -439,7 +401,7 @@ pub fn build_disk_audit_ocel(
                 timed_attr("path", &now, serde_json::json!(path_str)),
                 timed_attr("kind", &now, serde_json::json!(kind)),
             ],
-            relationships: vec![OcelRelationship {
+            relationships: vec![OCELRelationship {
                 object_id: audit_obj_id.clone(),
                 qualifier: "observed-in-audit".to_string(),
             }],
@@ -452,7 +414,7 @@ pub fn build_disk_audit_ocel(
                 timed_attr("path", &now, serde_json::json!(path_str)),
                 timed_attr("reason", &now, serde_json::json!(c.reason)),
             ],
-            relationships: vec![OcelRelationship {
+            relationships: vec![OCELRelationship {
                 object_id: fs_obj_id.clone(),
                 qualifier: "corresponds-to-fs-obj".to_string(),
             }],
@@ -461,17 +423,17 @@ pub fn build_disk_audit_ocel(
         events.push(OCELEvent {
             id: format!("event-fs-observed-{:06}", idx),
             event_type: "filesystem_object_observed".to_string(),
-            time: now.clone(),
+            time: now,
             attributes: vec![
                 attr("path", serde_json::json!(path_str)),
                 attr("kind", serde_json::json!(kind)),
             ],
             relationships: vec![
-                OcelRelationship {
+                OCELRelationship {
                     object_id: audit_obj_id.clone(),
                     qualifier: "audit-run".to_string(),
                 },
-                OcelRelationship {
+                OCELRelationship {
                     object_id: fs_obj_id.clone(),
                     qualifier: "observed-object".to_string(),
                 },
@@ -481,21 +443,21 @@ pub fn build_disk_audit_ocel(
         events.push(OCELEvent {
             id: format!("event-candidate-proposed-{:06}", idx),
             event_type: "artifact_candidate_proposed".to_string(),
-            time: now.clone(),
+            time: now,
             attributes: vec![
                 attr("path", serde_json::json!(path_str)),
                 attr("reason", serde_json::json!(c.reason)),
             ],
             relationships: vec![
-                OcelRelationship {
+                OCELRelationship {
                     object_id: audit_obj_id.clone(),
                     qualifier: "audit-run".to_string(),
                 },
-                OcelRelationship {
+                OCELRelationship {
                     object_id: cand_obj_id.clone(),
                     qualifier: "proposed-candidate".to_string(),
                 },
-                OcelRelationship {
+                OCELRelationship {
                     object_id: fs_obj_id.clone(),
                     qualifier: "targets-fs-object".to_string(),
                 },
@@ -518,7 +480,7 @@ pub fn build_disk_audit_ocel(
                 timed_attr("files", &now, serde_json::json!(tr.files)),
                 timed_attr("dirs", &now, serde_json::json!(tr.dirs)),
             ],
-            relationships: vec![OcelRelationship {
+            relationships: vec![OCELRelationship {
                 object_id: audit_obj_id.clone(),
                 qualifier: "tool-root-of-audit".to_string(),
             }],
@@ -527,18 +489,18 @@ pub fn build_disk_audit_ocel(
         events.push(OCELEvent {
             id: format!("event-tool-root-observed-{:06}", idx),
             event_type: "tool_root_observed".to_string(),
-            time: now.clone(),
+            time: now,
             attributes: vec![
                 attr("path", serde_json::json!(tr.path)),
                 attr("category", serde_json::json!(tr.category)),
                 attr("bytes", serde_json::json!(tr.bytes)),
             ],
             relationships: vec![
-                OcelRelationship {
+                OCELRelationship {
                     object_id: audit_obj_id.clone(),
                     qualifier: "audit-run".to_string(),
                 },
-                OcelRelationship {
+                OCELRelationship {
                     object_id: tr_obj_id.clone(),
                     qualifier: "observed-tool-root".to_string(),
                 },
@@ -548,23 +510,23 @@ pub fn build_disk_audit_ocel(
 
     OCEL {
         event_types: vec![
-            OcelTypeDef {
+            OCELType {
                 name: "disk_audit_started".to_string(),
                 attributes: vec![attr_def("tool", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "scan_root_started".to_string(),
                 attributes: vec![attr_def("path", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "filesystem_object_observed".to_string(),
                 attributes: vec![attr_def("path", "string"), attr_def("kind", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "artifact_candidate_proposed".to_string(),
                 attributes: vec![attr_def("path", "string"), attr_def("reason", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "tool_root_observed".to_string(),
                 attributes: vec![
                     attr_def("path", "string"),
@@ -574,7 +536,7 @@ pub fn build_disk_audit_ocel(
             },
         ],
         object_types: vec![
-            OcelTypeDef {
+            OCELType {
                 name: "disk_audit".to_string(),
                 attributes: vec![
                     attr_def("created_at", "string"),
@@ -587,19 +549,19 @@ pub fn build_disk_audit_ocel(
                     attr_def("errors", "integer"),
                 ],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "scan_root".to_string(),
                 attributes: vec![attr_def("path", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "filesystem_object".to_string(),
                 attributes: vec![attr_def("path", "string"), attr_def("kind", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "artifact_candidate".to_string(),
                 attributes: vec![attr_def("path", "string"), attr_def("reason", "string")],
             },
-            OcelTypeDef {
+            OCELType {
                 name: "tool_root".to_string(),
                 attributes: vec![
                     attr_def("path", "string"),
@@ -629,7 +591,7 @@ pub fn build_disk_audit_ocel(
 /// assert_eq!(log.events[0].event_type, "snapshot_state_observed");
 /// ```
 pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OCEL {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
     let state_obj_id = format!("snapshot-state-{}", chrono::Utc::now().timestamp());
 
     let mut objects = Vec::new();
@@ -653,26 +615,26 @@ pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OCEL {
     events.push(OCELEvent {
         id: format!("event-snapshot-observed-{}", chrono::Utc::now().timestamp()),
         event_type: "snapshot_state_observed".to_string(),
-        time: now.clone(),
+        time: now,
         attributes: vec![
             attr("volume", serde_json::json!(volume)),
             attr("snapshot_count", serde_json::json!(snapshots.len() as i64)),
         ],
-        relationships: vec![OcelRelationship {
+        relationships: vec![OCELRelationship {
             object_id: state_obj_id,
             qualifier: "observed-state".to_string(),
         }],
     });
 
     OCEL {
-        event_types: vec![OcelTypeDef {
+        event_types: vec![OCELType {
             name: "snapshot_state_observed".to_string(),
             attributes: vec![
                 attr_def("volume", "string"),
                 attr_def("snapshot_count", "integer"),
             ],
         }],
-        object_types: vec![OcelTypeDef {
+        object_types: vec![OCELType {
             name: "snapshot_state".to_string(),
             attributes: vec![
                 attr_def("volume", "string"),
@@ -704,7 +666,7 @@ pub fn build_snapshot_thin_ocel(
     after: &[String],
     thinned: &[String],
 ) -> OCEL {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
     let state_obj_id = format!("snapshot-state-{}", chrono::Utc::now().timestamp());
 
     let mut objects = Vec::new();
@@ -728,7 +690,7 @@ pub fn build_snapshot_thin_ocel(
     events.push(OCELEvent {
         id: format!("event-snapshot-thin-{}", chrono::Utc::now().timestamp()),
         event_type: "snapshot_thin_requested".to_string(),
-        time: now.clone(),
+        time: now,
         attributes: vec![
             attr("volume", serde_json::json!(volume)),
             attr("requested_bytes", serde_json::json!(requested_bytes as i64)),
@@ -742,14 +704,14 @@ pub fn build_snapshot_thin_ocel(
             ),
             attr("thinned_count", serde_json::json!(thinned.len() as i64)),
         ],
-        relationships: vec![OcelRelationship {
+        relationships: vec![OCELRelationship {
             object_id: state_obj_id,
             qualifier: "resulting-state".to_string(),
         }],
     });
 
     OCEL {
-        event_types: vec![OcelTypeDef {
+        event_types: vec![OCELType {
             name: "snapshot_thin_requested".to_string(),
             attributes: vec![
                 attr_def("volume", "string"),
@@ -759,7 +721,7 @@ pub fn build_snapshot_thin_ocel(
                 attr_def("thinned_count", "integer"),
             ],
         }],
-        object_types: vec![OcelTypeDef {
+        object_types: vec![OCELType {
             name: "snapshot_state".to_string(),
             attributes: vec![
                 attr_def("volume", "string"),
@@ -785,7 +747,7 @@ pub fn build_snapshot_thin_ocel(
 /// assert_eq!(log.events[0].event_type, "tm_exclusion_plan_written");
 /// ```
 pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> OCEL {
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
     let plan_obj_id = format!("tm-exclusion-plan-{}", chrono::Utc::now().timestamp());
 
     let mut objects = Vec::new();
@@ -808,26 +770,26 @@ pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> O
     events.push(OCELEvent {
         id: format!("event-exclusion-written-{}", chrono::Utc::now().timestamp()),
         event_type: "tm_exclusion_plan_written".to_string(),
-        time: now.clone(),
+        time: now,
         attributes: vec![
             attr("script_path", serde_json::json!(script_path)),
             attr("candidate_count", serde_json::json!(candidate_count as i64)),
         ],
-        relationships: vec![OcelRelationship {
+        relationships: vec![OCELRelationship {
             object_id: plan_obj_id,
             qualifier: "written-plan".to_string(),
         }],
     });
 
     OCEL {
-        event_types: vec![OcelTypeDef {
+        event_types: vec![OCELType {
             name: "tm_exclusion_plan_written".to_string(),
             attributes: vec![
                 attr_def("script_path", "string"),
                 attr_def("candidate_count", "integer"),
             ],
         }],
-        object_types: vec![OcelTypeDef {
+        object_types: vec![OCELType {
             name: "tm_exclusion_plan".to_string(),
             attributes: vec![
                 attr_def("script_path", "string"),
@@ -839,11 +801,7 @@ pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> O
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OcelValidationReport {
-    pub is_valid: bool,
-    pub errors: Vec<String>,
-}
+// OcelValidationReport replaced by wasm4pm_compat::admission::Admit trait.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditSummaryStats {
@@ -866,13 +824,16 @@ pub struct OcelSummary {
     pub audit_stats: Vec<AuditSummaryStats>,
 }
 
-fn val_matches_type(val: &serde_json::Value, type_str: &str) -> bool {
+fn val_matches_type(val: &OCELAttributeValue, type_str: &str) -> bool {
     match type_str {
-        "string" => val.is_string() || val.is_array(),
-        "integer" => val.is_i64() || val.is_u64(),
-        "float" | "number" => val.is_number(),
-        "boolean" => val.is_boolean(),
-        "array" => val.is_array(),
+        "string" => matches!(val, OCELAttributeValue::String(_)),
+        "integer" => matches!(val, OCELAttributeValue::Integer(_)),
+        "float" | "number" => matches!(
+            val,
+            OCELAttributeValue::Float(_) | OCELAttributeValue::Integer(_)
+        ),
+        "boolean" => matches!(val, OCELAttributeValue::Boolean(_)),
+        "array" => matches!(val, OCELAttributeValue::String(_)),
         _ => true,
     }
 }
@@ -882,247 +843,266 @@ fn val_matches_type(val: &serde_json::Value, type_str: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use osx_clnr::domain::ocel::{build_tool_roots_ocel, validate_ocel_log};
+/// use osx_clnr::domain::ocel::{build_tool_roots_ocel, OcelLogAdjudicator};
+/// use wasm4pm_compat::admission::Admit;
+/// use wasm4pm_compat::evidence::Evidence;
 ///
 /// // Positive case: validation succeeds for standard empty audit log
 /// let log = build_tool_roots_ocel(&[]);
-/// let report = validate_ocel_log(&log);
-/// assert!(report.is_valid);
-/// assert!(report.errors.is_empty());
+/// let report = OcelLogAdjudicator::admit(Evidence::raw(log));
+/// assert!(report.is_ok());
 ///
 /// // Refusal/Negative case: validation fails if an event type is undefined
-/// let mut bad_log = log;
+/// let mut bad_log = build_tool_roots_ocel(&[]);
 /// bad_log.events[0].event_type = "invalid_event_type".to_string();
-/// let report = validate_ocel_log(&bad_log);
-/// assert!(!report.is_valid);
-/// assert!(!report.errors.is_empty());
+/// let report = OcelLogAdjudicator::admit(Evidence::raw(bad_log));
+/// assert!(report.is_err());
 /// ```
-pub fn validate_ocel_log(log: &OCEL) -> OcelValidationReport {
-    let mut errors = Vec::new();
+use wasm4pm_compat::admission::{Admission, Admit, Refusal};
+use wasm4pm_compat::evidence::Evidence;
+use wasm4pm_compat::state::Raw;
+use wasm4pm_compat::witness::Ocel20;
 
-    let event_schema: std::collections::HashMap<&str, &OcelTypeDef> = log
-        .event_types
-        .iter()
-        .map(|t| (t.name.as_str(), t))
-        .collect();
-    let object_schema: std::collections::HashMap<&str, &OcelTypeDef> = log
-        .object_types
-        .iter()
-        .map(|t| (t.name.as_str(), t))
-        .collect();
+pub struct OcelLogAdjudicator;
 
-    let mut object_map = std::collections::HashMap::new();
-    for obj in &log.objects {
-        object_map.insert(obj.id.as_str(), obj.object_type.as_str());
-    }
+impl Admit for OcelLogAdjudicator {
+    type Raw = OCEL;
+    type Admitted = OCEL;
+    type Reason = String;
+    type Witness = Ocel20;
 
-    // Validate events
-    for event in &log.events {
-        let schema = match event_schema.get(event.event_type.as_str()) {
-            Some(s) => s,
-            None => {
-                errors.push(format!(
-                    "Event '{}' has type '{}' which is not defined in eventTypes schema",
-                    event.id, event.event_type
-                ));
-                continue;
-            }
-        };
+    fn admit(
+        raw: Evidence<Self::Raw, Raw, Self::Witness>,
+    ) -> Result<Admission<Self::Admitted, Self::Witness>, Refusal<Self::Reason, Self::Witness>>
+    {
+        let log = &raw.value;
+        let mut errors = Vec::new();
 
-        for attr in &event.attributes {
-            let attr_def = schema.attributes.iter().find(|a| a.name == attr.name);
-            match attr_def {
+        let event_schema: std::collections::HashMap<&str, &OCELType> = log
+            .event_types
+            .iter()
+            .map(|t| (t.name.as_str(), t))
+            .collect();
+        let object_schema: std::collections::HashMap<&str, &OCELType> = log
+            .object_types
+            .iter()
+            .map(|t| (t.name.as_str(), t))
+            .collect();
+
+        let mut object_map = std::collections::HashMap::new();
+        for obj in &log.objects {
+            object_map.insert(obj.id.as_str(), obj.object_type.as_str());
+        }
+
+        // Validate events
+        for event in &log.events {
+            let schema = match event_schema.get(event.event_type.as_str()) {
+                Some(s) => s,
                 None => {
                     errors.push(format!(
+                        "Event '{}' has type '{}' which is not defined in eventTypes schema",
+                        event.id, event.event_type
+                    ));
+                    continue;
+                }
+            };
+
+            for attr in &event.attributes {
+                let attr_def = schema.attributes.iter().find(|a| a.name == attr.name);
+                match attr_def {
+                    None => {
+                        errors.push(format!(
                         "Event '{}' has attribute '{}' not defined in schema for event type '{}'",
                         event.id, attr.name, event.event_type
                     ));
-                }
-                Some(def) => {
-                    if !val_matches_type(&attr.value, &def.attr_type) {
-                        errors.push(format!(
+                    }
+                    Some(def) => {
+                        if !val_matches_type(&attr.value, &def.value_type) {
+                            errors.push(format!(
                             "Event '{}' attribute '{}' has value '{:?}' which does not match defined type '{}'",
-                            event.id, attr.name, attr.value, def.attr_type
+                            event.id, attr.name, attr.value, def.value_type
                         ));
+                        }
                     }
                 }
             }
-        }
-
-        for rel in &event.relationships {
-            if !object_map.contains_key(rel.object_id.as_str()) {
-                errors.push(format!(
-                    "Event '{}' has relationship pointing to non-existent object '{}'",
-                    event.id, rel.object_id
-                ));
-            }
-        }
-
-        // Delete event relationship checks
-        let is_delete_event = matches!(
-            event.event_type.as_str(),
-            "artifact_deleted"
-                | "artifact_delete_skipped"
-                | "artifact_delete_refused"
-                | "artifact_delete_failed"
-        );
-        if is_delete_event {
-            let mut has_receipt = false;
-            let mut has_plan = false;
-            let mut has_candidate = false;
-            let mut has_fs_obj = false;
 
             for rel in &event.relationships {
-                if let Some(&obj_type) = object_map.get(rel.object_id.as_str()) {
-                    match obj_type {
-                        "delete_receipt" => has_receipt = true,
-                        "deletion_plan" => has_plan = true,
-                        "artifact_candidate" => has_candidate = true,
-                        "filesystem_object" => has_fs_obj = true,
-                        _ => {}
-                    }
+                if !object_map.contains_key(rel.object_id.as_str()) {
+                    errors.push(format!(
+                        "Event '{}' has relationship pointing to non-existent object '{}'",
+                        event.id, rel.object_id
+                    ));
                 }
             }
 
-            if !has_receipt {
-                errors.push(format!(
-                    "Delete event '{}' lacks relationship to 'delete_receipt' object",
-                    event.id
-                ));
-            }
-            if !has_plan {
-                errors.push(format!(
-                    "Delete event '{}' lacks relationship to 'deletion_plan' object",
-                    event.id
-                ));
-            }
-            if !has_candidate {
-                errors.push(format!(
-                    "Delete event '{}' lacks relationship to 'artifact_candidate' object",
-                    event.id
-                ));
-            }
-            if !has_fs_obj {
-                errors.push(format!(
-                    "Delete event '{}' lacks relationship to 'filesystem_object' object",
-                    event.id
-                ));
-            }
-        }
+            // Delete event relationship checks
+            let is_delete_event = matches!(
+                event.event_type.as_str(),
+                "artifact_deleted"
+                    | "artifact_delete_skipped"
+                    | "artifact_delete_refused"
+                    | "artifact_delete_failed"
+            );
+            if is_delete_event {
+                let mut has_receipt = false;
+                let mut has_plan = false;
+                let mut has_candidate = false;
+                let mut has_fs_obj = false;
 
-        // Candidate event checks
-        if event.event_type == "artifact_candidate_proposed" {
-            let mut has_audit = false;
-            let mut has_root = false;
-            let mut has_fs_obj = false;
-
-            for rel in &event.relationships {
-                if let Some(&obj_type) = object_map.get(rel.object_id.as_str()) {
-                    match obj_type {
-                        "disk_audit" => has_audit = true,
-                        "scan_root" => has_root = true,
-                        "filesystem_object" => has_fs_obj = true,
-                        _ => {}
+                for rel in &event.relationships {
+                    if let Some(&obj_type) = object_map.get(rel.object_id.as_str()) {
+                        match obj_type {
+                            "delete_receipt" => has_receipt = true,
+                            "deletion_plan" => has_plan = true,
+                            "artifact_candidate" => has_candidate = true,
+                            "filesystem_object" => has_fs_obj = true,
+                            _ => {}
+                        }
                     }
+                }
+
+                if !has_receipt {
+                    errors.push(format!(
+                        "Delete event '{}' lacks relationship to 'delete_receipt' object",
+                        event.id
+                    ));
+                }
+                if !has_plan {
+                    errors.push(format!(
+                        "Delete event '{}' lacks relationship to 'deletion_plan' object",
+                        event.id
+                    ));
+                }
+                if !has_candidate {
+                    errors.push(format!(
+                        "Delete event '{}' lacks relationship to 'artifact_candidate' object",
+                        event.id
+                    ));
+                }
+                if !has_fs_obj {
+                    errors.push(format!(
+                        "Delete event '{}' lacks relationship to 'filesystem_object' object",
+                        event.id
+                    ));
                 }
             }
 
-            if !has_audit {
-                errors.push(format!(
-                    "Candidate proposed event '{}' lacks relationship to 'disk_audit' object",
-                    event.id
-                ));
-            }
-            if !has_root {
-                errors.push(format!(
-                    "Candidate proposed event '{}' lacks relationship to 'scan_root' object",
-                    event.id
-                ));
-            }
-            if !has_fs_obj {
-                errors.push(format!(
+            // Candidate event checks
+            if event.event_type == "artifact_candidate_proposed" {
+                let mut has_audit = false;
+                let mut has_root = false;
+                let mut has_fs_obj = false;
+
+                for rel in &event.relationships {
+                    if let Some(&obj_type) = object_map.get(rel.object_id.as_str()) {
+                        match obj_type {
+                            "disk_audit" => has_audit = true,
+                            "scan_root" => has_root = true,
+                            "filesystem_object" => has_fs_obj = true,
+                            _ => {}
+                        }
+                    }
+                }
+
+                if !has_audit {
+                    errors.push(format!(
+                        "Candidate proposed event '{}' lacks relationship to 'disk_audit' object",
+                        event.id
+                    ));
+                }
+                if !has_root {
+                    errors.push(format!(
+                        "Candidate proposed event '{}' lacks relationship to 'scan_root' object",
+                        event.id
+                    ));
+                }
+                if !has_fs_obj {
+                    errors.push(format!(
                     "Candidate proposed event '{}' lacks relationship to 'filesystem_object' object",
                     event.id
                 ));
-            }
-        }
-
-        // Tool root review event checks
-        if event.event_type == "tool_root_review_proposed" {
-            let mut has_audit = false;
-            let mut has_tool_root = false;
-
-            for rel in &event.relationships {
-                if let Some(&obj_type) = object_map.get(rel.object_id.as_str()) {
-                    match obj_type {
-                        "disk_audit" => has_audit = true,
-                        "tool_root" => has_tool_root = true,
-                        _ => {}
-                    }
                 }
             }
 
-            if !has_audit {
-                errors.push(format!(
+            // Tool root review event checks
+            if event.event_type == "tool_root_review_proposed" {
+                let mut has_audit = false;
+                let mut has_tool_root = false;
+
+                for rel in &event.relationships {
+                    if let Some(&obj_type) = object_map.get(rel.object_id.as_str()) {
+                        match obj_type {
+                            "disk_audit" => has_audit = true,
+                            "tool_root" => has_tool_root = true,
+                            _ => {}
+                        }
+                    }
+                }
+
+                if !has_audit {
+                    errors.push(format!(
                     "Tool root review proposed event '{}' lacks relationship to 'disk_audit' object",
                     event.id
                 ));
-            }
-            if !has_tool_root {
-                errors.push(format!(
+                }
+                if !has_tool_root {
+                    errors.push(format!(
                     "Tool root review proposed event '{}' lacks relationship to 'tool_root' object",
                     event.id
                 ));
+                }
             }
         }
-    }
 
-    // Validate objects
-    for obj in &log.objects {
-        let schema = match object_schema.get(obj.object_type.as_str()) {
-            Some(s) => s,
-            None => {
-                errors.push(format!(
-                    "Object '{}' has type '{}' which is not defined in objectTypes schema",
-                    obj.id, obj.object_type
-                ));
-                continue;
-            }
-        };
-
-        for attr in &obj.attributes {
-            let attr_def = schema.attributes.iter().find(|a| a.name == attr.name);
-            match attr_def {
+        // Validate objects
+        for obj in &log.objects {
+            let schema = match object_schema.get(obj.object_type.as_str()) {
+                Some(s) => s,
                 None => {
                     errors.push(format!(
+                        "Object '{}' has type '{}' which is not defined in objectTypes schema",
+                        obj.id, obj.object_type
+                    ));
+                    continue;
+                }
+            };
+
+            for attr in &obj.attributes {
+                let attr_def = schema.attributes.iter().find(|a| a.name == attr.name);
+                match attr_def {
+                    None => {
+                        errors.push(format!(
                         "Object '{}' has attribute '{}' not defined in schema for object type '{}'",
                         obj.id, attr.name, obj.object_type
                     ));
-                }
-                Some(def) => {
-                    if !val_matches_type(&attr.value, &def.attr_type) {
-                        errors.push(format!(
+                    }
+                    Some(def) => {
+                        if !val_matches_type(&attr.value, &def.value_type) {
+                            errors.push(format!(
                             "Object '{}' attribute '{}' has value '{:?}' which does not match defined type '{}'",
-                            obj.id, attr.name, attr.value, def.attr_type
+                            obj.id, attr.name, attr.value, def.value_type
                         ));
+                        }
                     }
                 }
             }
-        }
 
-        for rel in &obj.relationships {
-            if !object_map.contains_key(rel.object_id.as_str()) {
-                errors.push(format!(
-                    "Object '{}' has relationship pointing to non-existent object '{}'",
-                    obj.id, rel.object_id
-                ));
+            for rel in &obj.relationships {
+                if !object_map.contains_key(rel.object_id.as_str()) {
+                    errors.push(format!(
+                        "Object '{}' has relationship pointing to non-existent object '{}'",
+                        obj.id, rel.object_id
+                    ));
+                }
             }
         }
-    }
 
-    OcelValidationReport {
-        is_valid: errors.is_empty(),
-        errors,
+        if errors.is_empty() {
+            Ok(Admission::new(raw.value))
+        } else {
+            Err(Refusal::new(errors.join(", ")))
+        }
     }
 }
 
@@ -1167,30 +1147,51 @@ pub fn summarize_ocel_log(log: &OCEL) -> OcelSummary {
             for attr in &o.attributes {
                 match attr.name.as_str() {
                     "created_at" => {
-                        if let Some(s) = attr.value.as_str() {
+                        if let OCELAttributeValue::String(s) = &attr.value {
                             created_at = s.to_string();
                         }
                     }
                     "files_seen" => {
-                        files_seen = attr.value.as_i64().unwrap_or(0);
+                        files_seen = match attr.value {
+                            OCELAttributeValue::Integer(i) => i,
+                            _ => 0,
+                        };
                     }
                     "dirs_seen" => {
-                        dirs_seen = attr.value.as_i64().unwrap_or(0);
+                        dirs_seen = match attr.value {
+                            OCELAttributeValue::Integer(i) => i,
+                            _ => 0,
+                        };
                     }
                     "bytes_seen" => {
-                        bytes_seen = attr.value.as_i64().unwrap_or(0);
+                        bytes_seen = match attr.value {
+                            OCELAttributeValue::Integer(i) => i,
+                            _ => 0,
+                        };
                     }
                     "projects_seen" => {
-                        projects_seen = attr.value.as_i64().unwrap_or(0);
+                        projects_seen = match attr.value {
+                            OCELAttributeValue::Integer(i) => i,
+                            _ => 0,
+                        };
                     }
                     "candidates_seen" => {
-                        candidates_seen = attr.value.as_i64().unwrap_or(0);
+                        candidates_seen = match attr.value {
+                            OCELAttributeValue::Integer(i) => i,
+                            _ => 0,
+                        };
                     }
                     "pruned_dirs" => {
-                        pruned_dirs = attr.value.as_i64().unwrap_or(0);
+                        pruned_dirs = match attr.value {
+                            OCELAttributeValue::Integer(i) => i,
+                            _ => 0,
+                        };
                     }
                     "errors" => {
-                        errors = attr.value.as_i64().unwrap_or(0);
+                        errors = match attr.value {
+                            OCELAttributeValue::Integer(i) => i,
+                            _ => 0,
+                        };
                     }
                     _ => {}
                 }

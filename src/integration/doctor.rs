@@ -5,7 +5,9 @@ use std::path::Path;
 use std::process::Command;
 
 /// Checks the existence of key files and directories in the workspace.
-pub fn read_workspace_architecture(workspace_root: &Path) -> (bool, bool, Vec<(String, bool)>, Vec<(String, bool)>) {
+pub fn read_workspace_architecture(
+    workspace_root: &Path,
+) -> (bool, bool, Vec<(String, bool)>, Vec<(String, bool)>) {
     let agents_md_exists = workspace_root.join("AGENTS.md").exists();
     let cargo_toml_exists = workspace_root.join("Cargo.toml").exists();
 
@@ -30,7 +32,12 @@ pub fn read_workspace_architecture(workspace_root: &Path) -> (bool, bool, Vec<(S
         nouns_files_exist.push((noun.to_string(), exists));
     }
 
-    (agents_md_exists, cargo_toml_exists, main_dirs_exist, nouns_files_exist)
+    (
+        agents_md_exists,
+        cargo_toml_exists,
+        main_dirs_exist,
+        nouns_files_exist,
+    )
 }
 
 /// Checks the substrate environment.
@@ -153,7 +160,11 @@ pub fn read_privacy_files(
         }
     }
 
-    traverse(workspace_root, &mut found_sensitive_files, &mut files_to_scan);
+    traverse(
+        workspace_root,
+        &mut found_sensitive_files,
+        &mut files_to_scan,
+    );
 
     (
         gitignore_exists,

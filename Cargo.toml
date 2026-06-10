@@ -19,6 +19,12 @@ indicatif = "0.17"
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6"
 jwalk = "0.8"
+wasm4pm-compat = { version = "26.6.8", features = ["formats", "strict"] }
+blake3 = "1.8.5"
+dialoguer = "0.12.0"
+colored = "3.1.1"
+clap_complete = "4.6.5"
+which = "8.0.3"
 
 [dev-dependencies]
 tempfile = "3"

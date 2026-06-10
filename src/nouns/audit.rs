@@ -177,11 +177,13 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
         AuditAction::CargoClean { root, dry_run } => {
             let search_root = match root {
                 Some(p) => p,
-                None => dirs::home_dir()
-                    .ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
+                None => dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
             };
 
-            eprintln!("Scanning {} for Rust target/ directories…", search_root.display());
+            eprintln!(
+                "Scanning {} for Rust target/ directories…",
+                search_root.display()
+            );
             let targets = find_cargo_target_dirs(&search_root)?;
 
             if targets.is_empty() {
@@ -241,8 +243,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
         AuditAction::FindLarge { root, min_mb, top } => {
             let search_root = match root {
                 Some(p) => p,
-                None => dirs::home_dir()
-                    .ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
+                None => dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
             };
             let min_bytes = min_mb * 1024 * 1024;
 
@@ -252,16 +253,12 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 min_mb
             );
 
-            let results = find_large_files(
-                &search_root,
-                min_bytes,
-                |files, found| {
-                    eprint!(
-                        "  scanned {:>10} files  |  found {:>6} large files\r",
-                        files, found
-                    );
-                },
-            )?;
+            let results = find_large_files(&search_root, min_bytes, |files, found| {
+                eprint!(
+                    "  scanned {:>10} files  |  found {:>6} large files\r",
+                    files, found
+                );
+            })?;
 
             // Clear progress line.
             eprintln!("{:80}", "");
@@ -275,8 +272,8 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             for raw in &paths {
                 // Expand leading ~
                 let path = if raw.starts_with("~") {
-                    let home = dirs::home_dir()
-                        .ok_or_else(|| anyhow::anyhow!("Home dir not found"))?;
+                    let home =
+                        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?;
                     let stripped = raw.strip_prefix("~").unwrap_or(raw);
                     home.join(stripped.strip_prefix("/").unwrap_or(stripped))
                 } else {
@@ -291,13 +288,20 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 // Measure size before deletion for the report.
                 let before: u64 = {
                     let mut builder = ignore::WalkBuilder::new(&path);
-                    builder.hidden(false).ignore(false).git_ignore(false)
-                        .git_global(false).git_exclude(false).follow_links(false)
+                    builder
+                        .hidden(false)
+                        .ignore(false)
+                        .git_ignore(false)
+                        .git_global(false)
+                        .git_exclude(false)
+                        .follow_links(false)
                         .same_file_system(true);
                     let mut sz = 0u64;
                     for e in builder.build().flatten() {
                         if let Ok(m) = e.metadata() {
-                            if m.is_file() { sz += m.len(); }
+                            if m.is_file() {
+                                sz += m.len();
+                            }
                         }
                     }
                     sz
@@ -327,8 +331,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
         AuditAction::Breakdown { root, top, min_mb } => {
             let scan_root_path = match root {
                 Some(p) => p,
-                None => dirs::home_dir()
-                    .ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
+                None => dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
             };
             eprintln!(
                 "Scanning {} for disk usage (including hidden dirs)…",
@@ -439,10 +442,7 @@ fn print_large_files(results: &[(PathBuf, u64)], top: usize, min_mb: u64) {
         "\x1b[1m\x1b[36m└─────────────────────────────────────────────────────────────────────────────┘\x1b[0m"
     );
 
-    println!(
-        "\n  {:<10}  {}",
-        "Size", "Path"
-    );
+    println!("\n  {:<10}  {}", "Size", "Path");
     println!("  {}", "─".repeat(78));
 
     for (path, bytes) in &visible {
@@ -488,12 +488,16 @@ fn print_breakdown(root: &std::path::Path, results: &[(PathBuf, u64)], top: usiz
     let total_bytes: u64 = results.iter().map(|(_, b)| b).sum();
     let total_shown: u64 = visible.iter().map(|(_, b)| b).sum();
 
-    println!("\n\x1b[1m\x1b[36m┌─────────────────────────────────────────────────────────────┐\x1b[0m");
+    println!(
+        "\n\x1b[1m\x1b[36m┌─────────────────────────────────────────────────────────────┐\x1b[0m"
+    );
     println!(
         "\x1b[1m\x1b[36m│  Disk Breakdown: {:<43}│\x1b[0m",
         format_path_for_display(&root.to_string_lossy())
     );
-    println!("\x1b[1m\x1b[36m└─────────────────────────────────────────────────────────────┘\x1b[0m");
+    println!(
+        "\x1b[1m\x1b[36m└─────────────────────────────────────────────────────────────┘\x1b[0m"
+    );
     println!(
         "  Total scanned: \x1b[1m\x1b[32m{}\x1b[0m across {} top-level entries\n",
         human_bytes(total_bytes),
@@ -554,18 +558,47 @@ fn print_breakdown(root: &std::path::Path, results: &[(PathBuf, u64)], top: usiz
 fn categorize_dir(name: &str) -> &'static str {
     // Hidden dirs that are tool caches / runtimes
     let tool_caches = [
-        ".ollama", ".cache", ".cargo", ".rustup", ".npm", ".pnpm-store", ".yarn", ".bun",
-        ".deno", ".gradle", ".m2", ".pyenv", ".rbenv", ".asdf", ".sdkman", ".local",
-        ".colima", ".docker", ".minikube", ".gemini", ".codeium", ".claude", ".codex",
-        ".conda", ".venv", "miniconda3", ".multipass",
+        ".ollama",
+        ".cache",
+        ".cargo",
+        ".rustup",
+        ".npm",
+        ".pnpm-store",
+        ".yarn",
+        ".bun",
+        ".deno",
+        ".gradle",
+        ".m2",
+        ".pyenv",
+        ".rbenv",
+        ".asdf",
+        ".sdkman",
+        ".local",
+        ".colima",
+        ".docker",
+        ".minikube",
+        ".gemini",
+        ".codeium",
+        ".claude",
+        ".codex",
+        ".conda",
+        ".venv",
+        "miniconda3",
+        ".multipass",
     ];
     if tool_caches.contains(&name) {
         return "tool cache";
     }
     // Well-known data dirs
     let data_dirs = [
-        "Documents", "Downloads", "Desktop", "Pictures", "Movies", "Music",
-        "Library", "Public",
+        "Documents",
+        "Downloads",
+        "Desktop",
+        "Pictures",
+        "Movies",
+        "Music",
+        "Library",
+        "Public",
     ];
     if data_dirs.contains(&name) {
         return "data";
