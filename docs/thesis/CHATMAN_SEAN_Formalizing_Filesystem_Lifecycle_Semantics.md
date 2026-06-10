@@ -11,6 +11,8 @@
 The lifecycle of local software artifacts is currently managed through ad-hoc, heuristic-based scripts, leading to unbounded storage bloat, broken dependencies, and opaque data loss. While Process Mining has revolutionized the discovery and conformance checking of enterprise workflows, its application to low-level operating system semantics remains largely unexplored. Prior work on filesystem governance treats deletion as a terminal operation outside the process model. We prove that deletion is a typed state transition admissible to the same OCEL (Object-Centric Event Log) ontology as creation, modification, and access. The receipt chain extends the process evidence boundary to include destructive operations for the first time.
 
 This thesis introduces a mathematically rigorous framework that applies Object-Centric Process Mining (OCPM) to local disk lifecycle management. By enforcing the deterministic "Gall Pipeline" via Rust's typestate system and securing executions with unforgeable BLAKE3 receipt chains, we guarantee the safety of autonomic deletion policies. Through the integration of the `wasm4pm` engine, we formally evaluate alignment-based conformance checking over $N \geq 1,000$ traces. We demonstrate that process intelligence can transition filesystem management from static measurement to autonomic, evidentiary governance.
+
+
 # Glossary of Foundational Axioms, Laws, and Proofs
 
 To ground the architectural and systemic claims of this dissertation in formal, inarguable mathematical logic, we explicitly define the following universally established axioms, theorems, and laws. The efficacy of `osx-clnr` does not rely on novel theoretical physics, but rather on the novel application of these incontrovertible proofs to the local filesystem domain.
@@ -41,6 +43,8 @@ $V^\pi(s) = R(s, \pi(s)) + \gamma \sum_{s'} P(s' | s, \pi(s)) V^\pi(s')$
 **Application:** This provides the undeniable structural proof that the Object-Centric Petri Net (OCPN) discovered from `osx-clnr` logs is free of infinite caching loops and deadlocks, ensuring artifacts can logically progress to deletion.
 
 ---
+
+
 # Chapter 1: Introduction
 
 ## 1.1 The Entropic Nature of Modern Filesystems
@@ -77,6 +81,8 @@ To validate this hypothesis, this thesis formally investigates the following Res
 Applying process intelligence to enterprise ERP or medical records relies on the inherent prestige and process-rich nature of those domains. Disk cleanup, however, is offensively mundane: find a big folder, delete it, free space. 
 
 By proving the phase change from measurement to standing in the most mundane domain possible—the developer filesystem—we demonstrate that the transition is produced strictly by the mechanism, not borrowed from the domain. This establishes the universality of the framework.
+
+
 # Chapter 2: Literature Review and State of the Art
 
 ## 2.1 The Evolution of Process Mining
@@ -95,6 +101,8 @@ This dissertation synthesizes OCPM with typestate programming. While process min
 This work does not exist in isolation. It forms the empirical validation of the Universal Chatman Equation, $\mathcal{A}_{\mathcal{U}} = \mu_{\mathcal{U}}(\mathcal{O}^*_{\mathcal{B}})$, which posits that raw, continuous observations ($\mathcal{O}^*_{\mathcal{B}}$) can be functorially mapped to discrete, unforgeable evidence ($\mathcal{A}_{\mathcal{U}}$) via a structured transformation mechanism ($\mu_{\mathcal{U}}$). 
 
 The Chatman Equation was previously formalized over programming language domains (e.g., `tower-lsp-max`) and symbolic language families via the Universal Semantic Physics Engine. The present work demonstrates that the identical transformation applies to the foundational filesystem domain. We prove that applying $\mu$ over the OCEL ontology $\mathcal{O}^*_{\text{fs}}$ produces process evidence with the same formal guarantees: $O(1)$ admission, cryptographic receipts, LTL-certified conformance, and causal auditability. The sheer domain generality—scaling from symbolic language semantics down to raw POSIX disk manipulation—is the definitive proof of the equation's universality.
+
+
 # Chapter 3: Mathematical Formalisms and Ontologies
 
 ## 3.1 Formalizing the Filesystem as an OCEL 2.0 Tuple
@@ -135,6 +143,8 @@ If an arbitrary deletion occurs that feels "unsafe," it must fall into one of th
 2. It causes unrecoverable ghost bloat in backups (Violates $\Phi_2$).
 3. It suffered a race condition or state drift between planning and execution (Violates $\Phi_3$).
 Because any theoretically unsafe operation mapping to $T_{\text{artifact\_deleted}}$ reduces to one of these three structural failures, the constraint set $\{\Phi_1, \Phi_2, \Phi_3\}$ is complete.
+
+
 # Chapter 4: System Architecture and Implementation
 
 ## 4.1 The Main Theorems: Typestate-OCEL Safety and its Converse
@@ -165,6 +175,8 @@ The performance overhead of adding process intelligence to raw POSIX operations 
 *   **Conformance Checking:** While Model-Based Alignments (replaying an entire log on the OCPN using an A* algorithm) is PSPACE-complete, *Rule-Based Conformance* (evaluating the LTL trace locally) takes $O(1)$ time due to prefix closure evaluation over the local bounded sub-trace.
 
 This formally aligns with the $O(1)$ annihilation results demonstrated in prior universal semantic iterations.
+
+
 # Chapter 5: Empirical Evaluation and Case Studies
 
 To validate the theoretical safety bounds and real-world applicability of `osx-clnr` paired with `wasm4pm`, we designed a rigorous empirical evaluation over an extensive, multi-month developer log consisting of $N = 1,250$ causal deletion traces.
@@ -200,6 +212,8 @@ $$\text{Thrashing}(x) \equiv \text{deletion}(x) \wedge \lozenge_{\leq T} \text{r
 where $T = 72 \text{ hours}$.
 
 Using `wpm lean` over the baseline (pre-intervention) logs, we observed a Cache Thrashing rate of **18.4%**. Developers were actively wasting disk I/O and network bandwidth redownloading identical `target/` objects. After transitioning governance to the `osx-clnr` `DeletionPlanAdjudicator`—which enforces semantic tool root awareness—the Cache Thrashing rate plummeted to **0.6%**. This validates RQ4, demonstrating massive efficiency gains when shifting from static measurement to process intelligence.
+
+
 # Chapter 6: Conclusion and Future Work
 
 ## 6.1 Conclusion
@@ -218,3 +232,26 @@ We formally define the Disk Cleanup MDP $\langle S, \mathcal{A}, P, R, \gamma \r
 *   **Discount Factor $\gamma$**: The hyperparameter valuing immediate byte reclamation against long-term stability.
 
 Over time, this autonomic agent will learn the precise temporal decay curve of individual software artifacts, achieving a perfectly optimized, self-healing developer environment that runs without human interaction.
+
+
+# References
+
+[1] van der Aalst, W.M.P. (2019). *Object-Centric Process Mining: Dealing with Divergence and Convergence in Event Data*. In: Software Engineering and Formal Methods. SEFM 2019. Lecture Notes in Computer Science, vol 11724. Springer, Cham.
+
+[2] Strom, R.E., and Yemini, S. (1986). *Typestate: A Programming Language Concept for Enhancing Software Reliability*. IEEE Transactions on Software Engineering, SE-12(1), 157-171.
+
+[3] Rice, H.G. (1953). *Classes of Recursively Enumerable Sets and Their Decision Problems*. Transactions of the American Mathematical Society, 74(2), 358-366.
+
+[4] Howard, W.A. (1980). *The formulae-as-types notion of construction*. In J.P. Seldin and J.R. Hindley (eds.), To H.B. Curry: Essays on Combinatory Logic, Lambda Calculus and Formalism, Academic Press, 479-490.
+
+[5] Little, J.D.C. (1961). *A Proof for the Queuing Formula: $L = \lambda W$*. Operations Research, 9(3), 383-387.
+
+[6] Bellman, R. (1954). *The Theory of Dynamic Programming*. Bulletin of the American Mathematical Society, 60(6), 503-515.
+
+[7] O'Connor, J., Aumasson, J.P., Neves, S., and Wilcox-O'Hearn, Z. (2020). *BLAKE3: one function, fast everywhere*. IACR Cryptology ePrint Archive, 2020:131.
+
+[8] van der Aalst, W.M.P. (1998). *The Application of Petri Nets to Workflow Management*. The Journal of Circuits, Systems and Computers, 8(1), 21-66.
+
+[9] Jung, R., Jourdan, J.H., Krebbers, R., and Dreyer, D. (2017). *RustBelt: Securing the Foundations of the Rust Programming Language*. Proceedings of the ACM on Programming Languages, 2(POPL), 66:1-66:34.
+
+
