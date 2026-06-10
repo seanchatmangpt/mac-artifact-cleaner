@@ -13,14 +13,14 @@ Let $L = (E, O, T_E, T_O, \pi_{type}, \pi_{rel}, \pi_{time}, \pi_{attr})$:
 
 ### 3.1.1 Completeness and Soundness of the OCEL Mapping
 For this formalization to hold mathematical weight, the mapping $f: \text{POSIX\_Op} \rightarrow E$ must be complete and sound.
-*   **Lemma 1 (Completeness):** Every POSIX operation that materially changes a tracked artifact maps to some $e \in E$. By hooking into the filesystem polling layer (and strictly gating execution via the `Admit` boundary), no destructive or exclusionary OS event within the governed domains drops silently.
+*   **Lemma 1 (Completeness and Event Abstraction):** Every POSIX operation that materially changes a tracked artifact maps to some $e \in E$. Crucially, this mapping performs **Event Abstraction**. It filters and aggregates stochastic, high-frequency POSIX interrupts (e.g., `open`, `write`, `close`, `stat`) into deterministic, macroscopic lifecycle events (e.g., `artifact_created`). By hooking into the filesystem polling layer via this abstraction, no destructive or exclusionary OS event drops silently.
 *   **Lemma 2 (Soundness):** Every $e \in E$ corresponds to an actual POSIX operation that occurred. Because $E$ emissions are inextricably bound to cryptographic receipt creation, no phantom events can be generated. The emission of $e$ requires the resolution of its physical OS counterpart.
 
 ## 3.2 Formal OCPN Construction
 To discover and check conformance, we construct the formal Object-Centric Petri Net (OCPN) $\mathcal{N} = (P, T, F, M_0, \mathcal{O}, \pi)$:
 *   **Places $P$:** Artifact states $\{p_{\text{raw}}, p_{\text{cand}}, p_{\text{plan}}, p_{\text{excl}}, p_{\text{del}}, p_{\text{refused}}\}$.
 *   **Transitions $T$:** The event types $T_E$.
-*   **Object binding $\pi$:** Maps object types to specific transition arcs (e.g., $T_{\text{artifact\_deleted}}$ consumes from $p_{\text{excl}}$ and places tokens into $p_{\text{del}}$ for objects of type `tool_root`). Crucially, the binding $\pi$ employs **variable arc weights**, allowing a single transition to dynamically consume and produce an arbitrary number of object tokens representing diverse filesystem artifacts.
+*   **Object binding $\pi$:** Maps object types to specific transition arcs (e.g., $T_{\text{artifact\_deleted}}$ consumes from $p_{\text{excl}}$ and places tokens into $p_{\text{del}}$ for objects of type `tool_root`). Crucially, the binding $\pi$ employs **variable arc weights** and **Synchronizing Transitions**, allowing a single transition to dynamically consume, produce, and synchronize an arbitrary number of object tokens across different $T_O$ object types (e.g., synchronizing 1 `deletion_plan` token with 50,000 `filesystem_object` tokens) during batch operations.
 *   **Marking $M_0$:** The initial state representing identified artifacts on disk.
 
 *   **Theorem (Soundness & Liveness of $\mathcal{N}$):** The constructed OCPN is *sound* (no transition fires without all required typed object tokens) and *live* (every artifact token in $M_0$ that reaches $p_{\text{plan}}$ is guaranteed to eventually sink into $p_{\text{del}}$ or $p_{\text{refused}}$).

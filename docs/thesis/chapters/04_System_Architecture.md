@@ -25,6 +25,6 @@ The `ReceiptEnvelope` provides an unforgeable commitment to the deletion metadat
 The performance overhead of adding process intelligence to raw POSIX operations must remain negligible to prevent observer effect.
 *   **Admission Control:** Validating a plan against exclusion heuristics operates in $O(1)$ time relative to total disk size, acting solely on the size of the localized candidate set.
 *   **OCEL Emission:** Generating and sinking the OCEL event tuple $L$ occurs in $O(1)$ time per event.
-*   **Conformance Checking:** While Model-Based Alignments (replaying an entire log on the OCPN using an A* algorithm) is PSPACE-complete, *Rule-Based Conformance* (evaluating the LTL trace locally) takes $O(1)$ time due to prefix closure evaluation over the local bounded sub-trace.
+*   **Conformance Checking:** While Model-Based Alignments (replaying an entire log on the OCPN using an A* algorithm) is PSPACE-complete, *Rule-Based Conformance* (evaluating the LTL trace locally) takes $O(1)$ time due to prefix closure evaluation over the local bounded sub-trace. Furthermore, evaluating time-bounded LTL constraints (e.g., $\lozenge_{\leq T}$) over a continuous, infinite event stream utilizes a **sliding temporal window** to maintain strict $O(1)$ memory complexity, preventing state-space explosion over months of uptime.
 
 This formally aligns with the $O(1)$ annihilation results demonstrated in prior universal semantic iterations.
