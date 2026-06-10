@@ -13,7 +13,24 @@ We define the Object-Centric Event Log as a tuple $L = (E, O, T_E, T_O, \pi_{typ
 *   $\pi_{time}: E \rightarrow \mathcal{T}$ maps an event to a precise Unix timestamp.
 *   $\pi_{attr}$ maps events and objects to physical attributes (e.g., `bytes_reclaimed`, `category`).
 
-## 3.2 The Gall Checkpoint Pipeline
+## 3.2 The Chatman Equation and The Categorical Proof
+The central mathematical proposition of this thesis is the Chatman Equation:
+$$A = \mu(O^*)$$
+
+Where $A$ is the Artifact, $\mu$ is the transformation mechanism, and $O^*$ is the set of continuous filesystem observations.
+
+Before the Chatman Equation ($A \neq \mu(O^*)$), the artifact possesses only measurable properties (path, bytes, mtime, owner, extension). After the Chatman Equation ($A = \mu(O^*)$), the artifact assumes an evidentiary status ($Standing(A) \in \{Admitted, Refused\}$).
+
+**The Categorical Proof:**
+This represents a profound categorical shift. $\mu$ is not a function from Domain to Domain. It is a functor from Domain to Evidence.
+A normal static cleanup tool maps:
+$$Filesystem \rightarrow Measurement \quad (\text{e.g., } folder \mapsto bytes)$$
+`osx-clnr` maps:
+$$Filesystem \rightarrow Evidence \quad (\text{e.g., } artifact \mapsto AdmittedDeletionReceipt)$$
+
+These are entirely different codomains. The proof of this dissertation is not that `osx-clnr` cleans the disk "better" than heuristic tools. The proof is that `osx-clnr` successfully forces the domain of disk governance to exit the category of measurement and enter the category of evidence.
+
+## 3.3 The Gall Checkpoint Pipeline
 The Gall Checkpoint Pipeline is the normative safety model governing destructive operations in `osx-clnr`. It asserts that no file can be deleted without a preceding explicit plan, and no file can be deleted without first being excluded from Time Machine backups to prevent "ghost bloat."
 
 We formalize these constraints using Linear Temporal Logic (LTL) semantics within a Declare model. Let $\Sigma$ be the alphabet of event types $T_E$.

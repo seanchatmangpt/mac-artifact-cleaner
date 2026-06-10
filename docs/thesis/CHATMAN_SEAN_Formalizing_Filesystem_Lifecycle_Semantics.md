@@ -1,45 +1,39 @@
 # Chapter 1: Introduction
 
 ## 1.1 The Entropic Nature of Modern Filesystems
-The modern polyglot software engineering ecosystem is characterized by an unprecedented velocity of artifact generation. Package managers (e.g., npm, cargo, pip), build systems (e.g., webpack, rustc), and container runtimes (e.g., Docker, containerd) function as isolated, sovereign actors operating upon a shared, stateful medium: the local developer filesystem. Each tool independently fetches dependencies, compiles intermediate objects, and generates voluminous caching structures. Because these tools lack a unified protocol for lifecycle management, they collectively induce a state of unbounded systemic entropy.
+The modern polyglot software engineering ecosystem is characterized by an unprecedented velocity of artifact generation. Package managers, build systems, and container runtimes function as isolated, sovereign actors operating upon a shared, stateful medium: the local developer filesystem. Because these tools lack a unified protocol for lifecycle management, they collectively induce a state of unbounded systemic entropy, which we define as the "Bloat Cascade."
 
-We define this phenomenon as the "Bloat Cascade." Without external, deterministic intervention, the local storage medium trends monotonically toward saturation. Historically, the mitigation of this entropy has relied on heuristic-based, static analysis tools (e.g., `ncdu`, `DaisyDisk`, or ad-hoc `bash` scripts). These tools operate on a snapshot of the filesystem's current state, performing arbitrary size-based aggregations and offering candidates for manual deletion.
+Historically, the mitigation of this entropy has relied on heuristic-based, static analysis tools (e.g., `ncdu`, `DaisyDisk`, or ad-hoc `bash` scripts). These tools operate on a snapshot of the filesystem's current state, performing arbitrary size-based aggregations and offering candidates for manual deletion.
 
-## 1.2 The Failure of Static State Governance
-Static state governance suffers from three fundamental ontological failures:
-1. **Temporal Blindness:** Static tools observe the existence of an artifact (e.g., a `node_modules` directory consuming 5GB) but lack the causal provenance of its creation or its anticipated time-to-deletion (TTD).
-2. **Implicit Dependency Violation:** By deleting artifacts based purely on volumetric thresholds, static tools routinely sever implicit dependencies required by downstream build systems, causing subsequent compilations to fail or forcing the immediate re-acquisition of the deleted data (a pathology we formally define as "Cache Thrashing").
-3. **Absence of Verifiability:** The execution of a deletion via `rm -rf` or `unlink` is an irreversible, untracked state transition. There exists no cryptographic, unforgeable proof that a deletion occurred according to a sanctioned policy, rendering the developer environment opaque to enterprise compliance and adversarial auditing.
+## 1.2 The Order Parameter is Standing
+The decisive failure of static state governance is not that it is "inefficient," but that it produces the wrong output type. Tools like `ncdu` produce **measurements**: bytes, paths, sizes, and timestamps. 
 
-## 1.3 The Object-Centric Process Mining Hypothesis
-This dissertation proposes a radical paradigm shift: the re-conceptualization of the local filesystem not as a static repository of bytes, but as a dynamic, continuous **Object-Centric Event Log (OCEL)**.
+This dissertation argues that civilization, even at the micro-scale of the developer filesystem, cannot operate securely on measurements alone; it requires artifacts with **standing**. `osx-clnr` proves the transition from measurement to standing. It produces:
+* Admitted / Refused decisions
+* BLAKE3 cryptographic receipt chains
+* Gall Pipeline conformance results
+* Object-Centric Event Log (OCEL) causal graphs
 
-By instrumenting the filesystem to emit structured events (`artifact_created`, `scan_root_started`, `deletion_plan_approved`) that map causally to multiple intersecting objects (`tool_root`, `filesystem_object`, `snapshot_state`), we elevate the problem of disk management from the domain of rudimentary garbage collection to the mathematically rigorous discipline of **Process Intelligence**.
+Before this transition, an artifact has only measurable properties (path, bytes, mtime). After this transition, the artifact possesses an evidentiary status ($Standing(A) \in \{Admitted, Refused\}$). Only `Admitted` artifacts cross the execution boundary.
 
-This allows for the application of Dr. Wil van der Aalst's foundational pillars of Process Mining:
-1. **Process Discovery:** Mathematically extracting the behavioral models (Object-Centric Petri Nets) that govern artifact lifecycles.
-2. **Conformance Checking:** Utilizing alignment-based verification to mathematically prove that the lifecycle of an artifact adhered to a strict, normative safety model (the "Gall Pipeline") prior to its deletion.
-3. **Predictive Monitoring and Enhancement:** Applying Lean Six Sigma metrics and Statistical Process Control (SPC) to forecast systemic bottlenecks and autonomic resource allocation.
+## 1.3 The Three Phase-Change Properties
+This transition represents a strict phase change, characterized by three properties:
+
+1. **Discontinuity:** There is no smooth interpolation from a heuristic byte-count to a typestate-admitted deletion authority. The output type fundamentally breaks and changes.
+2. **Symmetry Breaking:** Before OCEL, the disk is a symmetric namespace of bytes. After OCEL, the namespace is broken into explicit process roles (`tool_root`, `deletion_plan`, `tm_script`). They cease to be labels of convenience and become objects bound by lifecycle constraints.
+3. **Emergence:** Below the boundary, questions of causality, conformance, and RL optimization are undefined. Above the boundary, they become native properties of the system. 
 
 ## 1.4 Research Questions
 To validate this hypothesis, this thesis formally investigates the following Research Questions (RQs):
+*   **RQ1 (Ontological Formulation):** How can chaotic filesystem operations be formally modeled and extracted using Object-Centric Event Logs (OCEL 2.0)?
+*   **RQ2 (Typestate Safety):** How does the integration of Rust's affine typestate system guarantee the discontinuity of standing?
+*   **RQ3 (Alignment-Based Verification):** Can conformance checking perfectly detect non-conforming traces that violate the temporal safety constraints of the Gall Pipeline?
+*   **RQ4 (Autonomic Optimization):** How can predictive models applied over the discovered Object-Centric Petri Nets (OCPN) transition the environment to Autonomic Optimization?
 
-**RQ1 (Ontological Formulation):** How can the chaotic, non-deterministic operations of POSIX-compliant filesystems and polyglot build tools be formally modeled and extracted using Object-Centric Event Logs (OCEL 2.0)?
+## 1.5 The Mundanity of the Proof Domain
+Applying process intelligence to enterprise ERP or medical records relies on the inherent prestige and process-rich nature of those domains. Disk cleanup, however, is offensively mundane: find a big folder, delete it, free space. 
 
-**RQ2 (Typestate Safety):** To what extent can the integration of Rust's affine typestate system (specifically, the `Admit` boundary) with cryptographic receipt chains (BLAKE3) mathematically guarantee the safety and provenance of destructive filesystem operations?
-
-**RQ3 (Alignment-Based Verification):** Can alignment-based conformance checking be applied to local artifact logs to detect, with 100% precision, non-conforming deletion events that violate the temporal safety constraints of the Gall Pipeline?
-
-**RQ4 (Autonomic Optimization):** How can predictive monitoring models, applied over the discovered Object-Centric Petri Nets (OCPN), transition the developer environment from reactive manual cleanup to proactive, Autonomic Optimization?
-
-## 1.5 Contributions and Dissertation Structure
-The primary contribution of this work is the **osx-clnr** architecture, tightly coupled with the **wasm4pm** process mining engine. This thesis is structured as follows:
-
-*   **Chapter 2** provides a comprehensive review of the state-of-the-art in Process Mining, OCEL semantics, and Systems Typestate theory.
-*   **Chapter 3** formally defines the mathematical models mapping the filesystem to OCEL and outlines the Linear Temporal Logic (LTL) constraints of the Gall Pipeline.
-*   **Chapter 4** details the system architecture, specifically the typestate adjudication boundary and the formulation of cryptographic provenance chains.
-*   **Chapter 5** presents the empirical implementation of 25 novel process intelligence use cases, explicitly addressing the four Research Questions.
-*   **Chapter 6** concludes the dissertation and outlines the trajectory toward fully Reinforcement Learning-driven (RL) autonomic disk ecosystems.# Chapter 2: Literature Review and State of the Art
+By proving the phase change from measurement to standing in the most mundane domain possible—the developer filesystem—we demonstrate that the transition is produced strictly by the mechanism, not borrowed from the domain. This establishes the universality of the framework.# Chapter 2: Literature Review and State of the Art
 
 ## 2.1 The Evolution of Process Mining
 Process mining emerged in the late 1990s as a discipline designed to extract knowledge from event logs readily available in today's information systems. The seminal works of Dr. Wil van der Aalst established the three primary capabilities of process mining: Process Discovery, Conformance Checking, and Process Enhancement.
@@ -74,7 +68,24 @@ We define the Object-Centric Event Log as a tuple $L = (E, O, T_E, T_O, \pi_{typ
 *   $\pi_{time}: E \rightarrow \mathcal{T}$ maps an event to a precise Unix timestamp.
 *   $\pi_{attr}$ maps events and objects to physical attributes (e.g., `bytes_reclaimed`, `category`).
 
-## 3.2 The Gall Checkpoint Pipeline
+## 3.2 The Chatman Equation and The Categorical Proof
+The central mathematical proposition of this thesis is the Chatman Equation:
+$$A = \mu(O^*)$$
+
+Where $A$ is the Artifact, $\mu$ is the transformation mechanism, and $O^*$ is the set of continuous filesystem observations.
+
+Before the Chatman Equation ($A \neq \mu(O^*)$), the artifact possesses only measurable properties (path, bytes, mtime, owner, extension). After the Chatman Equation ($A = \mu(O^*)$), the artifact assumes an evidentiary status ($Standing(A) \in \{Admitted, Refused\}$).
+
+**The Categorical Proof:**
+This represents a profound categorical shift. $\mu$ is not a function from Domain to Domain. It is a functor from Domain to Evidence.
+A normal static cleanup tool maps:
+$$Filesystem \rightarrow Measurement \quad (\text{e.g., } folder \mapsto bytes)$$
+`osx-clnr` maps:
+$$Filesystem \rightarrow Evidence \quad (\text{e.g., } artifact \mapsto AdmittedDeletionReceipt)$$
+
+These are entirely different codomains. The proof of this dissertation is not that `osx-clnr` cleans the disk "better" than heuristic tools. The proof is that `osx-clnr` successfully forces the domain of disk governance to exit the category of measurement and enter the category of evidence.
+
+## 3.3 The Gall Checkpoint Pipeline
 The Gall Checkpoint Pipeline is the normative safety model governing destructive operations in `osx-clnr`. It asserts that no file can be deleted without a preceding explicit plan, and no file can be deleted without first being excluded from Time Machine backups to prevent "ghost bloat."
 
 We formalize these constraints using Linear Temporal Logic (LTL) semantics within a Declare model. Let $\Sigma$ be the alphabet of event types $T_E$.
@@ -96,8 +107,8 @@ $\square ( \text{tm\_exclusion} \rightarrow \bigcirc \text{artifact\_deleted} ) 
 
 Any trace $\sigma \in L$ that violates these LTL constraints is mathematically flagged by the `wpm audit` Alignment-Based Conformance Checker as a non-conforming trace.# Chapter 4: System Architecture and Implementation
 
-## 4.1 Typestate Admission Control
-The core of the `osx-clnr` architecture is the immutable adjudication boundary. While traditional process mining detects violations *after* they occur, our system prevents violations *before* execution by leveraging Rust's typestate constraints.
+## 4.1 Typestate Admission Control and The $h_I$ Boundary
+The core of the `osx-clnr` architecture is the immutable adjudication boundary, denoted as $h_I$. While traditional process mining detects violations *after* they occur, our system prevents violations *before* execution by leveraging Rust's typestate constraints.
 
 When a `DeletionPlan` is generated by the scanning engine, it is instantiated as `Evidence<DeletionPlan, Raw, PlanSafetyWitness>`. At this state, the Rust compiler physically prevents the execution engine from accessing the underlying plan data.
 
@@ -105,7 +116,7 @@ To proceed, the data must pass through the `Admit` trait via the `DeletionPlanAd
 *   If validation succeeds, the adjudicator yields `Admission<DeletionPlan, PlanSafetyWitness>`, allowing the state to transition to `Evidence<DeletionPlan, Admitted, PlanSafetyWitness>`. The execution engine is statically typed to accept only `Admitted` evidence.
 *   If validation fails, it yields a strongly-typed `Refusal`, carrying the specific reason for denial.
 
-This architecture guarantees that the execution engine is mathematically isolated from `Raw`, unverified state.
+This architecture guarantees that the execution engine is mathematically isolated from `Raw`, unverified state. **Above $h_I$, falsehood must appear as a failed assumption, failed model, failed receipt, failed conformance check, or failed implementation — not as an unexamined heuristic judgment.** The system does not abolish all possible defects; it relocates defect claims into explicit, typed proof obligations.
 
 ## 4.2 Cryptographic Execution Receipts
 Once an artifact transitions to the `artifact_deleted` state, the operation must be indelibly recorded. We achieve this by emitting a `ReceiptChain` anchored by a `ReceiptEnvelope`.
