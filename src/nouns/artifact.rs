@@ -28,6 +28,9 @@ pub enum ArtifactAction {
         /// Include aggressive build files
         #[arg(long)]
         aggressive: bool,
+        /// Ignore projects modified within the specified number of hours
+        #[arg(long, default_value_t = 168)]
+        ignore_recent_hours: u64,
         /// Verbose trace output
         #[arg(long)]
         verbose: bool,
@@ -40,10 +43,11 @@ pub fn handle(action: ArtifactAction) -> anyhow::Result<()> {
             root,
             deps,
             aggressive,
+            ignore_recent_hours,
             verbose,
         } => {
             let roots = if root.is_empty() {
-                vec![dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?]
+                crate::nouns::default_scan_roots()?
             } else {
                 root
             };
@@ -53,6 +57,7 @@ pub fn handle(action: ArtifactAction) -> anyhow::Result<()> {
                 aggressive,
                 verbose,
                 tool_roots: false,
+                ignore_recent_hours,
             };
 
             let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));
@@ -64,9 +69,9 @@ pub fn handle(action: ArtifactAction) -> anyhow::Result<()> {
             let tool_defs = build_tool_root_defs();
             let tool_accs = Arc::new(DashMap::new());
 
-            for r in roots {
+            for r in &roots {
                 scan_root(
-                    &r,
+                    r,
                     &args,
                     candidates.clone(),
                     stats.clone(),

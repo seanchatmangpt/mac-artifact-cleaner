@@ -26,6 +26,9 @@ pub enum PlanAction {
         /// Include aggressive build files
         #[arg(long)]
         aggressive: bool,
+        /// Ignore projects modified within the specified number of hours
+        #[arg(long, default_value_t = 168)]
+        ignore_recent_hours: u64,
         /// Plan file output destination
         #[arg(short, long)]
         output: PathBuf,
@@ -50,11 +53,12 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             root,
             deps,
             aggressive,
+            ignore_recent_hours,
             output,
             verbose,
         } => {
             let roots = if root.is_empty() {
-                vec![dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?]
+                crate::nouns::default_scan_roots()?
             } else {
                 root
             };
@@ -64,6 +68,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                 aggressive,
                 verbose,
                 tool_roots: false,
+                ignore_recent_hours,
             };
 
             let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));

@@ -32,6 +32,9 @@ pub enum AuditAction {
         /// Include aggressive build files
         #[arg(long)]
         aggressive: bool,
+        /// Ignore projects modified within the specified number of hours
+        #[arg(long, default_value_t = 168)]
+        ignore_recent_hours: u64,
         /// Include major tool-root analysis
         #[arg(long)]
         tool_roots: bool,
@@ -53,6 +56,9 @@ pub enum AuditAction {
         /// Include aggressive build files
         #[arg(long)]
         aggressive: bool,
+        /// Ignore projects modified within the specified number of hours
+        #[arg(long, default_value_t = 168)]
+        ignore_recent_hours: u64,
         /// Include major tool-root analysis
         #[arg(long)]
         tool_roots: bool,
@@ -104,18 +110,19 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             root,
             deps,
             aggressive,
+            ignore_recent_hours,
             tool_roots,
             verbose,
             ocel_output,
         } => {
             let roots = if root.is_empty() {
-                vec![dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?]
+                crate::nouns::default_scan_roots()?
             } else {
                 root
             };
 
             let (stats, candidates, tool_reports) =
-                run_audit_scan(&roots, deps, aggressive, tool_roots, verbose)?;
+                run_audit_scan(&roots, deps, aggressive, ignore_recent_hours, tool_roots, verbose)?;
 
             println!("\n==================================================");
             println!("               DISK AUDIT RUN                     ");
@@ -344,17 +351,18 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             root,
             deps,
             aggressive,
+            ignore_recent_hours,
             tool_roots,
         } => {
             let roots = if root.is_empty() {
-                vec![dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?]
+                crate::nouns::default_scan_roots()?
             } else {
                 root
             };
 
-            let (stats, candidates, tool_reports) = run_audit_scan(
-                &roots, deps, aggressive, tool_roots, false, // non-verbose for summary
-            )?;
+            let (stats, candidates, tool_reports) =
+                run_audit_scan(&roots, deps, aggressive, ignore_recent_hours, tool_roots, false, // non-verbose for summary
+                )?;
 
             print_premium_audit_summary(&stats, &candidates, &tool_reports);
         }
@@ -366,6 +374,7 @@ fn run_audit_scan(
     roots: &[PathBuf],
     deps: bool,
     aggressive: bool,
+    ignore_recent_hours: u64,
     tool_roots_enabled: bool,
     verbose: bool,
 ) -> anyhow::Result<(Arc<Stats>, Vec<Candidate>, Vec<ToolRootReport>)> {
@@ -374,6 +383,7 @@ fn run_audit_scan(
         aggressive,
         verbose,
         tool_roots: tool_roots_enabled,
+        ignore_recent_hours,
     };
 
     let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));

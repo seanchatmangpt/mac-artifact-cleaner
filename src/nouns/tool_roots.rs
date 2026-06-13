@@ -162,10 +162,11 @@ fn run_tool_roots_scan(
     }
 
     let args = ArgsSnapshot {
-        deps: false,
+        deps: true,
         aggressive: false,
         verbose: false,
         tool_roots: true,
+        ignore_recent_hours: 1,
     };
 
     let stats = Arc::new(Stats::default());

@@ -16,9 +16,10 @@ pub fn handle() -> anyhow::Result<()> {
 
     println!("\n{}", "[1/4] Scanning disk & building deletion plan...".blue());
     plan::handle(plan::PlanAction::Build {
-        root: vec![], // defaults to home dir
+        root: vec![], // defaults to home dir + /tmp
         deps: true,
         aggressive: false,
+        ignore_recent_hours: 168,
         output: plan_file.clone(),
         verbose: false,
     })?;

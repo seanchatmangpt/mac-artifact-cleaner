@@ -234,6 +234,17 @@ impl DirSnapshot {
             .iter()
             .filter(move |e| e.is_dir() && e.file_name.starts_with(prefix))
     }
+
+    /// Returns names of all child files whose extension matches the given one.
+    pub fn files_with_ext<'a>(&'a self, ext: &'a str) -> impl Iterator<Item = &'a EntrySnapshot> {
+        self.children.iter().filter(move |e| {
+            e.is_file()
+                && e.extension
+                    .as_ref()
+                    .map(|e_ext| e_ext == ext)
+                    .unwrap_or(false)
+        })
+    }
 }
 
 // ── Domain types ───────────────────────────────────────────────────────────────
@@ -255,6 +266,7 @@ pub struct ArgsSnapshot {
     pub aggressive: bool,
     pub verbose: bool,
     pub tool_roots: bool,
+    pub ignore_recent_hours: u64,
 }
 
 // ── Classification predicates ──────────────────────────────────────────────────
@@ -278,6 +290,21 @@ pub struct ArgsSnapshot {
 pub fn is_macos_os_dir(path: &Path) -> bool {
     let s = path.to_string_lossy();
 
+    // Explicitly allow scanning of temporary directories even if they are in /private
+    if s == "/tmp" || s == "/private/tmp" || s == "private/tmp" || s.contains(".antigravitycli") {
+        return false;
+    }
+
+    // Allow everything inside the user's home directory (e.g. /Users/name/Library/...)
+    // but block the root-level /Library, /System, etc.
+    if s.starts_with("/Users/") && !s.contains("/Library/Application Support/CloudDocs") {
+        // We still want to block some very specific user paths that are too noisy or sensitive
+        if s.contains("/Library/Application Support/CloudDocs") || s.contains("/Library/Mail") || s.contains("/Library/Messages") {
+             return true;
+        }
+        return false;
+    }
+
     s == "/System"
         || s == "/Library"
         || s == "/Applications"
@@ -290,12 +317,11 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
         || s == "/etc"
         || s == "/var"
         || s == "/opt"
-        || s.ends_with("/Library")
-        || s.contains("/Library/Application Support")
-        || s.contains("/Library/Caches")
-        || s.contains("/Library/Developer")
-        || s.contains("/Library/Containers")
-        || s.contains("/Library/Group Containers")
+        || s == "/Library/Application Support"
+        || s == "/Library/Caches"
+        || s == "/Library/Developer"
+        || s == "/Library/Containers"
+        || s == "/Library/Group Containers"
 }
 
 /// Returns true when a path represents a global package or tool cache directory.
@@ -307,8 +333,7 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
 /// use std::path::Path;
 ///
 /// // Positive case: global cache paths are identified.
-/// assert!(is_global_cache(Path::new("/Users/user/.cargo/registry")));
-/// assert!(is_global_cache(Path::new("/Users/user/.npm")));
+/// assert!(is_global_cache(Path::new("/Users/user/.pnpm-store")));
 ///
 /// // Negative case: typical user project folders are not marked.
 /// assert!(!is_global_cache(Path::new("/Users/user/dev/project")));
@@ -316,27 +341,13 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
 pub fn is_global_cache(path: &Path) -> bool {
     let s = path.to_string_lossy();
     let global_caches = [
-        "/.cache",
-        "/.cargo",
-        "/.gemini",
-        "/.claude",
-        "/.codex",
-        "/.npm",
         "/.pnpm-store",
-        "/.yarn",
-        "/.bun",
-        "/.deno",
-        "/.gradle",
-        "/.m2",
         "/.rustup",
         "/.asdf",
         "/.pyenv",
         "/.rbenv",
         "/.mix",
         "/.hex",
-        "/.local",
-        "/.config",
-        "/.vscode",
         "/.osa",
     ];
 
@@ -540,6 +551,18 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
         names.push("rust");
     }
 
+    if snap.has_dir(".agents") || snap.has_dir(".gemini") || snap.has_dir(".claude") {
+        names.push("ai_project");
+    }
+
+    if snap.has_dir("tmp") || snap.has_dir("logs") || snap.has_dir("chats") || snap.has_dir("agents") {
+        names.push("ai_project");
+    }
+
+    if snap.has_dir("tmp") && (snap.has_file("Cargo.toml") || snap.has_dir(".gemini")) {
+        names.push("session_logs");
+    }
+
     if snap.has_file("go.mod") {
         names.push("go");
     }
@@ -595,7 +618,7 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
 ///
 /// let root = Path::new("/project");
 /// let project = ProjectKind { names: vec!["rust"] };
-/// let args = ArgsSnapshot { deps: true, aggressive: true, verbose: false, tool_roots: false };
+/// let args = ArgsSnapshot { deps: true, aggressive: true, verbose: false, tool_roots: false, ignore_recent_hours: 1 };
 ///
 /// // Positive case: "target" dir in snapshot → candidate.
 /// let snap = DirSnapshot {
@@ -764,6 +787,34 @@ pub fn artifact_candidates_from_snapshot(
                             reason: "cmake build dir".to_string(),
                         });
                     }
+                }
+            }
+
+            "ai_project" => {
+                add_dir(&mut out, root, ".agents", "ai agents dir", snap);
+                add_dir(&mut out, root, "agents", "ai agents dir", snap);
+                add_dir(&mut out, root, ".gemini/tmp", "gemini temp artifacts", snap);
+                add_dir(&mut out, root, ".claude/tmp", "claude temp artifacts", snap);
+                add_dir(&mut out, root, "tmp", "ai temp artifacts", snap);
+                add_dir(&mut out, root, "logs", "ai tool logs", snap);
+                add_dir(&mut out, root, "chats", "ai chat history", snap);
+            }
+
+            "session_logs" => {
+                if snap.has_dir("tmp") {
+                    // This specifically targets massive session files seen in lsp-max and .gemini
+                    for e in snap.files_with_ext("jsonl") {
+                        out.push(Candidate {
+                            path: e.path.clone(),
+                            reason: "massive ai session logs".to_string(),
+                        });
+                    }
+                    // Also check for logs in tmp/
+                    let tmp_path = root.join("tmp");
+                    out.push(Candidate {
+                        path: tmp_path,
+                        reason: "temporary session logs".to_string(),
+                    });
                 }
             }
 

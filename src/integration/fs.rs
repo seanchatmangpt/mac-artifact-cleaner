@@ -118,6 +118,37 @@ pub fn estimate_size(path: &Path, stats: Arc<Stats>) -> u64 {
     size
 }
 
+/// Performs a fast, bounded traversal to see if any file within the project
+/// has been modified recently. This correctly identifies active development
+/// because a directory's `mtime` only updates on direct child changes.
+fn is_recently_active(project_root: &Path, hours: u64) -> bool {
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
+
+    let mut builder = WalkBuilder::new(project_root);
+    builder
+        .hidden(false)
+        .ignore(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .max_depth(Some(4)); // Limit depth for speed
+
+    for result in builder.build() {
+        if let Ok(entry) = result {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    if let Ok(modified) = meta.modified() {
+                        if modified > cutoff {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 // ── Parallel traversal ─────────────────────────────────────────────────────────
 
 /// Recursively traverses a root path to find candidate files/folders.
@@ -213,6 +244,9 @@ pub fn scan_root(
             };
 
             let path = entry.path();
+            if args_snapshot.verbose {
+                eprintln!("Visiting: {}", path.display());
+            }
 
             if let Ok(meta) = entry.metadata() {
                 if meta.is_file() {
@@ -259,6 +293,11 @@ pub fn scan_root(
 
                     let mut lock = candidates.lock().unwrap();
                     for c in found {
+                        if args_snapshot.ignore_recent_hours > 0 {
+                            if is_recently_active(&c.path, args_snapshot.ignore_recent_hours) {
+                                continue;
+                            }
+                        }
                         lock.insert(c);
                     }
                 }

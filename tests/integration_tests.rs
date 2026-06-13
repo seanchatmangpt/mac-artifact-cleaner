@@ -40,6 +40,7 @@ fn test_project_detection_and_candidates() {
         aggressive: true,
         verbose: false,
         tool_roots: false,
+        ignore_recent_hours: 1,
     };
     let snap2 = read_dir_snapshot(&project_dir);
     let project = detect_project_from_snapshot(&snap2).unwrap();
@@ -109,12 +110,23 @@ fn test_end_to_end_artifact_scan_build_delete() {
     fs::create_dir(&py_venv).unwrap();
     File::create(py_venv.join("pip")).unwrap();
 
+    // Workaround for recent project ignoring: set mtimes to past for all files
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "find '{}' '{}' -exec touch -t 202001010000 {{}} +",
+            rust_proj.display(),
+            py_proj.display()
+        ))
+        .status();
+
     // 2. Perform file traversal scanning
     let args = ArgsSnapshot {
         deps: true,
         aggressive: true,
         verbose: true,
         tool_roots: false,
+        ignore_recent_hours: 1,
     };
     let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));
     let stats = Arc::new(Stats::default());
@@ -642,6 +654,7 @@ fn test_traversal_barriers() {
         aggressive: false,
         verbose: false,
         tool_roots: false,
+        ignore_recent_hours: 1,
     };
 
     let candidates = Arc::new(Mutex::new(BTreeSet::new()));

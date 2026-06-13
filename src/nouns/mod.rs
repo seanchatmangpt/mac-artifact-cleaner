@@ -17,6 +17,7 @@ pub mod wpm;
 pub mod wpm_use_cases;
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -98,10 +99,27 @@ pub enum Command {
     Wpm {
         #[command(subcommand)]
         action: wpm::WpmAction,
-    },
-}
+    }
+    }
 
-pub fn handle_cli() -> anyhow::Result<()> {
+    /// Returns the default list of roots to scan for developer artifacts.
+    /// Includes the user's home directory and the system temporary directory.
+    pub fn default_scan_roots() -> anyhow::Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home);
+    } else {
+        anyhow::bail!("Home directory not found");
+    }
+
+    // Always include /tmp for developer build artifacts and lock files
+    roots.push(PathBuf::from("/tmp"));
+
+    Ok(roots)
+    }
+
+    pub fn handle_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Wizard => wizard::handle(),

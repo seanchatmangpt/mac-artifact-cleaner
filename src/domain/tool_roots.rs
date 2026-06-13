@@ -82,9 +82,11 @@ pub fn build_tool_root_defs() -> Vec<ToolRootDef> {
     let defs = [
         (".gemini", "ai_tool_state", "review"),
         (".claude", "ai_tool_state", "review"),
+        (".antigravitycli", "ai_tool_state", "review"),
         (".codex", "ai_tool_state", "review"),
         (".cursor", "ai_tool_state", "review"),
         (".continue", "ai_tool_state", "review"),
+        (".huggingface", "model_cache", "review"),
         (".vscode", "editor_state", "review"),
         (".idea", "editor_state", "review"),
         (".cargo", "rust_package_cache", "review"),
