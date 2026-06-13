@@ -17,7 +17,11 @@ pub mod wpm;
 pub mod wpm_use_cases;
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
+use std::sync::OnceLock;
+use crate::domain::policy::OclnrPolicy;
+
+pub static POLICY: OnceLock<OclnrPolicy> = OnceLock::new();
 
 #[derive(Parser, Debug)]
 #[command(
@@ -27,10 +31,14 @@ use std::path::PathBuf;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
+    /// Optional path to a custom OCLNR.yaml policy file
+    #[arg(long)]
+    pub policy: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    // ... (rest of commands)
     /// Interactive maintenance wizard (Audit -> Plan -> Delete -> Thin)
     #[command(alias = "clean")]
     Wizard,
@@ -100,27 +108,24 @@ pub enum Command {
         #[command(subcommand)]
         action: wpm::WpmAction,
     }
-    }
+}
 
-    /// Returns the default list of roots to scan for developer artifacts.
-    /// Includes the user's home directory and the system temporary directory.
-    pub fn default_scan_roots() -> anyhow::Result<Vec<PathBuf>> {
-    let mut roots = Vec::new();
-
-    if let Some(home) = dirs::home_dir() {
-        roots.push(home);
-    } else {
-        anyhow::bail!("Home directory not found");
-    }
-
-    // Always include /tmp for developer build artifacts and lock files
-    roots.push(PathBuf::from("/tmp"));
-
-    Ok(roots)
-    }
-
-    pub fn handle_cli() -> anyhow::Result<()> {
+pub fn handle_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    
+    let policy = if let Some(path) = cli.policy {
+        OclnrPolicy::load_from_file(&path)?
+    } else {
+        let default_path = Path::new("OCLNR.yaml");
+        if default_path.exists() {
+            OclnrPolicy::load_from_file(default_path)?
+        } else {
+            OclnrPolicy::default()
+        }
+    };
+    
+    POLICY.set(policy).map_err(|_| anyhow::anyhow!("Failed to set global policy"))?;
+    
     match cli.command {
         Command::Wizard => wizard::handle(),
         Command::Completion { action } => completion::handle(action),
