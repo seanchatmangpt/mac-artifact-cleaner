@@ -116,7 +116,7 @@ pub fn handle_cli() -> anyhow::Result<()> {
     let policy = if let Some(path) = cli.policy {
         OclnrPolicy::load_from_file(&path)?
     } else {
-        let default_path = Path::new("OCLNR.toml");
+        let default_path = Path::new("osxclnr.toml");
         if default_path.exists() {
             OclnrPolicy::load_from_file(default_path)?
         } else {

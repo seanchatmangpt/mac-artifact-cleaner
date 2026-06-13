@@ -14,9 +14,9 @@ pub struct OclnrPolicy {
 impl OclnrPolicy {
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)
-            .context("Failed to read OCLNR.toml")?;
+            .context("Failed to read osxclnr.toml")?;
         let policy: OclnrPolicy = toml::from_str(&content)
-            .context("Failed to parse OCLNR.toml")?;
+            .context("Failed to parse osxclnr.toml")?;
         Ok(policy)
     }
 }
