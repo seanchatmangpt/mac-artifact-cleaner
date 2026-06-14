@@ -33,7 +33,12 @@ pub struct PlanItem {
 pub enum PlanItemKind {
     File,
     Dir,
+    GithubRepo,
+    GithubBranch,
+    GithubRun,
+    GithubRelease,
 }
+
 
 impl DeletionPlan {
     /// Creates a new deletion plan.

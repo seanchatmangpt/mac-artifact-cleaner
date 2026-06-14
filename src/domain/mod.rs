@@ -13,3 +13,5 @@ pub mod receipt;
 pub mod redaction;
 pub mod time;
 pub mod tool_roots;
+pub mod github;
+

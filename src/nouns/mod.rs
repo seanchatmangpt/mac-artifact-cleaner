@@ -16,6 +16,7 @@ pub mod tool_roots;
 pub mod wizard;
 pub mod wpm;
 pub mod wpm_use_cases;
+pub mod github;
 
 use clap::{Parser, Subcommand};
 use std::path::{PathBuf, Path};
@@ -120,6 +121,11 @@ pub enum Command {
     Wpm {
         #[command(subcommand)]
         action: wpm::WpmAction,
+    },
+    /// GitHub wrapper actions
+    Github {
+        #[command(subcommand)]
+        action: github::GithubAction,
     }
 }
 
@@ -176,5 +182,6 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::Ocel { action } => ocel::handle(action),
         Command::Privacy { action } => privacy::handle(action),
         Command::Wpm { action } => wpm::handle(action),
+        Command::Github { action } => github::handle(action),
     }
 }

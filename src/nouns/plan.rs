@@ -156,7 +156,12 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                             .map(|m| m.blocks() * 512)
                             .unwrap_or(0),
                         PlanItemKind::Dir => physical_dir_size(&c.path),
+                        PlanItemKind::GithubRepo
+                        | PlanItemKind::GithubBranch
+                        | PlanItemKind::GithubRun
+                        | PlanItemKind::GithubRelease => 0,
                     };
+
                     PlanItem {
                         path: c.path.clone(),
                         kind,

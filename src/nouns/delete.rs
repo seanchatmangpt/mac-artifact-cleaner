@@ -122,6 +122,17 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                                     bytes_freed: 0,
                                 },
                             },
+                            PlanItemKind::GithubRepo
+                            | PlanItemKind::GithubBranch
+                            | PlanItemKind::GithubRun
+                            | PlanItemKind::GithubRelease => DeletionResult {
+                                path: item.path.clone(),
+                                status: DeletionStatus::Failed,
+                                error: Some("GitHub resources must be deleted using the github command".to_string()),
+                                blake3_hash: None,
+                                bytes_freed: 0,
+                            },
+
                         }
                     };
                     pb.inc(1);

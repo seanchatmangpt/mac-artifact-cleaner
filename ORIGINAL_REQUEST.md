@@ -341,3 +341,47 @@ rg "/Users/sac|/Users/" docs examples tests src README.md AGENTS.md .gitignore |
 ```
 
 Capture and summarize outputs.
+
+## Follow-up — 2026-06-14T20:22:14Z
+
+Evolve the `osx-clnr` tool to add a command-line wrapper around the `gh` CLI to inspect, plan, and clean up GitHub repositories. The tool must follow the project's strict `clap-noun-verb` design and non-negotiable operating laws (dry-run, plan, receipt, verification).
+
+Working directory: `/Users/sac/osx-clnr`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. CLI Integration & Noun-Verb CLI Contract
+Add a new noun `github` or `repo` to the existing clap-noun-verb structure in `osx-clnr`. The command surface must follow the existing pattern:
+- `github scan` or `github audit`: Inspect repositories, branches, runs, and releases to identify stale candidates.
+- `github plan`: Build a reviewable cleanup plan file.
+- `github delete`: Execute deletion strictly from the saved plan file, executing the corresponding `gh` CLI commands.
+- `github receipt`: Output and verify deletion receipts.
+
+### R2. Strict `gh` CLI Wrapper Boundary
+All interaction with GitHub must occur through executing the local `gh` CLI binary. The application must not perform direct HTTP network requests to the GitHub API, nor manage raw authentication tokens. It relies entirely on the system's authenticated `gh` environment.
+
+### R3. Supported Cleanup Targets
+The tool must support auditing and proposing plans to:
+- Delete merged/stale branches (both local tracking and remote).
+- Delete old GitHub Action workflow runs (e.g., filtering by status, age, or count).
+- Archive or delete stale/empty repositories.
+- Delete old/draft releases or untagged packages.
+
+### R4. Plan-Bound Execution & Audit Trail
+Adhere strictly to the `osx-clnr` safety laws in `AGENTS.md`:
+- Never run destructive actions directly from a live scan.
+- Write a structured JSON/OCEL plan file containing the targets for deletion.
+- Execution requires passing the plan file path.
+- Generate a receipt file mapping every successful, skipped, or failed deletion event.
+
+## Acceptance Criteria
+
+### CLI Interface Validation
+- [ ] Running the binary with the new `github` noun and verbs successfully outputs help messages and accepts valid parameters.
+
+### Plan Generation
+- [ ] Running the scan/plan step generates a valid JSON plan containing structured cleanup targets (e.g., target branch names, run IDs, repo names, release tags).
+
+### Mocked CLI Verification
+- [ ] Rust integration/unit tests verify the command builder logic by mocking the output of `gh` CLI commands (e.g., mock stdout for `gh repo list`, `gh run list`, etc.) and checking that the target commands (e.g., `gh repo delete`, `gh run delete`) are invoked with correct arguments.

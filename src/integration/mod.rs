@@ -6,3 +6,5 @@ pub mod fs;
 pub mod monitor;
 pub mod progress;
 pub mod tmutil;
+pub mod github;
+
