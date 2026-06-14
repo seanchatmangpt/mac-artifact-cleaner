@@ -57,7 +57,7 @@ fn find_wpm_binary() -> anyhow::Result<String> {
     if let Ok(path) = which::which("wpm") {
         return Ok(path.to_string_lossy().to_string());
     }
-    
+
     // 2. Check local wasm4pm repo target/release
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?;
     let release_path = home.join("wasm4pm/target/release/wpm");
@@ -71,16 +71,16 @@ fn find_wpm_binary() -> anyhow::Result<String> {
         return Ok(debug_path.to_string_lossy().to_string());
     }
 
-    anyhow::bail!("Could not find 'wpm' binary in PATH or ~/wasm4pm/target/... Please install wasm4pm.")
+    anyhow::bail!(
+        "Could not find 'wpm' binary in PATH or ~/wasm4pm/target/... Please install wasm4pm."
+    )
 }
 
 fn run_wpm_cmd(args: &[&str]) -> anyhow::Result<()> {
     let wpm_bin = find_wpm_binary()?;
     println!("Executing: {} {}", wpm_bin, args.join(" "));
-    
-    let status = Command::new(wpm_bin)
-        .args(args)
-        .status()?;
+
+    let status = Command::new(wpm_bin).args(args).status()?;
 
     if !status.success() {
         anyhow::bail!("wpm command failed with status: {}", status);

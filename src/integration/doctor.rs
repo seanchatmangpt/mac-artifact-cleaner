@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 //! Integration layer for the doctor command.
 //! All filesystem reads and process spawner commands live here.
 

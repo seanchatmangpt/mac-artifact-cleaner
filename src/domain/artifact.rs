@@ -299,8 +299,11 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
     // but block the root-level /Library, /System, etc.
     if s.starts_with("/Users/") && !s.contains("/Library/Application Support/CloudDocs") {
         // We still want to block some very specific user paths that are too noisy or sensitive
-        if s.contains("/Library/Application Support/CloudDocs") || s.contains("/Library/Mail") || s.contains("/Library/Messages") {
-             return true;
+        if s.contains("/Library/Application Support/CloudDocs")
+            || s.contains("/Library/Mail")
+            || s.contains("/Library/Messages")
+        {
+            return true;
         }
         return false;
     }
@@ -597,7 +600,11 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
         names.push("ai_project");
     }
 
-    if snap.has_dir("tmp") || snap.has_dir("logs") || snap.has_dir("chats") || snap.has_dir("agents") {
+    if snap.has_dir("tmp")
+        || snap.has_dir("logs")
+        || snap.has_dir("chats")
+        || snap.has_dir("agents")
+    {
         names.push("ai_project");
     }
 

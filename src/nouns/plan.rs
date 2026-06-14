@@ -159,7 +159,11 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                         PlanItemKind::GithubRepo
                         | PlanItemKind::GithubBranch
                         | PlanItemKind::GithubRun
-                        | PlanItemKind::GithubRelease => 0,
+                        | PlanItemKind::GithubRelease
+                        | PlanItemKind::GithubCache
+                        | PlanItemKind::GithubIssue
+                        | PlanItemKind::GithubPr
+                        | PlanItemKind::GithubReleaseAsset => 0,
                     };
 
                     PlanItem {
@@ -173,7 +177,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
 
             // Largest reclaim first — both for the printed preview and so deletion
             // tackles the biggest wins before any I/O errors can interrupt it.
-            items.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+            items.sort_by_key(|b| std::cmp::Reverse(b.bytes));
 
             let plan_total: u64 = items.iter().map(|i| i.bytes).sum();
 

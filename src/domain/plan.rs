@@ -37,8 +37,11 @@ pub enum PlanItemKind {
     GithubBranch,
     GithubRun,
     GithubRelease,
+    GithubCache,
+    GithubIssue,
+    GithubPr,
+    GithubReleaseAsset,
 }
-
 
 impl DeletionPlan {
     /// Creates a new deletion plan.

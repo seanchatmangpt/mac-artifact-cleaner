@@ -385,3 +385,38 @@ Adhere strictly to the `osx-clnr` safety laws in `AGENTS.md`:
 
 ### Mocked CLI Verification
 - [ ] Rust integration/unit tests verify the command builder logic by mocking the output of `gh` CLI commands (e.g., mock stdout for `gh repo list`, `gh run list`, etc.) and checking that the target commands (e.g., `gh repo delete`, `gh run delete`) are invoked with correct arguments.
+
+## Follow-up — 2026-06-14T23:37:44Z
+
+Evolve the `osx-clnr` GitHub cleanup capabilities to support actions cache deletion, stale issues/PRs management, release assets cleanup, and pagination/interaction optimizations. The additions must follow the project's strict `clap-noun-verb` design and non-destructive plan-bound operating laws.
+
+Working directory: `/Users/sac/osx-clnr`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Expand Cleanup Targets
+The companion tool must support the following new targets:
+1. **GitHub Actions Cache**: Retrieve and delete old/stale Actions Caches via the `gh cache` CLI (e.g. `gh cache list` and `gh cache delete`).
+2. **Stale/Inactive Issues & PRs**: Identify and close or label issues and pull requests that have had no activity for $N$ days. Use the `gh issue` and `gh pr` CLIs.
+3. **Release Assets**: List and delete large asset files/binaries attached to old releases, keeping the release itself if desired, or deleting specific target assets.
+
+### R2. CLI wrapper & Pagination Optimizations
+1. Wrap all interactions using the system's `gh` CLI executable. Optimize all list operations with proper pagination/limits to handle repositories with large numbers of issues, runs, or caches.
+2. For interactive executions, support prompt choices or confirmation dialogs where appropriate during manual invocations (non-automated runs).
+
+### R3. Safety & Plan-Bound Operations
+1. All new targets must adhere to the `osx-clnr` safety laws:
+   - Identify candidate resources during the scan/audit phase.
+   - Write those resources as items to a reviewable JSON plan file (e.g. `github://cache/...`, `github://issue/...`, etc.).
+   - Execute deletion strictly from the plan file.
+   - Record outcomes in a detailed deletion receipt.
+
+## Acceptance Criteria
+
+### Integration Tests & Mocks
+- [ ] Implement Rust unit/integration tests with mocked outputs for `gh cache list`, `gh issue list`, `gh pr list`, etc.
+- [ ] Verify that correct cleanup commands (e.g. `gh cache delete`, `gh issue close`) are built and executed.
+
+### CLI Execution
+- [ ] Running the binary with the new targets added to the `github` subcommand runs successfully, outputs valid help text, builds plans, and executes deletions strictly from plans.```

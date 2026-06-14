@@ -1,3 +1,4 @@
+#![allow(clippy::manual_flatten, clippy::collapsible_if, clippy::unnecessary_sort_by, clippy::redundant_pattern_matching)]
 //! Filesystem traversal, size estimation, and plan-bound deletion.
 //!
 //! **Integration layer rule**: All `std::fs` and OS calls live here.

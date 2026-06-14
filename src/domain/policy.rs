@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
-use std::path::Path;
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::Path;
 use toml;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -13,10 +13,9 @@ pub struct OclnrPolicy {
 
 impl OclnrPolicy {
     pub fn load_from_file(path: &Path) -> Result<Self> {
-        let content = fs::read_to_string(path)
-            .context("Failed to read osxclnr.toml")?;
-        let policy: OclnrPolicy = toml::from_str(&content)
-            .context("Failed to parse osxclnr.toml")?;
+        let content = fs::read_to_string(path).context("Failed to read osxclnr.toml")?;
+        let policy: OclnrPolicy =
+            toml::from_str(&content).context("Failed to parse osxclnr.toml")?;
         Ok(policy)
     }
 }
@@ -28,10 +27,7 @@ impl Default for OclnrPolicy {
                 "node_modules".to_string(),
                 ".cache".to_string(),
             ],
-            ignore_paths: vec![
-                "/System".to_string(),
-                "/Library".to_string(),
-            ],
+            ignore_paths: vec!["/System".to_string(), "/Library".to_string()],
             retention_hours: 168,
         }
     }

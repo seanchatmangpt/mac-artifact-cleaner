@@ -36,11 +36,7 @@ fn main() {
     // ── simulate deletion: remove those two from the snapshot list ────────────
     let remaining: Vec<String> = all_snapshots
         .iter()
-        .filter(|s| {
-            !oldest_two
-                .iter()
-                .any(|date| s.contains(date.as_str()))
-        })
+        .filter(|s| !oldest_two.iter().any(|date| s.contains(date.as_str())))
         .cloned()
         .collect();
 
@@ -49,9 +45,7 @@ fn main() {
     println!("thinned list     -> {:?}", thinned);
     assert_eq!(thinned.len(), 2, "two snapshots must have been thinned");
     assert!(
-        thinned
-            .iter()
-            .any(|s| s.contains("2026-05-25-080000")),
+        thinned.iter().any(|s| s.contains("2026-05-25-080000")),
         "oldest must be in thinned list"
     );
 
@@ -63,7 +57,10 @@ fn main() {
         all_snapshots.clone(),
         remaining.clone(),
     );
-    println!("receipt          -> snapshots_thinned={:?}", receipt.snapshots_thinned);
+    println!(
+        "receipt          -> snapshots_thinned={:?}",
+        receipt.snapshots_thinned
+    );
     assert_eq!(
         receipt.snapshots_thinned.len(),
         2,

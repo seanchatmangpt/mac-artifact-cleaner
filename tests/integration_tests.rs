@@ -231,14 +231,17 @@ fn test_end_to_end_artifact_scan_build_delete() {
             PlanItemKind::GithubRepo
             | PlanItemKind::GithubBranch
             | PlanItemKind::GithubRun
-            | PlanItemKind::GithubRelease => osx_clnr::domain::receipt::DeletionResult {
+            | PlanItemKind::GithubRelease
+            | PlanItemKind::GithubCache
+            | PlanItemKind::GithubIssue
+            | PlanItemKind::GithubPr
+            | PlanItemKind::GithubReleaseAsset => osx_clnr::domain::receipt::DeletionResult {
                 path: item.path.clone(),
                 status: DeletionStatus::Failed,
                 error: Some("Not supported".to_string()),
                 blake3_hash: None,
                 bytes_freed: 0,
             },
-
         };
         results.push(res);
     }

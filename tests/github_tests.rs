@@ -2,7 +2,7 @@ use osx_clnr::domain::github::GithubTarget;
 use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
 use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
 use osx_clnr::integration::github::MockCommandExecutor;
-use osx_clnr::nouns::github::discover_candidates;
+use osx_clnr::nouns::github::{discover_candidates, handle, GithubAction};
 use std::path::PathBuf;
 
 #[test]
@@ -57,6 +57,60 @@ fn test_github_target_parsing_and_roundtrip() {
         }
     );
     assert_eq!(target_release.to_path_buf(), p_release);
+
+    // Cache
+    let p_cache = PathBuf::from("github://cache/owner/my-repo/12345/my-key/v1");
+    let target_cache = GithubTarget::parse(&p_cache).unwrap();
+    assert_eq!(
+        target_cache,
+        GithubTarget::Cache {
+            owner: "owner".to_string(),
+            repo: "my-repo".to_string(),
+            cache_id: 12345,
+            key: "my-key/v1".to_string()
+        }
+    );
+    assert_eq!(target_cache.to_path_buf(), p_cache);
+
+    // Issue
+    let p_issue = PathBuf::from("github://issue/owner/my-repo/42");
+    let target_issue = GithubTarget::parse(&p_issue).unwrap();
+    assert_eq!(
+        target_issue,
+        GithubTarget::Issue {
+            owner: "owner".to_string(),
+            repo: "my-repo".to_string(),
+            number: 42
+        }
+    );
+    assert_eq!(target_issue.to_path_buf(), p_issue);
+
+    // PR
+    let p_pr = PathBuf::from("github://pr/owner/my-repo/101");
+    let target_pr = GithubTarget::parse(&p_pr).unwrap();
+    assert_eq!(
+        target_pr,
+        GithubTarget::Pr {
+            owner: "owner".to_string(),
+            repo: "my-repo".to_string(),
+            number: 101
+        }
+    );
+    assert_eq!(target_pr.to_path_buf(), p_pr);
+
+    // ReleaseAsset
+    let p_asset = PathBuf::from("github://release-asset/owner/my-repo/555/large-asset.zip");
+    let target_asset = GithubTarget::parse(&p_asset).unwrap();
+    assert_eq!(
+        target_asset,
+        GithubTarget::ReleaseAsset {
+            owner: "owner".to_string(),
+            repo: "my-repo".to_string(),
+            asset_id: 555,
+            asset_name: "large-asset.zip".to_string()
+        }
+    );
+    assert_eq!(target_asset.to_path_buf(), p_asset);
 }
 
 #[test]
@@ -64,10 +118,6 @@ fn test_github_discover_candidates() {
     let mock = MockCommandExecutor::new();
 
     // 1. Mock repo list command
-    // We have three repos:
-    // - "empty-repo" (isEmpty = true) -> Repo Candidate
-    // - "stale-repo" (isEmpty = false, updatedAt/pushedAt = older) -> Repo Candidate
-    // - "active-repo" (isEmpty = false, active) -> We will scan branches, runs, releases
     let repo_list_json = r#"[
         {
             "name": "empty-repo",
@@ -79,7 +129,8 @@ fn test_github_discover_candidates() {
             "updatedAt": "2026-06-10T12:00:00Z",
             "createdAt": "2026-06-10T12:00:00Z",
             "diskUsage": 0,
-            "visibility": "PUBLIC"
+            "visibility": "PUBLIC",
+            "defaultBranchRef": null
         },
         {
             "name": "stale-repo",
@@ -92,7 +143,8 @@ fn test_github_discover_candidates() {
             "updatedAt": "2025-12-10T12:00:00Z",
             "createdAt": "2025-12-10T12:00:00Z",
             "diskUsage": 100,
-            "visibility": "PUBLIC"
+            "visibility": "PUBLIC",
+            "defaultBranchRef": null
         },
         {
             "name": "active-repo",
@@ -105,7 +157,10 @@ fn test_github_discover_candidates() {
             "updatedAt": "2026-06-14T12:00:00Z",
             "createdAt": "2026-06-10T12:00:00Z",
             "diskUsage": 200,
-            "visibility": "PUBLIC"
+            "visibility": "PUBLIC",
+            "defaultBranchRef": {
+                "name": "main"
+            }
         }
     ]"#;
     mock.add_response(
@@ -116,19 +171,14 @@ fn test_github_discover_candidates() {
             "--limit",
             "1000",
             "--json",
-            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility",
+            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility,defaultBranchRef",
         ],
         0,
         repo_list_json,
         "",
     );
 
-    // Stub runs, branches, and releases for empty-repo and stale-repo to not be called (they are candidates and skipped from further scans)
-
-    // For active-repo:
-    // Runs:
-    // - Run 1: completed, older than 30 days -> Run Candidate
-    // - Run 2: in_progress -> Ignored
+    // 2. Mock runs for active-repo
     let run_list_json = r#"[
         {
             "databaseId": 111,
@@ -161,7 +211,7 @@ fn test_github_discover_candidates() {
             "--repo",
             "my-org/active-repo",
             "--limit",
-            "100",
+            "1000",
             "--json",
             "databaseId,number,name,headBranch,status,conclusion,createdAt,updatedAt",
         ],
@@ -170,10 +220,7 @@ fn test_github_discover_candidates() {
         "",
     );
 
-    // Branches:
-    // - main (default) -> Ignored
-    // - feature/merged (compare status identical) -> Branch Candidate
-    // - feature/active (compare status ahead) -> Ignored
+    // 3. Mock branches for active-repo
     let branch_list_json = r#"[
         {
             "name": "main",
@@ -193,33 +240,42 @@ fn test_github_discover_candidates() {
     ]"#;
     mock.add_response(
         "gh",
-        &["api", "repos/my-org/active-repo/branches"],
+        &[
+            "api",
+            "repos/my-org/active-repo/branches?per_page=100&page=1",
+        ],
         0,
         branch_list_json,
         "",
     );
 
-    let compare_merged_json = r#"{"status": "identical", "ahead_by": 0, "behind_by": 0, "total_commits": 0}"#;
+    let compare_merged_json =
+        r#"{"status": "identical", "ahead_by": 0, "behind_by": 0, "total_commits": 0}"#;
     mock.add_response(
         "gh",
-        &["api", "repos/my-org/active-repo/compare/main...feature/merged"],
+        &[
+            "api",
+            "repos/my-org/active-repo/compare/main...feature/merged",
+        ],
         0,
         compare_merged_json,
         "",
     );
 
-    let compare_active_json = r#"{"status": "ahead", "ahead_by": 2, "behind_by": 0, "total_commits": 2}"#;
+    let compare_active_json =
+        r#"{"status": "ahead", "ahead_by": 2, "behind_by": 0, "total_commits": 2}"#;
     mock.add_response(
         "gh",
-        &["api", "repos/my-org/active-repo/compare/main...feature/active"],
+        &[
+            "api",
+            "repos/my-org/active-repo/compare/main...feature/active",
+        ],
         0,
         compare_active_json,
         "",
     );
 
-    // Releases:
-    // - v1.0.0-draft (isDraft = true) -> Release Candidate
-    // - v0.9.0 (published, 2026-06-13, not older than 30 days) -> Ignored
+    // 4. Mock releases for active-repo
     let release_list_json = r#"[
         {
             "tagName": "v1.0.0-draft",
@@ -227,15 +283,28 @@ fn test_github_discover_candidates() {
             "isDraft": true,
             "isPrerelease": false,
             "createdAt": "2026-06-12T12:00:00Z",
-            "publishedAt": null
+            "publishedAt": null,
+            "assets": []
         },
         {
             "tagName": "v0.9.0",
             "name": "Release 0.9",
             "isDraft": false,
             "isPrerelease": false,
-            "createdAt": "2026-06-13T12:00:00Z",
-            "publishedAt": "2026-06-13T12:05:00Z"
+            "createdAt": "2026-06-13T12:05:00Z",
+            "publishedAt": "2026-06-13T12:05:00Z",
+            "assets": [
+                {
+                    "id": 555,
+                    "name": "large-asset.zip",
+                    "size": 10485760
+                },
+                {
+                    "id": 666,
+                    "name": "small-asset.txt",
+                    "size": 1024
+                }
+            ]
         }
     ]"#;
     mock.add_response(
@@ -246,40 +315,199 @@ fn test_github_discover_candidates() {
             "--repo",
             "my-org/active-repo",
             "--limit",
-            "100",
+            "1000",
             "--json",
-            "tagName,name,isDraft,isPrerelease,createdAt,publishedAt",
+            "tagName,name,isDraft,isPrerelease,createdAt,publishedAt,assets",
         ],
         0,
         release_list_json,
         "",
     );
 
+    // 5. Mock caches for active-repo
+    let cache_list_json = r#"[
+        {
+            "id": 333,
+            "key": "stale-cache",
+            "sizeInBytes": 5000,
+            "createdAt": "2025-12-10T12:00:00Z",
+            "lastAccessedAt": "2025-12-10T12:00:00Z"
+        },
+        {
+            "id": 444,
+            "key": "active-cache",
+            "sizeInBytes": 2000,
+            "createdAt": "2026-06-13T12:00:00Z",
+            "lastAccessedAt": "2026-06-13T12:00:00Z"
+        }
+    ]"#;
+    mock.add_response(
+        "gh",
+        &[
+            "cache",
+            "list",
+            "--repo",
+            "my-org/active-repo",
+            "--limit",
+            "1000",
+            "--json",
+            "id,key,sizeInBytes,createdAt,lastAccessedAt",
+        ],
+        0,
+        cache_list_json,
+        "",
+    );
+
+    // 6. Mock issues for active-repo
+    let issue_list_json = r#"[
+        {
+            "number": 12,
+            "title": "Stale issue",
+            "state": "OPEN",
+            "createdAt": "2025-12-10T12:00:00Z",
+            "updatedAt": "2025-12-10T12:00:00Z",
+            "labels": []
+        },
+        {
+            "number": 13,
+            "title": "Closed issue",
+            "state": "CLOSED",
+            "createdAt": "2025-12-10T12:00:00Z",
+            "updatedAt": "2025-12-10T12:00:00Z",
+            "labels": []
+        }
+    ]"#;
+    mock.add_response(
+        "gh",
+        &[
+            "issue",
+            "list",
+            "--repo",
+            "my-org/active-repo",
+            "--state",
+            "all",
+            "--limit",
+            "1000",
+            "--json",
+            "number,title,state,createdAt,updatedAt,labels",
+        ],
+        0,
+        issue_list_json,
+        "",
+    );
+
+    // 7. Mock PRs for active-repo
+    let pr_list_json = r#"[
+        {
+            "number": 24,
+            "title": "Stale PR",
+            "state": "OPEN",
+            "createdAt": "2025-12-10T12:00:00Z",
+            "updatedAt": "2025-12-10T12:00:00Z",
+            "labels": []
+        },
+        {
+            "number": 25,
+            "title": "Merged PR",
+            "state": "MERGED",
+            "createdAt": "2025-12-10T12:00:00Z",
+            "updatedAt": "2025-12-10T12:00:00Z",
+            "labels": []
+        }
+    ]"#;
+    mock.add_response(
+        "gh",
+        &[
+            "pr",
+            "list",
+            "--repo",
+            "my-org/active-repo",
+            "--state",
+            "all",
+            "--limit",
+            "1000",
+            "--json",
+            "number,title,state,createdAt,updatedAt,labels",
+        ],
+        0,
+        pr_list_json,
+        "",
+    );
+
     // Perform scan discovery
-    // We assume current date in tests is around 2026-06-14
-    let candidates = discover_candidates(&mock, 180, 30, 30).unwrap();
+    let candidates = discover_candidates(&mock, 180, 30, 30, 30, 30, 30, 5).unwrap();
 
-    assert_eq!(candidates.len(), 5);
+    assert_eq!(candidates.len(), 9);
 
-    assert_eq!(candidates[0].path, PathBuf::from("github://repo/my-org/empty-repo"));
+    assert_eq!(
+        candidates[0].path,
+        PathBuf::from("github://repo/my-org/empty-repo")
+    );
     assert_eq!(candidates[0].kind, PlanItemKind::GithubRepo);
     assert_eq!(candidates[0].reason, "Empty repository");
 
-    assert_eq!(candidates[1].path, PathBuf::from("github://repo/my-org/stale-repo"));
+    assert_eq!(
+        candidates[1].path,
+        PathBuf::from("github://repo/my-org/stale-repo")
+    );
     assert_eq!(candidates[1].kind, PlanItemKind::GithubRepo);
-    assert_eq!(candidates[1].reason, "Stale repository (inactive for > 180 days)");
+    assert_eq!(
+        candidates[1].reason,
+        "Stale repository (inactive for > 180 days)"
+    );
 
-    assert_eq!(candidates[2].path, PathBuf::from("github://run/my-org/active-repo/111"));
+    assert_eq!(
+        candidates[2].path,
+        PathBuf::from("github://run/my-org/active-repo/111")
+    );
     assert_eq!(candidates[2].kind, PlanItemKind::GithubRun);
-    assert_eq!(candidates[2].reason, "Completed workflow run older than 30 days (run #1)");
+    assert_eq!(
+        candidates[2].reason,
+        "Completed workflow run older than 30 days (run #1)"
+    );
 
-    assert_eq!(candidates[3].path, PathBuf::from("github://branch/my-org/active-repo/feature/merged"));
+    assert_eq!(
+        candidates[3].path,
+        PathBuf::from("github://branch/my-org/active-repo/feature/merged")
+    );
     assert_eq!(candidates[3].kind, PlanItemKind::GithubBranch);
-    assert_eq!(candidates[3].reason, "Branch fully merged into default branch (main)");
+    assert_eq!(
+        candidates[3].reason,
+        "Branch fully merged into default branch (main)"
+    );
 
-    assert_eq!(candidates[4].path, PathBuf::from("github://release/my-org/active-repo/v1.0.0-draft"));
+    assert_eq!(
+        candidates[4].path,
+        PathBuf::from("github://release/my-org/active-repo/v1.0.0-draft")
+    );
     assert_eq!(candidates[4].kind, PlanItemKind::GithubRelease);
     assert_eq!(candidates[4].reason, "Draft release");
+
+    assert_eq!(
+        candidates[5].path,
+        PathBuf::from("github://release-asset/my-org/active-repo/555/large-asset.zip")
+    );
+    assert_eq!(candidates[5].kind, PlanItemKind::GithubReleaseAsset);
+    assert_eq!(candidates[5].bytes, 10485760);
+
+    assert_eq!(
+        candidates[6].path,
+        PathBuf::from("github://cache/my-org/active-repo/333/stale-cache")
+    );
+    assert_eq!(candidates[6].kind, PlanItemKind::GithubCache);
+    assert_eq!(candidates[6].bytes, 5000);
+
+    assert_eq!(
+        candidates[7].path,
+        PathBuf::from("github://issue/my-org/active-repo/12")
+    );
+    assert_eq!(candidates[7].kind, PlanItemKind::GithubIssue);
+
+    assert_eq!(
+        candidates[8].path,
+        PathBuf::from("github://pr/my-org/active-repo/24")
+    );
+    assert_eq!(candidates[8].kind, PlanItemKind::GithubPr);
 }
 
 #[test]
@@ -287,10 +515,80 @@ fn test_github_deletions_execution() {
     let mock = MockCommandExecutor::new();
 
     // Mock successful deletions
-    mock.add_response("gh", &["repo", "delete", "my-org/empty-repo", "--confirm"], 0, "", "");
-    mock.add_response("gh", &["run", "delete", "111", "--repo", "my-org/active-repo"], 0, "", "");
-    mock.add_response("gh", &["api", "-X", "DELETE", "repos/my-org/active-repo/git/refs/heads/feature/merged"], 0, "", "");
-    mock.add_response("gh", &["release", "delete", "v1.0.0-draft", "--repo", "my-org/active-repo", "--yes", "--cleanup-tag"], 0, "", "");
+    mock.add_response(
+        "gh",
+        &["repo", "delete", "my-org/empty-repo", "--yes"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &["run", "delete", "111", "--repo", "my-org/active-repo"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &[
+            "api",
+            "-X",
+            "DELETE",
+            "repos/my-org/active-repo/git/refs/heads/feature/merged",
+        ],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &[
+            "release",
+            "delete",
+            "v1.0.0-draft",
+            "--repo",
+            "my-org/active-repo",
+            "--yes",
+            "--cleanup-tag",
+        ],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &["cache", "delete", "333", "--repo", "my-org/active-repo"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &["issue", "close", "12", "--repo", "my-org/active-repo"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &["pr", "close", "24", "--repo", "my-org/active-repo"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &[
+            "api",
+            "-X",
+            "DELETE",
+            "repos/my-org/active-repo/releases/assets/555",
+        ],
+        0,
+        "",
+        "",
+    );
 
     let items = vec![
         PlanItem {
@@ -317,6 +615,30 @@ fn test_github_deletions_execution() {
             reason: "Draft release".to_string(),
             bytes: 0,
         },
+        PlanItem {
+            path: PathBuf::from("github://cache/my-org/active-repo/333/stale-cache"),
+            kind: PlanItemKind::GithubCache,
+            reason: "Stale cache".to_string(),
+            bytes: 5000,
+        },
+        PlanItem {
+            path: PathBuf::from("github://issue/my-org/active-repo/12"),
+            kind: PlanItemKind::GithubIssue,
+            reason: "Stale issue".to_string(),
+            bytes: 0,
+        },
+        PlanItem {
+            path: PathBuf::from("github://pr/my-org/active-repo/24"),
+            kind: PlanItemKind::GithubPr,
+            reason: "Stale PR".to_string(),
+            bytes: 0,
+        },
+        PlanItem {
+            path: PathBuf::from("github://release-asset/my-org/active-repo/555/large-asset.zip"),
+            kind: PlanItemKind::GithubReleaseAsset,
+            reason: "Large asset".to_string(),
+            bytes: 10485760,
+        },
     ];
 
     let plan = DeletionPlan::new(
@@ -327,26 +649,69 @@ fn test_github_deletions_execution() {
         vec![],
     );
 
-    // Let's manually run the delete execution using our mock executor to test the logic
     let start_time = 0;
     let mut results = Vec::new();
 
     for item in &plan.items {
         let res = if let Some(target) = GithubTarget::parse(&item.path) {
-            let delete_result = match target {
-                GithubTarget::Repo { owner, repo } => osx_clnr::integration::github::delete_repository(&mock, &owner, &repo),
-                GithubTarget::Branch { owner, repo, branch } => osx_clnr::integration::github::delete_branch(&mock, &owner, &repo, &branch),
-                GithubTarget::Run { owner, repo, run_id } => osx_clnr::integration::github::delete_run(&mock, &owner, &repo, run_id),
-                GithubTarget::Release { owner, repo, tag } => osx_clnr::integration::github::delete_release(&mock, &owner, &repo, &tag),
+            let delete_result = match &target {
+                GithubTarget::Repo { owner, repo } => {
+                    osx_clnr::integration::github::delete_repository(&mock, owner, repo)
+                }
+                GithubTarget::Branch {
+                    owner,
+                    repo,
+                    branch,
+                } => osx_clnr::integration::github::delete_branch(&mock, owner, repo, branch),
+                GithubTarget::Run {
+                    owner,
+                    repo,
+                    run_id,
+                } => osx_clnr::integration::github::delete_run(&mock, owner, repo, *run_id),
+                GithubTarget::Release { owner, repo, tag } => {
+                    osx_clnr::integration::github::delete_release(&mock, owner, repo, tag)
+                }
+                GithubTarget::Cache {
+                    owner,
+                    repo,
+                    cache_id,
+                    ..
+                } => osx_clnr::integration::github::delete_cache(&mock, owner, repo, *cache_id),
+                GithubTarget::Issue {
+                    owner,
+                    repo,
+                    number,
+                } => osx_clnr::integration::github::close_issue(&mock, owner, repo, *number),
+                GithubTarget::Pr {
+                    owner,
+                    repo,
+                    number,
+                } => osx_clnr::integration::github::close_pr(&mock, owner, repo, *number),
+                GithubTarget::ReleaseAsset {
+                    owner,
+                    repo,
+                    asset_id,
+                    ..
+                } => osx_clnr::integration::github::delete_release_asset(
+                    &mock, owner, repo, *asset_id,
+                ),
             };
             match delete_result {
-                Ok(()) => DeletionResult {
-                    path: item.path.clone(),
-                    status: DeletionStatus::Deleted,
-                    error: None,
-                    blake3_hash: None,
-                    bytes_freed: 0,
-                },
+                Ok(()) => {
+                    let bytes_freed = match target {
+                        GithubTarget::Cache { .. } | GithubTarget::ReleaseAsset { .. } => {
+                            item.bytes
+                        }
+                        _ => 0,
+                    };
+                    DeletionResult {
+                        path: item.path.clone(),
+                        status: DeletionStatus::Deleted,
+                        error: None,
+                        blake3_hash: None,
+                        bytes_freed,
+                    }
+                }
                 Err(e) => DeletionResult {
                     path: item.path.clone(),
                     status: DeletionStatus::Failed,
@@ -378,28 +743,114 @@ fn test_github_deletions_execution() {
         None,
     );
 
-    // Verify receipt has 4 deleted items
-    assert_eq!(receipt.execution_record.results.len(), 4);
-    for r in &receipt.execution_record.results {
+    assert_eq!(receipt.execution_record.results.len(), 8);
+    for (i, r) in receipt.execution_record.results.iter().enumerate() {
         assert_eq!(r.status, DeletionStatus::Deleted);
         assert!(r.error.is_none());
-        assert_eq!(r.bytes_freed, 0);
+        if i == 4 {
+            assert_eq!(r.bytes_freed, 5000);
+        } else if i == 7 {
+            assert_eq!(r.bytes_freed, 10485760);
+        } else {
+            assert_eq!(r.bytes_freed, 0);
+        }
     }
 
-    // Verify correct commands were made
     let calls = mock.get_calls();
-    assert_eq!(calls.len(), 4);
-    assert_eq!(calls[0], vec!["gh".to_string(), "repo".to_string(), "delete".to_string(), "my-org/empty-repo".to_string(), "--confirm".to_string()]);
-    assert_eq!(calls[1], vec!["gh".to_string(), "run".to_string(), "delete".to_string(), "111".to_string(), "--repo".to_string(), "my-org/active-repo".to_string()]);
-    assert_eq!(calls[2], vec!["gh".to_string(), "api".to_string(), "-X".to_string(), "DELETE".to_string(), "repos/my-org/active-repo/git/refs/heads/feature/merged".to_string()]);
-    assert_eq!(calls[3], vec!["gh".to_string(), "release".to_string(), "delete".to_string(), "v1.0.0-draft".to_string(), "--repo".to_string(), "my-org/active-repo".to_string(), "--yes".to_string(), "--cleanup-tag".to_string()]);
+    assert_eq!(calls.len(), 8);
+    assert_eq!(
+        calls[0],
+        vec![
+            "gh".to_string(),
+            "repo".to_string(),
+            "delete".to_string(),
+            "my-org/empty-repo".to_string(),
+            "--yes".to_string()
+        ]
+    );
+    assert_eq!(
+        calls[1],
+        vec![
+            "gh".to_string(),
+            "run".to_string(),
+            "delete".to_string(),
+            "111".to_string(),
+            "--repo".to_string(),
+            "my-org/active-repo".to_string()
+        ]
+    );
+    assert_eq!(
+        calls[2],
+        vec![
+            "gh".to_string(),
+            "api".to_string(),
+            "-X".to_string(),
+            "DELETE".to_string(),
+            "repos/my-org/active-repo/git/refs/heads/feature/merged".to_string()
+        ]
+    );
+    assert_eq!(
+        calls[3],
+        vec![
+            "gh".to_string(),
+            "release".to_string(),
+            "delete".to_string(),
+            "v1.0.0-draft".to_string(),
+            "--repo".to_string(),
+            "my-org/active-repo".to_string(),
+            "--yes".to_string(),
+            "--cleanup-tag".to_string()
+        ]
+    );
+    assert_eq!(
+        calls[4],
+        vec![
+            "gh".to_string(),
+            "cache".to_string(),
+            "delete".to_string(),
+            "333".to_string(),
+            "--repo".to_string(),
+            "my-org/active-repo".to_string()
+        ]
+    );
+    assert_eq!(
+        calls[5],
+        vec![
+            "gh".to_string(),
+            "issue".to_string(),
+            "close".to_string(),
+            "12".to_string(),
+            "--repo".to_string(),
+            "my-org/active-repo".to_string()
+        ]
+    );
+    assert_eq!(
+        calls[6],
+        vec![
+            "gh".to_string(),
+            "pr".to_string(),
+            "close".to_string(),
+            "24".to_string(),
+            "--repo".to_string(),
+            "my-org/active-repo".to_string()
+        ]
+    );
+    assert_eq!(
+        calls[7],
+        vec![
+            "gh".to_string(),
+            "api".to_string(),
+            "-X".to_string(),
+            "DELETE".to_string(),
+            "repos/my-org/active-repo/releases/assets/555".to_string()
+        ]
+    );
 }
 
 #[test]
 fn test_github_zero_thresholds() {
     let mock = MockCommandExecutor::new();
 
-    // Repo list: one repo that is active but not empty
     let repo_list_json = r#"[
         {
             "name": "active-repo",
@@ -412,7 +863,8 @@ fn test_github_zero_thresholds() {
             "updatedAt": "2026-06-14T12:00:00Z",
             "createdAt": "2026-06-10T12:00:00Z",
             "diskUsage": 200,
-            "visibility": "PUBLIC"
+            "visibility": "PUBLIC",
+            "defaultBranchRef": null
         }
     ]"#;
     mock.add_response(
@@ -423,26 +875,29 @@ fn test_github_zero_thresholds() {
             "--limit",
             "1000",
             "--json",
-            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility",
+            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility,defaultBranchRef",
         ],
         0,
         repo_list_json,
         "",
     );
 
-    // Call discover_candidates with 0-day threshold
-    // Even if it was pushed 1 second ago, it will be marked stale
-    let candidates = discover_candidates(&mock, 0, 0, 0).unwrap();
+    let candidates = discover_candidates(&mock, 0, 0, 0, 0, 0, 0, 0).unwrap();
     assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0].path, PathBuf::from("github://repo/my-org/active-repo"));
-    assert_eq!(candidates[0].reason, "Stale repository (inactive for > 0 days)");
+    assert_eq!(
+        candidates[0].path,
+        PathBuf::from("github://repo/my-org/active-repo")
+    );
+    assert_eq!(
+        candidates[0].reason,
+        "Stale repository (inactive for > 0 days)"
+    );
 }
 
 #[test]
 fn test_github_custom_default_branch_heuristic_issue() {
     let mock = MockCommandExecutor::new();
 
-    // Repo list with active repo
     let repo_list_json = r#"[
         {
             "name": "active-repo",
@@ -455,7 +910,10 @@ fn test_github_custom_default_branch_heuristic_issue() {
             "updatedAt": "2026-06-14T12:00:00Z",
             "createdAt": "2026-06-10T12:00:00Z",
             "diskUsage": 200,
-            "visibility": "PUBLIC"
+            "visibility": "PUBLIC",
+            "defaultBranchRef": {
+                "name": "develop"
+            }
         }
     ]"#;
     mock.add_response(
@@ -466,7 +924,7 @@ fn test_github_custom_default_branch_heuristic_issue() {
             "--limit",
             "1000",
             "--json",
-            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility",
+            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility,defaultBranchRef",
         ],
         0,
         repo_list_json,
@@ -482,7 +940,7 @@ fn test_github_custom_default_branch_heuristic_issue() {
             "--repo",
             "my-org/active-repo",
             "--limit",
-            "100",
+            "1000",
             "--json",
             "databaseId,number,name,headBranch,status,conclusion,createdAt,updatedAt",
         ],
@@ -491,8 +949,6 @@ fn test_github_custom_default_branch_heuristic_issue() {
         "",
     );
 
-    // Branches: feature/merged is listed first, then the actual default branch develop.
-    // Since neither "main" nor "master" exists, the heuristic selects the first branch ("feature/merged") as default.
     let branch_list_json = r#"[
         {
             "name": "feature/merged",
@@ -507,19 +963,23 @@ fn test_github_custom_default_branch_heuristic_issue() {
     ]"#;
     mock.add_response(
         "gh",
-        &["api", "repos/my-org/active-repo/branches"],
+        &[
+            "api",
+            "repos/my-org/active-repo/branches?per_page=100&page=1",
+        ],
         0,
         branch_list_json,
         "",
     );
 
-    // feature/merged is treated as default.
-    // develop is compared against feature/merged.
-    // If develop is ahead, it is not merged.
-    let compare_develop_json = r#"{"status": "ahead", "ahead_by": 5, "behind_by": 0, "total_commits": 5}"#;
+    let compare_develop_json =
+        r#"{"status": "identical", "ahead_by": 0, "behind_by": 0, "total_commits": 0}"#;
     mock.add_response(
         "gh",
-        &["api", "repos/my-org/active-repo/compare/feature/merged...develop"],
+        &[
+            "api",
+            "repos/my-org/active-repo/compare/develop...feature/merged",
+        ],
         0,
         compare_develop_json,
         "",
@@ -534,19 +994,128 @@ fn test_github_custom_default_branch_heuristic_issue() {
             "--repo",
             "my-org/active-repo",
             "--limit",
-            "100",
+            "1000",
             "--json",
-            "tagName,name,isDraft,isPrerelease,createdAt,publishedAt",
+            "tagName,name,isDraft,isPrerelease,createdAt,publishedAt,assets",
         ],
         0,
         "[]",
         "",
     );
 
-    let candidates = discover_candidates(&mock, 180, 30, 30).unwrap();
+    // No caches
+    mock.add_response(
+        "gh",
+        &[
+            "cache",
+            "list",
+            "--repo",
+            "my-org/active-repo",
+            "--limit",
+            "1000",
+            "--json",
+            "id,key,sizeInBytes,createdAt,lastAccessedAt",
+        ],
+        0,
+        "[]",
+        "",
+    );
 
-    // feature/merged was ignored because it was incorrectly selected as the default branch!
-    // So we found 0 candidates instead of finding feature/merged as merged into develop.
-    assert_eq!(candidates.len(), 0);
+    // No issues
+    mock.add_response(
+        "gh",
+        &[
+            "issue",
+            "list",
+            "--repo",
+            "my-org/active-repo",
+            "--state",
+            "all",
+            "--limit",
+            "1000",
+            "--json",
+            "number,title,state,createdAt,updatedAt,labels",
+        ],
+        0,
+        "[]",
+        "",
+    );
+
+    // No PRs
+    mock.add_response(
+        "gh",
+        &[
+            "pr",
+            "list",
+            "--repo",
+            "my-org/active-repo",
+            "--state",
+            "all",
+            "--limit",
+            "1000",
+            "--json",
+            "number,title,state,createdAt,updatedAt,labels",
+        ],
+        0,
+        "[]",
+        "",
+    );
+
+    let candidates = discover_candidates(&mock, 180, 30, 30, 30, 30, 30, 5).unwrap();
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(
+        candidates[0].path,
+        PathBuf::from("github://branch/my-org/active-repo/feature/merged")
+    );
+    assert_eq!(
+        candidates[0].reason,
+        "Branch fully merged into default branch (develop)"
+    );
 }
 
+#[test]
+fn test_github_confirmation_and_refused() {
+    let plan_dir = tempfile::tempdir().unwrap();
+    let plan_path = plan_dir.path().join("plan.json");
+    let receipt_path = plan_dir.path().join("receipt.json");
+
+    let items = vec![PlanItem {
+        path: PathBuf::from("github://repo/my-org/empty-repo"),
+        kind: PlanItemKind::GithubRepo,
+        reason: "Empty repository".to_string(),
+        bytes: 0,
+    }];
+
+    let plan = DeletionPlan::new(
+        vec![PathBuf::from("github://")],
+        false,
+        false,
+        items,
+        vec![],
+    );
+    let plan_json = serde_json::to_string_pretty(&plan).unwrap();
+    std::fs::write(&plan_path, plan_json).unwrap();
+
+    // Since stdin is not a tty in test runner, dialoguer returns false.
+    // So the item should be refused.
+    handle(GithubAction::Delete {
+        plan: plan_path.clone(),
+        receipt: receipt_path.clone(),
+        yes: false,
+    })
+    .unwrap();
+
+    // Verify receipt has status Refused
+    let receipt_content = std::fs::read_to_string(&receipt_path).unwrap();
+    let receipt: DeletionReceipt = serde_json::from_str(&receipt_content).unwrap();
+    assert_eq!(receipt.execution_record.results.len(), 1);
+    assert_eq!(
+        receipt.execution_record.results[0].status,
+        DeletionStatus::Refused
+    );
+    assert_eq!(
+        receipt.execution_record.results[0].error,
+        Some("Deletion refused by user".to_string())
+    );
+}

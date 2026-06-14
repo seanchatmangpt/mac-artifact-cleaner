@@ -1,7 +1,7 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sled::Db;
 use std::path::{Path, PathBuf};
-use anyhow::Result;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OclArtifact {
@@ -30,7 +30,7 @@ impl OclDatabase {
         Ok(())
     }
 
-    pub fn get_artifact(&self, path: &PathBuf) -> Result<Option<OclArtifact>> {
+    pub fn get_artifact(&self, path: &std::path::Path) -> Result<Option<OclArtifact>> {
         let key = path.to_string_lossy().as_bytes().to_vec();
         if let Some(v) = self.db.get(key)? {
             let artifact: OclArtifact = serde_json::from_slice(&v)?;
@@ -50,7 +50,7 @@ impl OclDatabase {
         Ok(results)
     }
 
-    pub fn remove_artifact(&self, path: &PathBuf) -> Result<()> {
+    pub fn remove_artifact(&self, path: &std::path::Path) -> Result<()> {
         let key = path.to_string_lossy().as_bytes().to_vec();
         self.db.remove(key)?;
         Ok(())

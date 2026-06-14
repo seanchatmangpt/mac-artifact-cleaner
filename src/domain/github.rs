@@ -13,9 +13,15 @@
 //! assert_eq!(target, GithubTarget::Repo { owner: "owner".into(), repo: "repo".into() });
 //! ```
 
-use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Duration};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+/// A branch reference wrapper returned in defaultBranchRef.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GhBranchRef {
+    pub name: String,
+}
 
 /// Repositories returned from `gh repo list --json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -33,6 +39,7 @@ pub struct GhRepo {
     pub created_at: String,
     pub disk_usage: u64,
     pub visibility: String,
+    pub default_branch_ref: Option<GhBranchRef>,
 }
 
 /// The owner of a GitHub repository.
@@ -89,15 +96,54 @@ pub struct GhRelease {
     pub is_prerelease: bool,
     pub created_at: String,
     pub published_at: Option<String>,
+    #[serde(default)]
+    pub assets: Vec<GhReleaseAsset>,
 }
 
-/// A parsed GitHub URI target, referencing a Repository, Branch, Workflow Run, or Release.
+/// A parsed GitHub URI target, referencing a Repository, Branch, Workflow Run, Release, Cache, Issue, PR, or Release Asset.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GithubTarget {
-    Repo { owner: String, repo: String },
-    Branch { owner: String, repo: String, branch: String },
-    Run { owner: String, repo: String, run_id: u64 },
-    Release { owner: String, repo: String, tag: String },
+    Repo {
+        owner: String,
+        repo: String,
+    },
+    Branch {
+        owner: String,
+        repo: String,
+        branch: String,
+    },
+    Run {
+        owner: String,
+        repo: String,
+        run_id: u64,
+    },
+    Release {
+        owner: String,
+        repo: String,
+        tag: String,
+    },
+    Cache {
+        owner: String,
+        repo: String,
+        cache_id: u64,
+        key: String,
+    },
+    Issue {
+        owner: String,
+        repo: String,
+        number: u64,
+    },
+    Pr {
+        owner: String,
+        repo: String,
+        number: u64,
+    },
+    ReleaseAsset {
+        owner: String,
+        repo: String,
+        asset_id: u64,
+        asset_name: String,
+    },
 }
 
 impl GithubTarget {
@@ -125,6 +171,22 @@ impl GithubTarget {
     /// let target = GithubTarget::parse(Path::new("github://release/my-owner/my-repo/v1.0.0-beta/3")).unwrap();
     /// assert_eq!(target, GithubTarget::Release { owner: "my-owner".into(), repo: "my-repo".into(), tag: "v1.0.0-beta/3".into() });
     ///
+    /// // Cache target containing slashes in key
+    /// let target = GithubTarget::parse(Path::new("github://cache/my-owner/my-repo/54321/cargo-cache/1")).unwrap();
+    /// assert_eq!(target, GithubTarget::Cache { owner: "my-owner".into(), repo: "my-repo".into(), cache_id: 54321, key: "cargo-cache/1".into() });
+    ///
+    /// // Issue target
+    /// let target = GithubTarget::parse(Path::new("github://issue/my-owner/my-repo/42")).unwrap();
+    /// assert_eq!(target, GithubTarget::Issue { owner: "my-owner".into(), repo: "my-repo".into(), number: 42 });
+    ///
+    /// // PR target
+    /// let target = GithubTarget::parse(Path::new("github://pr/my-owner/my-repo/101")).unwrap();
+    /// assert_eq!(target, GithubTarget::Pr { owner: "my-owner".into(), repo: "my-repo".into(), number: 101 });
+    ///
+    /// // ReleaseAsset target
+    /// let target = GithubTarget::parse(Path::new("github://release-asset/my-owner/my-repo/123/asset-file.zip")).unwrap();
+    /// assert_eq!(target, GithubTarget::ReleaseAsset { owner: "my-owner".into(), repo: "my-repo".into(), asset_id: 123, asset_name: "asset-file.zip".into() });
+    ///
     /// // Invalid scheme
     /// assert!(GithubTarget::parse(Path::new("/Users/user/project")).is_none());
     /// ```
@@ -133,17 +195,17 @@ impl GithubTarget {
         if !path_str.starts_with("github://") {
             return None;
         }
-        
+
         let stripped = path_str.strip_prefix("github://")?;
         let parts: Vec<&str> = stripped.split('/').collect();
         if parts.len() < 3 {
             return None;
         }
-        
+
         let resource_type = parts[0];
         let owner = parts[1].to_string();
         let repo = parts[2].to_string();
-        
+
         match resource_type {
             "repo" => {
                 if parts.len() == 3 {
@@ -155,7 +217,11 @@ impl GithubTarget {
             "branch" => {
                 let branch = parts[3..].join("/");
                 if !branch.is_empty() {
-                    Some(GithubTarget::Branch { owner, repo, branch })
+                    Some(GithubTarget::Branch {
+                        owner,
+                        repo,
+                        branch,
+                    })
                 } else {
                     None
                 }
@@ -163,7 +229,11 @@ impl GithubTarget {
             "run" => {
                 if parts.len() == 4 {
                     let run_id = parts[3].parse::<u64>().ok()?;
-                    Some(GithubTarget::Run { owner, repo, run_id })
+                    Some(GithubTarget::Run {
+                        owner,
+                        repo,
+                        run_id,
+                    })
                 } else {
                     None
                 }
@@ -172,6 +242,66 @@ impl GithubTarget {
                 let tag = parts[3..].join("/");
                 if !tag.is_empty() {
                     Some(GithubTarget::Release { owner, repo, tag })
+                } else {
+                    None
+                }
+            }
+            "cache" => {
+                if parts.len() >= 5 {
+                    let cache_id = parts[3].parse::<u64>().ok()?;
+                    let key = parts[4..].join("/");
+                    if !key.is_empty() {
+                        Some(GithubTarget::Cache {
+                            owner,
+                            repo,
+                            cache_id,
+                            key,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            "issue" => {
+                if parts.len() == 4 {
+                    let number = parts[3].parse::<u64>().ok()?;
+                    Some(GithubTarget::Issue {
+                        owner,
+                        repo,
+                        number,
+                    })
+                } else {
+                    None
+                }
+            }
+            "pr" => {
+                if parts.len() == 4 {
+                    let number = parts[3].parse::<u64>().ok()?;
+                    Some(GithubTarget::Pr {
+                        owner,
+                        repo,
+                        number,
+                    })
+                } else {
+                    None
+                }
+            }
+            "release-asset" => {
+                if parts.len() >= 5 {
+                    let asset_id = parts[3].parse::<u64>().ok()?;
+                    let asset_name = parts[4..].join("/");
+                    if !asset_name.is_empty() {
+                        Some(GithubTarget::ReleaseAsset {
+                            owner,
+                            repo,
+                            asset_id,
+                            asset_name,
+                        })
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -196,14 +326,55 @@ impl GithubTarget {
             GithubTarget::Repo { owner, repo } => {
                 format!("github://repo/{}/{}", owner, repo)
             }
-            GithubTarget::Branch { owner, repo, branch } => {
+            GithubTarget::Branch {
+                owner,
+                repo,
+                branch,
+            } => {
                 format!("github://branch/{}/{}/{}", owner, repo, branch)
             }
-            GithubTarget::Run { owner, repo, run_id } => {
+            GithubTarget::Run {
+                owner,
+                repo,
+                run_id,
+            } => {
                 format!("github://run/{}/{}/{}", owner, repo, run_id)
             }
             GithubTarget::Release { owner, repo, tag } => {
                 format!("github://release/{}/{}/{}", owner, repo, tag)
+            }
+            GithubTarget::Cache {
+                owner,
+                repo,
+                cache_id,
+                key,
+            } => {
+                format!("github://cache/{}/{}/{}/{}", owner, repo, cache_id, key)
+            }
+            GithubTarget::Issue {
+                owner,
+                repo,
+                number,
+            } => {
+                format!("github://issue/{}/{}/{}", owner, repo, number)
+            }
+            GithubTarget::Pr {
+                owner,
+                repo,
+                number,
+            } => {
+                format!("github://pr/{}/{}/{}", owner, repo, number)
+            }
+            GithubTarget::ReleaseAsset {
+                owner,
+                repo,
+                asset_id,
+                asset_name,
+            } => {
+                format!(
+                    "github://release-asset/{}/{}/{}/{}",
+                    owner, repo, asset_id, asset_name
+                )
             }
         };
         PathBuf::from(path_str)
@@ -244,6 +415,7 @@ fn is_older_than(date_str: &str, threshold_days: i64, current_time_iso: &str) ->
 ///     created_at: "2026-06-10T12:00:00Z".into(),
 ///     disk_usage: 0,
 ///     visibility: "PUBLIC".into(),
+///     default_branch_ref: None,
 /// };
 ///
 /// assert!(is_repo_stale_or_empty(&empty_repo, 30, "2026-06-14T12:00:00Z"));
@@ -261,6 +433,7 @@ fn is_older_than(date_str: &str, threshold_days: i64, current_time_iso: &str) ->
 ///     created_at: "2026-06-10T12:00:00Z".into(),
 ///     disk_usage: 100,
 ///     visibility: "PUBLIC".into(),
+///     default_branch_ref: None,
 /// };
 /// assert!(!is_repo_stale_or_empty(&active_repo, 30, "2026-06-14T12:00:00Z"));
 /// ```
@@ -271,7 +444,7 @@ pub fn is_repo_stale_or_empty(repo: &GhRepo, threshold_days: i64, current_time_i
     if repo.is_archived {
         return false;
     }
-    
+
     // Check if the latest activity (push or update) is older than the threshold.
     let push_date = repo.pushed_at.as_deref().unwrap_or(&repo.updated_at);
     is_older_than(push_date, threshold_days, current_time_iso)
@@ -355,6 +528,7 @@ pub fn is_branch_merged(compare: &GhCompareResponse) -> bool {
 ///     is_prerelease: false,
 ///     created_at: "2026-06-10T12:00:00Z".into(),
 ///     published_at: None,
+///     assets: vec![],
 /// };
 /// assert!(is_release_stale_or_draft(&draft, 30, "2026-06-14T12:00:00Z"));
 ///
@@ -365,12 +539,160 @@ pub fn is_branch_merged(compare: &GhCompareResponse) -> bool {
 ///     is_prerelease: false,
 ///     created_at: "2026-05-10T12:00:00Z".into(),
 ///     published_at: Some("2026-05-10T12:00:00Z".into()),
+///     assets: vec![],
 /// };
 /// assert!(is_release_stale_or_draft(&old_release, 30, "2026-06-14T12:00:00Z"));
 /// ```
-pub fn is_release_stale_or_draft(release: &GhRelease, threshold_days: i64, current_time_iso: &str) -> bool {
+pub fn is_release_stale_or_draft(
+    release: &GhRelease,
+    threshold_days: i64,
+    current_time_iso: &str,
+) -> bool {
     if release.is_draft {
         return true;
     }
     is_older_than(&release.created_at, threshold_days, current_time_iso)
+}
+
+/// Cache representation returned from `gh cache list --json`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GhCache {
+    pub id: u64,
+    pub key: String,
+    pub size_in_bytes: u64,
+    pub created_at: String,
+    pub last_accessed_at: String,
+}
+
+/// Label representation returned inside issues/PRs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GhLabel {
+    pub name: String,
+}
+
+/// Issue representation returned from `gh issue list --json`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GhIssue {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub labels: Vec<GhLabel>,
+}
+
+/// Pull Request representation returned from `gh pr list --json`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GhPr {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub labels: Vec<GhLabel>,
+}
+
+/// Release asset representation returned inside `GhRelease`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GhReleaseAsset {
+    pub id: u64,
+    pub name: String,
+    pub size: u64,
+}
+
+/// Evaluates if a cache is stale.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::github::{GhCache, is_cache_stale};
+///
+/// let cache = GhCache {
+///     id: 123,
+///     key: "my-cache-key".into(),
+///     size_in_bytes: 1024,
+///     created_at: "2026-05-10T12:00:00Z".into(),
+///     last_accessed_at: "2026-05-10T12:00:00Z".into(),
+/// };
+///
+/// // Stale cache older than 30 days
+/// assert!(is_cache_stale(&cache, 30, "2026-06-14T12:00:00Z"));
+///
+/// // Cache not yet older than 30 days
+/// assert!(!is_cache_stale(&cache, 60, "2026-06-14T12:00:00Z"));
+/// ```
+pub fn is_cache_stale(cache: &GhCache, threshold_days: i64, current_time_iso: &str) -> bool {
+    is_older_than(&cache.last_accessed_at, threshold_days, current_time_iso)
+}
+
+/// Evaluates if an issue is stale.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::github::{GhIssue, is_issue_stale};
+///
+/// let issue = GhIssue {
+///     number: 42,
+///     title: "A bug".into(),
+///     state: "OPEN".into(),
+///     created_at: "2026-05-10T12:00:00Z".into(),
+///     updated_at: "2026-05-10T12:00:00Z".into(),
+///     labels: vec![],
+/// };
+///
+/// // Open issue older than 30 days
+/// assert!(is_issue_stale(&issue, 30, "2026-06-14T12:00:00Z"));
+///
+/// // Open issue not older than 30 days
+/// assert!(!is_issue_stale(&issue, 60, "2026-06-14T12:00:00Z"));
+///
+/// // Closed issue is not considered stale
+/// let mut closed_issue = issue.clone();
+/// closed_issue.state = "CLOSED".into();
+/// assert!(!is_issue_stale(&closed_issue, 30, "2026-06-14T12:00:00Z"));
+/// ```
+pub fn is_issue_stale(issue: &GhIssue, threshold_days: i64, current_time_iso: &str) -> bool {
+    if issue.state != "OPEN" {
+        return false;
+    }
+    is_older_than(&issue.updated_at, threshold_days, current_time_iso)
+}
+
+/// Evaluates if a pull request is stale.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::github::{GhPr, is_pr_stale};
+///
+/// let pr = GhPr {
+///     number: 101,
+///     title: "A feature".into(),
+///     state: "OPEN".into(),
+///     created_at: "2026-05-10T12:00:00Z".into(),
+///     updated_at: "2026-05-10T12:00:00Z".into(),
+///     labels: vec![],
+/// };
+///
+/// // Open PR older than 30 days
+/// assert!(is_pr_stale(&pr, 30, "2026-06-14T12:00:00Z"));
+///
+/// // Open PR not older than 30 days
+/// assert!(!is_pr_stale(&pr, 60, "2026-06-14T12:00:00Z"));
+///
+/// // Merged/closed PR is not considered stale
+/// let mut closed_pr = pr.clone();
+/// closed_pr.state = "MERGED".into();
+/// assert!(!is_pr_stale(&closed_pr, 30, "2026-06-14T12:00:00Z"));
+/// ```
+pub fn is_pr_stale(pr: &GhPr, threshold_days: i64, current_time_iso: &str) -> bool {
+    if pr.state != "OPEN" {
+        return false;
+    }
+    is_older_than(&pr.updated_at, threshold_days, current_time_iso)
 }

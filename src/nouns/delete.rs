@@ -125,14 +125,20 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                             PlanItemKind::GithubRepo
                             | PlanItemKind::GithubBranch
                             | PlanItemKind::GithubRun
-                            | PlanItemKind::GithubRelease => DeletionResult {
+                            | PlanItemKind::GithubRelease
+                            | PlanItemKind::GithubCache
+                            | PlanItemKind::GithubIssue
+                            | PlanItemKind::GithubPr
+                            | PlanItemKind::GithubReleaseAsset => DeletionResult {
                                 path: item.path.clone(),
                                 status: DeletionStatus::Failed,
-                                error: Some("GitHub resources must be deleted using the github command".to_string()),
+                                error: Some(
+                                    "GitHub resources must be deleted using the github command"
+                                        .to_string(),
+                                ),
                                 blake3_hash: None,
                                 bytes_freed: 0,
                             },
-
                         }
                     };
                     pb.inc(1);

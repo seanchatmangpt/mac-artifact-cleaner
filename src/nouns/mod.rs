@@ -7,6 +7,7 @@ pub mod delete;
 pub mod doctor;
 pub mod emergency;
 pub mod exclusion;
+pub mod github;
 pub mod ocel;
 pub mod plan;
 pub mod privacy;
@@ -16,12 +17,11 @@ pub mod tool_roots;
 pub mod wizard;
 pub mod wpm;
 pub mod wpm_use_cases;
-pub mod github;
 
-use clap::{Parser, Subcommand};
-use std::path::{PathBuf, Path};
-use std::sync::OnceLock;
 use crate::domain::policy::OclnrPolicy;
+use clap::{Parser, Subcommand};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 pub static POLICY: OnceLock<OclnrPolicy> = OnceLock::new();
 
@@ -126,7 +126,7 @@ pub enum Command {
     Github {
         #[command(subcommand)]
         action: github::GithubAction,
-    }
+    },
 }
 
 /// Returns the default list of roots to scan for developer artifacts.
@@ -148,7 +148,7 @@ pub fn default_scan_roots() -> anyhow::Result<Vec<PathBuf>> {
 
 pub fn handle_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    
+
     let policy = if let Some(path) = cli.policy {
         OclnrPolicy::load_from_file(&path)?
     } else {
@@ -159,9 +159,11 @@ pub fn handle_cli() -> anyhow::Result<()> {
             OclnrPolicy::default()
         }
     };
-    
-    POLICY.set(policy).map_err(|_| anyhow::anyhow!("Failed to set global policy"))?;
-    
+
+    POLICY
+        .set(policy)
+        .map_err(|_| anyhow::anyhow!("Failed to set global policy"))?;
+
     match cli.command {
         Command::Wizard => wizard::handle(),
         Command::Completion { action } => completion::handle(action),

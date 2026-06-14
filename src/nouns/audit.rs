@@ -122,8 +122,14 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 root
             };
 
-            let (stats, candidates, tool_reports) =
-                run_audit_scan(&roots, deps, aggressive, ignore_recent_hours, tool_roots, verbose)?;
+            let (stats, candidates, tool_reports) = run_audit_scan(
+                &roots,
+                deps,
+                aggressive,
+                ignore_recent_hours,
+                tool_roots,
+                verbose,
+            )?;
 
             println!("\n==================================================");
             println!("               DISK AUDIT RUN                     ");
@@ -362,9 +368,14 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 root
             };
 
-            let (stats, candidates, tool_reports) =
-                run_audit_scan(&roots, deps, aggressive, ignore_recent_hours, tool_roots, false, // non-verbose for summary
-                )?;
+            let (stats, candidates, tool_reports) = run_audit_scan(
+                &roots,
+                deps,
+                aggressive,
+                ignore_recent_hours,
+                tool_roots,
+                false, // non-verbose for summary
+            )?;
 
             print_disk_header();
             print_premium_audit_summary(&stats, &candidates, &tool_reports);
@@ -471,7 +482,7 @@ fn print_large_files(results: &[(PathBuf, u64)], top: usize, min_mb: u64) {
         "\x1b[1m\x1b[36m└─────────────────────────────────────────────────────────────────────────────┘\x1b[0m"
     );
 
-    println!("\n  {:<10}  {}", "Size", "Path");
+    println!("\n  {:<10}  Path", "Size");
     println!("  {}", "─".repeat(78));
 
     for (path, bytes) in &visible {
@@ -534,8 +545,8 @@ fn print_breakdown(root: &std::path::Path, results: &[(PathBuf, u64)], top: usiz
     );
 
     println!(
-        "  {:<50} {:>10}  {:>6}  {}",
-        "Path", "Size", "% of ~", "Category"
+        "  {:<50} {:>10}  {:>6}  Category",
+        "Path", "Size", "% of ~"
     );
     println!("  {}", "─".repeat(80));
 

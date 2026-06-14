@@ -104,7 +104,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
         events.push(OCELEvent {
             id: format!("event-tool-root-observed-{:06}", idx),
             event_type: "tool_root_observed".to_string(),
-            time: observed_time.clone(),
+            time: observed_time,
             attributes: vec![
                 attr("path", serde_json::json!(root.path)),
                 attr("category", serde_json::json!(root.category)),

@@ -277,7 +277,8 @@ impl DeletionReceipt {
         for result in &self.execution_record.results {
             match result.status {
                 DeletionStatus::Deleted | DeletionStatus::SkippedMissing
-                    if result.path.exists() =>
+                    if !result.path.to_string_lossy().starts_with("github://")
+                        && result.path.exists() =>
                 {
                     issues.push(VerificationIssue {
                         path: result.path.clone(),

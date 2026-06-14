@@ -3,7 +3,9 @@
 //! Exposes functions to execute `gh` CLI commands and parse their outputs,
 //! abstracting standard system process execution behind a `CommandExecutor` trait.
 
-use crate::domain::github::{GhRepo, GhRun, GhBranchListRef, GhCompareResponse, GhRelease};
+use crate::domain::github::{
+    GhBranchListRef, GhCache, GhCompareResponse, GhIssue, GhPr, GhRelease, GhRepo, GhRun,
+};
 use std::io;
 use std::process::Output;
 
@@ -37,10 +39,7 @@ fn run_gh_parsed<T: serde::de::DeserializeOwned>(
 }
 
 /// Helper to run a `gh` subcommand and check its status.
-fn run_gh_status(
-    executor: &dyn CommandExecutor,
-    args: &[&str],
-) -> anyhow::Result<()> {
+fn run_gh_status(executor: &dyn CommandExecutor, args: &[&str]) -> anyhow::Result<()> {
     let output = executor.execute("gh", args)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -59,13 +58,17 @@ pub fn list_repositories(executor: &dyn CommandExecutor) -> anyhow::Result<Vec<G
             "--limit",
             "1000",
             "--json",
-            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility",
+            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility,defaultBranchRef",
         ],
     )
 }
 
 /// Lists workflow runs for a specific repository.
-pub fn list_runs(executor: &dyn CommandExecutor, owner: &str, repo: &str) -> anyhow::Result<Vec<GhRun>> {
+pub fn list_runs(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<Vec<GhRun>> {
     let repo_arg = format!("{}/{}", owner, repo);
     run_gh_parsed(
         executor,
@@ -75,7 +78,7 @@ pub fn list_runs(executor: &dyn CommandExecutor, owner: &str, repo: &str) -> any
             "--repo",
             &repo_arg,
             "--limit",
-            "100",
+            "1000",
             "--json",
             "databaseId,number,name,headBranch,status,conclusion,createdAt,updatedAt",
         ],
@@ -83,9 +86,27 @@ pub fn list_runs(executor: &dyn CommandExecutor, owner: &str, repo: &str) -> any
 }
 
 /// Lists branches for a specific repository.
-pub fn list_branches(executor: &dyn CommandExecutor, owner: &str, repo: &str) -> anyhow::Result<Vec<GhBranchListRef>> {
-    let api_path = format!("repos/{}/{}/branches", owner, repo);
-    run_gh_parsed(executor, &["api", &api_path])
+pub fn list_branches(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<Vec<GhBranchListRef>> {
+    let mut all = Vec::new();
+    let mut page = 1;
+    loop {
+        let api_path = format!(
+            "repos/{}/{}/branches?per_page=100&page={}",
+            owner, repo, page
+        );
+        let page_items: Vec<GhBranchListRef> = run_gh_parsed(executor, &["api", &api_path])?;
+        let len = page_items.len();
+        all.extend(page_items);
+        if len < 100 {
+            break;
+        }
+        page += 1;
+    }
+    Ok(all)
 }
 
 /// Compares a branch with a default branch in a repository.
@@ -96,12 +117,19 @@ pub fn compare_branch(
     default_branch: &str,
     branch: &str,
 ) -> anyhow::Result<GhCompareResponse> {
-    let api_path = format!("repos/{}/{}/compare/{}...{}", owner, repo, default_branch, branch);
+    let api_path = format!(
+        "repos/{}/{}/compare/{}...{}",
+        owner, repo, default_branch, branch
+    );
     run_gh_parsed(executor, &["api", &api_path])
 }
 
 /// Lists releases in a repository.
-pub fn list_releases(executor: &dyn CommandExecutor, owner: &str, repo: &str) -> anyhow::Result<Vec<GhRelease>> {
+pub fn list_releases(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<Vec<GhRelease>> {
     let repo_arg = format!("{}/{}", owner, repo);
     run_gh_parsed(
         executor,
@@ -111,40 +139,208 @@ pub fn list_releases(executor: &dyn CommandExecutor, owner: &str, repo: &str) ->
             "--repo",
             &repo_arg,
             "--limit",
-            "100",
+            "1000",
             "--json",
-            "tagName,name,isDraft,isPrerelease,createdAt,publishedAt",
+            "tagName,name,isDraft,isPrerelease,createdAt,publishedAt,assets",
+        ],
+    )
+}
+
+/// Lists caches in a repository.
+pub fn list_caches(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<Vec<GhCache>> {
+    let repo_arg = format!("{}/{}", owner, repo);
+    run_gh_parsed(
+        executor,
+        &[
+            "cache",
+            "list",
+            "--repo",
+            &repo_arg,
+            "--limit",
+            "1000",
+            "--json",
+            "id,key,sizeInBytes,createdAt,lastAccessedAt",
+        ],
+    )
+}
+
+/// Lists issues in a repository.
+pub fn list_issues(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<Vec<GhIssue>> {
+    let repo_arg = format!("{}/{}", owner, repo);
+    run_gh_parsed(
+        executor,
+        &[
+            "issue",
+            "list",
+            "--repo",
+            &repo_arg,
+            "--state",
+            "all",
+            "--limit",
+            "1000",
+            "--json",
+            "number,title,state,createdAt,updatedAt,labels",
+        ],
+    )
+}
+
+/// Lists pull requests in a repository.
+pub fn list_prs(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<Vec<GhPr>> {
+    let repo_arg = format!("{}/{}", owner, repo);
+    run_gh_parsed(
+        executor,
+        &[
+            "pr",
+            "list",
+            "--repo",
+            &repo_arg,
+            "--state",
+            "all",
+            "--limit",
+            "1000",
+            "--json",
+            "number,title,state,createdAt,updatedAt,labels",
         ],
     )
 }
 
 /// Deletes a GitHub repository.
-pub fn delete_repository(executor: &dyn CommandExecutor, owner: &str, repo: &str) -> anyhow::Result<()> {
+pub fn delete_repository(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<()> {
     let repo_arg = format!("{}/{}", owner, repo);
-    run_gh_status(executor, &["repo", "delete", &repo_arg, "--confirm"])
+    run_gh_status(executor, &["repo", "delete", &repo_arg, "--yes"])
 }
 
 /// Deletes a git branch ref from a repository.
-pub fn delete_branch(executor: &dyn CommandExecutor, owner: &str, repo: &str, branch: &str) -> anyhow::Result<()> {
+pub fn delete_branch(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> anyhow::Result<()> {
     let api_path = format!("repos/{}/{}/git/refs/heads/{}", owner, repo, branch);
     run_gh_status(executor, &["api", "-X", "DELETE", &api_path])
 }
 
 /// Deletes a workflow run from a repository.
-pub fn delete_run(executor: &dyn CommandExecutor, owner: &str, repo: &str, run_id: u64) -> anyhow::Result<()> {
+pub fn delete_run(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+    run_id: u64,
+) -> anyhow::Result<()> {
     let repo_arg = format!("{}/{}", owner, repo);
-    run_gh_status(executor, &["run", "delete", &run_id.to_string(), "--repo", &repo_arg])
+    run_gh_status(
+        executor,
+        &["run", "delete", &run_id.to_string(), "--repo", &repo_arg],
+    )
 }
 
 /// Deletes a release and optionally its tag from a repository.
-pub fn delete_release(executor: &dyn CommandExecutor, owner: &str, repo: &str, tag: &str) -> anyhow::Result<()> {
+pub fn delete_release(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+    tag: &str,
+) -> anyhow::Result<()> {
     let repo_arg = format!("{}/{}", owner, repo);
-    run_gh_status(executor, &["release", "delete", tag, "--repo", &repo_arg, "--yes", "--cleanup-tag"])
+    run_gh_status(
+        executor,
+        &[
+            "release",
+            "delete",
+            tag,
+            "--repo",
+            &repo_arg,
+            "--yes",
+            "--cleanup-tag",
+        ],
+    )
+}
+
+/// Deletes a cache from a repository.
+pub fn delete_cache(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+    cache_id: u64,
+) -> anyhow::Result<()> {
+    let repo_arg = format!("{}/{}", owner, repo);
+    run_gh_status(
+        executor,
+        &[
+            "cache",
+            "delete",
+            &cache_id.to_string(),
+            "--repo",
+            &repo_arg,
+        ],
+    )
+}
+
+/// Closes an issue in a repository.
+pub fn close_issue(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> anyhow::Result<()> {
+    let repo_arg = format!("{}/{}", owner, repo);
+    run_gh_status(
+        executor,
+        &["issue", "close", &number.to_string(), "--repo", &repo_arg],
+    )
+}
+
+/// Closes a pull request in a repository.
+pub fn close_pr(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> anyhow::Result<()> {
+    let repo_arg = format!("{}/{}", owner, repo);
+    run_gh_status(
+        executor,
+        &["pr", "close", &number.to_string(), "--repo", &repo_arg],
+    )
+}
+
+/// Deletes a release asset.
+pub fn delete_release_asset(
+    executor: &dyn CommandExecutor,
+    owner: &str,
+    repo: &str,
+    asset_id: u64,
+) -> anyhow::Result<()> {
+    let api_path = format!("repos/{}/{}/releases/assets/{}", owner, repo, asset_id);
+    run_gh_status(executor, &["api", "-X", "DELETE", &api_path])
 }
 
 pub struct MockCommandExecutor {
     pub calls: std::sync::Mutex<Vec<Vec<String>>>,
     pub responses: std::sync::Mutex<std::collections::HashMap<String, (i32, String, String)>>,
+}
+
+impl Default for MockCommandExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockCommandExecutor {
@@ -155,12 +351,19 @@ impl MockCommandExecutor {
         }
     }
 
-    pub fn add_response(&self, program: &str, args: &[&str], status: i32, stdout: &str, stderr: &str) {
+    pub fn add_response(
+        &self,
+        program: &str,
+        args: &[&str],
+        status: i32,
+        stdout: &str,
+        stderr: &str,
+    ) {
         let key = format!("{} {}", program, args.join(" "));
-        self.responses.lock().unwrap().insert(
-            key,
-            (status, stdout.to_string(), stderr.to_string()),
-        );
+        self.responses
+            .lock()
+            .unwrap()
+            .insert(key, (status, stdout.to_string(), stderr.to_string()));
     }
 
     pub fn get_calls(&self) -> Vec<Vec<String>> {
@@ -172,7 +375,9 @@ impl CommandExecutor for MockCommandExecutor {
     fn execute(&self, program: &str, args: &[&str]) -> io::Result<Output> {
         let args_vec: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         self.calls.lock().unwrap().push(
-            std::iter::once(program.to_string()).chain(args_vec).collect()
+            std::iter::once(program.to_string())
+                .chain(args_vec)
+                .collect(),
         );
 
         let key = format!("{} {}", program, args.join(" "));
@@ -203,4 +408,3 @@ impl CommandExecutor for MockCommandExecutor {
         }
     }
 }
-
