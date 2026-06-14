@@ -159,6 +159,8 @@ pub fn parse_size_in_bytes(s: &str) -> Result<u64, String> {
 /// This is the one definition; `integration::progress::human_bytes` and
 /// `domain::tool_roots::human_bytes` re-export it so the two paths cannot drift.
 ///
+/// Running example: [`examples/size_units.rs`](../../examples/size_units.rs)
+///
 /// # Examples
 ///
 /// ```
@@ -187,6 +189,8 @@ pub fn human_bytes(bytes: u64) -> String {
 /// Snapshots are ordered by their parsed date (see [`parse_snapshot_date`]);
 /// entries without a parseable date are ignored. The returned strings are the
 /// date suffixes accepted by `tmutil deletelocalsnapshots`.
+///
+/// Running example: [`examples/snapshot_pipeline.rs`](../../examples/snapshot_pipeline.rs)
 ///
 /// # Examples
 ///

@@ -107,6 +107,8 @@ pub enum ReclaimCheck {
 /// delta. That is correct signal (a `Shortfall`), not a false positive — the
 /// remedy is thinning snapshots, not suppressing the verdict.
 ///
+/// Running example: [`examples/reclaim_check.rs`](../../examples/reclaim_check.rs)
+///
 /// # Examples
 ///
 /// ```
