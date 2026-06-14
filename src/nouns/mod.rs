@@ -5,6 +5,7 @@ pub mod audit;
 pub mod completion;
 pub mod delete;
 pub mod doctor;
+pub mod emergency;
 pub mod exclusion;
 pub mod ocel;
 pub mod plan;
@@ -82,6 +83,18 @@ pub enum Command {
         #[command(subcommand)]
         action: snapshot::SnapshotAction,
     },
+    /// Emergency low-disk reclaim (works when the volume is critically full)
+    Emergency {
+        /// Volume mount point (defaults to "/")
+        #[arg(long, default_value = "/")]
+        mount: String,
+        /// Actually delete; default is a dry-run preview
+        #[arg(long)]
+        yes: bool,
+        /// Optional receipt path (written only if space allows afterward)
+        #[arg(long)]
+        receipt: Option<PathBuf>,
+    },
     /// Exclusion actions
     Exclusion {
         #[command(subcommand)]
@@ -110,6 +123,23 @@ pub enum Command {
     }
 }
 
+/// Returns the default list of roots to scan for developer artifacts.
+/// Includes the user's home directory and the system temporary directory.
+pub fn default_scan_roots() -> anyhow::Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home);
+    } else {
+        anyhow::bail!("Home directory not found");
+    }
+
+    // Always include /tmp for developer build artifacts and lock files
+    roots.push(PathBuf::from("/tmp"));
+
+    Ok(roots)
+}
+
 pub fn handle_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
     
@@ -136,6 +166,11 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::Receipt { action } => receipt::handle(action),
         Command::Doctor { action } => doctor::handle(action),
         Command::Snapshot { action } => snapshot::handle(action),
+        Command::Emergency {
+            mount,
+            yes,
+            receipt,
+        } => emergency::handle(mount, yes, receipt),
         Command::Exclusion { action } => exclusion::handle(action),
         Command::ToolRoots { action } => tool_roots::handle(action),
         Command::Ocel { action } => ocel::handle(action),

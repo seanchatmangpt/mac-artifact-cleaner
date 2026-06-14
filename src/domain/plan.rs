@@ -21,6 +21,11 @@ pub struct PlanItem {
     pub path: PathBuf,
     pub kind: PlanItemKind,
     pub reason: String,
+    /// Physical disk allocation of this item in bytes (blocks × 512), so the plan
+    /// shows reclaim impact before deletion. `#[serde(default)]` keeps plans
+    /// written before this field was added loadable.
+    #[serde(default)]
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,6 +48,7 @@ impl DeletionPlan {
     ///     path: PathBuf::from("/Users/user/dev/project/target"),
     ///     kind: PlanItemKind::Dir,
     ///     reason: "rust target".to_string(),
+    ///     bytes: 0,
     /// }];
     /// let plan = DeletionPlan::new(
     ///     vec![PathBuf::from("/Users/user")],
@@ -94,11 +100,13 @@ impl DeletionPlan {
 ///         path: PathBuf::from("/Users/user/dev/project/target"),
 ///         kind: PlanItemKind::Dir,
 ///         reason: "rust target".to_string(),
+///         bytes: 0,
 ///     },
 ///     PlanItem {
 ///         path: PathBuf::from("/Users/user/dev/project/src/main.rs"),
 ///         kind: PlanItemKind::File,
 ///         reason: "source file".to_string(),
+///         bytes: 0,
 ///     },
 /// ];
 /// let tool_roots = vec![

@@ -21,6 +21,7 @@ pub fn handle() -> anyhow::Result<()> {
         aggressive: false,
         ignore_recent_hours: 168,
         output: plan_file.clone(),
+        include_global_caches: false,
         verbose: false,
     })?;
 

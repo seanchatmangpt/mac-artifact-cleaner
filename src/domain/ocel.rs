@@ -734,6 +734,83 @@ pub fn build_snapshot_thin_ocel(
     }
 }
 
+/// Builds the OCEL log for a *selective* snapshot deletion (`snapshot delete`).
+///
+/// Distinct from [`build_snapshot_thin_ocel`] on purpose: thinning is byte-driven
+/// (macOS chooses what to drop to hit a target); selective deletion names exactly
+/// which snapshots to remove. Emitting the same `snapshot_thin_requested` event
+/// for both would make the event log lie about which operation actually ran — a
+/// model-vs-log mismatch. This emits `snapshot_delete_requested` so process
+/// mining can tell the two apart.
+pub fn build_snapshot_delete_ocel(
+    volume: &str,
+    before: &[String],
+    after: &[String],
+    deleted: &[String],
+) -> OCEL {
+    let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
+    let state_obj_id = format!("snapshot-state-{}", chrono::Utc::now().timestamp());
+
+    let objects = vec![OCELObject {
+        id: state_obj_id.clone(),
+        object_type: "snapshot_state".to_string(),
+        attributes: vec![
+            timed_attr("volume", &now, serde_json::json!(volume)),
+            timed_attr(
+                "snapshot_count",
+                &now,
+                serde_json::json!(after.len() as i64),
+            ),
+            timed_attr("snapshots", &now, serde_json::json!(after)),
+        ],
+        relationships: vec![],
+    }];
+
+    let events = vec![OCELEvent {
+        id: format!("event-snapshot-delete-{}", chrono::Utc::now().timestamp()),
+        event_type: "snapshot_delete_requested".to_string(),
+        time: now,
+        attributes: vec![
+            attr("volume", serde_json::json!(volume)),
+            attr(
+                "snapshots_before_count",
+                serde_json::json!(before.len() as i64),
+            ),
+            attr(
+                "snapshots_after_count",
+                serde_json::json!(after.len() as i64),
+            ),
+            attr("deleted_count", serde_json::json!(deleted.len() as i64)),
+        ],
+        relationships: vec![OCELRelationship {
+            object_id: state_obj_id,
+            qualifier: "resulting-state".to_string(),
+        }],
+    }];
+
+    OCEL {
+        event_types: vec![OCELType {
+            name: "snapshot_delete_requested".to_string(),
+            attributes: vec![
+                attr_def("volume", "string"),
+                attr_def("snapshots_before_count", "integer"),
+                attr_def("snapshots_after_count", "integer"),
+                attr_def("deleted_count", "integer"),
+            ],
+        }],
+        object_types: vec![OCELType {
+            name: "snapshot_state".to_string(),
+            attributes: vec![
+                attr_def("volume", "string"),
+                attr_def("snapshot_count", "integer"),
+                attr_def("snapshots", "array"),
+            ],
+        }],
+        events,
+        objects,
+    }
+}
+
 /// Builds an OCEL log structure for a Time Machine exclusion plan.
 ///
 /// # Examples

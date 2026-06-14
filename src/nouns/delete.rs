@@ -3,11 +3,14 @@
 //! **Noun layer rule**: This module parses, routes, and formats output only.
 //! All destructive filesystem operations are delegated to `integration::fs`.
 
+use crate::domain::crypto::generate_manifest;
 use crate::domain::delete::{DeletionPlanAdjudicator, PlanSafetyWitness};
 use crate::domain::plan::{DeletionPlan, PlanItemKind};
 use crate::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
-use crate::integration::fs::{delete_dir_all, delete_file};
+use crate::integration::fs::{delete_dir_all, delete_file, volume_space, write_or_dump_on_full};
+use crate::integration::progress::human_bytes;
 use clap::Subcommand;
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::path::PathBuf;
 use wasm4pm_compat::admission::Admit;
@@ -26,8 +29,6 @@ pub enum DeleteAction {
         receipt: PathBuf,
     },
 }
-
-use indicatif::{ProgressBar, ProgressStyle};
 
 pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
     match action {
@@ -49,6 +50,7 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             let plan = admitted_plan.into_inner();
 
             println!("Executing deletion from plan: {}", plan_path.display());
+            let space_before = volume_space(std::path::Path::new("/")).ok();
             let start_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -76,32 +78,48 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                             path: item.path.clone(),
                             status: DeletionStatus::SkippedMissing,
                             error: None,
+                            blake3_hash: None,
+                            bytes_freed: 0,
                         }
                     } else {
                         // Delegate all filesystem mutations to the integration layer.
+                        // On success, the planned physical size is what was reclaimed.
                         match item.kind {
-                            PlanItemKind::File => match delete_file(&item.path) {
-                                Ok(()) => DeletionResult {
-                                    path: item.path.clone(),
-                                    status: DeletionStatus::Deleted,
-                                    error: None,
-                                },
-                                Err(e) => DeletionResult {
-                                    path: item.path.clone(),
-                                    status: DeletionStatus::Failed,
-                                    error: Some(e.to_string()),
-                                },
-                            },
+                            PlanItemKind::File => {
+                                // Generate cryptographic manifest before deletion
+                                let hash = generate_manifest(&item.path).ok();
+
+                                match delete_file(&item.path) {
+                                    Ok(()) => DeletionResult {
+                                        path: item.path.clone(),
+                                        status: DeletionStatus::Deleted,
+                                        error: None,
+                                        blake3_hash: hash,
+                                        bytes_freed: item.bytes,
+                                    },
+                                    Err(e) => DeletionResult {
+                                        path: item.path.clone(),
+                                        status: DeletionStatus::Failed,
+                                        error: Some(e.to_string()),
+                                        blake3_hash: hash,
+                                        bytes_freed: 0,
+                                    },
+                                }
+                            }
                             PlanItemKind::Dir => match delete_dir_all(&item.path) {
                                 Ok(()) => DeletionResult {
                                     path: item.path.clone(),
                                     status: DeletionStatus::Deleted,
                                     error: None,
+                                    blake3_hash: None,
+                                    bytes_freed: item.bytes,
                                 },
                                 Err(e) => DeletionResult {
                                     path: item.path.clone(),
                                     status: DeletionStatus::Failed,
                                     error: Some(e.to_string()),
+                                    blake3_hash: None,
+                                    bytes_freed: 0,
                                 },
                             },
                         }
@@ -118,22 +136,32 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 .unwrap_or_default()
                 .as_secs();
 
+            // Sample free space once after execution; reuse for both the receipt
+            // REALITY law and the printed delta below.
+            let available_after: Option<u64> = volume_space(std::path::Path::new("/"))
+                .ok()
+                .map(|v| v.available);
+
             let receipt = DeletionReceipt::new(
                 "deletion-chain-001".to_string(),
                 plan.created_unix,
                 start_time,
                 end_time,
                 results,
+                space_before.map(|v| v.available),
+                available_after,
             );
             let serialized_receipt = serde_json::to_string_pretty(&receipt)?;
-            std::fs::write(&receipt_path, serialized_receipt)?;
+            write_or_dump_on_full(&receipt_path, &serialized_receipt, "deletion receipt")?;
 
             let mut deleted_count = 0;
             let mut skipped_count = 0;
             let mut failed_count = 0;
+            let mut bytes_freed_total: u64 = 0;
             let mut failures = Vec::new();
 
             for r in &receipt.execution_record.results {
+                bytes_freed_total += r.bytes_freed;
                 match r.status {
                     DeletionStatus::Deleted => deleted_count += 1,
                     DeletionStatus::SkippedMissing => skipped_count += 1,
@@ -156,7 +184,17 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             println!("  Deleted:     {}", deleted_count);
             println!("  Skipped:     {}", skipped_count);
             println!("  Failed:      {}", failed_count);
+            println!(
+                "  Freed:       {} (planned)",
+                human_bytes(bytes_freed_total)
+            );
             println!("  Elapsed:     {} seconds", end_time - start_time);
+            if let (Some(before), Some(after)) =
+                (space_before.map(|v| v.available), available_after)
+            {
+                let actual = after.saturating_sub(before);
+                println!("  Actual free-space delta on /: {}", human_bytes(actual));
+            }
             println!("==================================================");
 
             if !failures.is_empty() {

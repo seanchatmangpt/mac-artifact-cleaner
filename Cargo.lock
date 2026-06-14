@@ -863,6 +863,7 @@ dependencies = [
  "ignore",
  "indicatif",
  "jwalk",
+ "libc",
  "notify",
  "once_cell",
  "rayon",

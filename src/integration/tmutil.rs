@@ -78,3 +78,26 @@ pub fn thin_local_snapshots(mount_point: &str, bytes: u64, urgency: u8) -> anyho
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
+
+/// Deletes a single local APFS snapshot by name or date via
+/// `tmutil deletelocalsnapshots <name-or-date>`.
+///
+/// Unlike [`thin_local_snapshots`] (which lets macOS choose what to drop to hit a
+/// byte target), this removes a specific snapshot the caller selected — e.g. the
+/// oldest. Accepts either a full snapshot name or its date suffix (e.g.
+/// `2026-05-26-135630`).
+pub fn delete_local_snapshot(name_or_date: &str) -> anyhow::Result<String> {
+    let output = std::process::Command::new("tmutil")
+        .arg("deletelocalsnapshots")
+        .arg(name_or_date)
+        .output()?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "tmutil deletelocalsnapshots {} failed: {}",
+            name_or_date,
+            err
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}

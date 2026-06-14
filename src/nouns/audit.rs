@@ -15,6 +15,7 @@ use crate::domain::tool_roots::{
 };
 use crate::integration::fs::{
     breakdown_sizes, find_cargo_target_dirs, find_large_files, force_remove_dir_all, scan_root,
+    volume_space,
 };
 use crate::integration::progress::human_bytes;
 use crate::integration::progress::ProgressReporter;
@@ -345,6 +346,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 scan_root_path.display()
             );
             let results = breakdown_sizes(&scan_root_path)?;
+            print_disk_header();
             print_breakdown(&scan_root_path, &results, top, min_mb);
         }
         AuditAction::Summarize {
@@ -364,10 +366,27 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 run_audit_scan(&roots, deps, aggressive, ignore_recent_hours, tool_roots, false, // non-verbose for summary
                 )?;
 
+            print_disk_header();
             print_premium_audit_summary(&stats, &candidates, &tool_reports);
         }
     }
     Ok(())
+}
+
+/// Prints a one-line free-space header for the boot volume (`/`).
+///
+/// This is the number that matters during a disk-full incident; without it the
+/// audit gives no sense of how urgent cleanup is or whether it helped.
+pub fn print_disk_header() {
+    match volume_space(std::path::Path::new("/")) {
+        Ok(vs) => println!(
+            "\x1b[1mDisk /:\x1b[0m {} free of {} ({}% used)",
+            human_bytes(vs.available),
+            human_bytes(vs.total),
+            vs.percent_used()
+        ),
+        Err(e) => eprintln!("warning: could not read free space: {}", e),
+    }
 }
 
 fn run_audit_scan(

@@ -354,6 +354,48 @@ pub fn is_global_cache(path: &Path) -> bool {
     global_caches.iter().any(|cache| s.contains(cache))
 }
 
+/// Returns the curated set of user-level regenerable caches (path + reason),
+/// resolved against `home`.
+///
+/// These live outside project roots, so the normal per-project scanner never
+/// nominates them — yet they are usually the biggest reclaimable wins on a
+/// developer machine. Every entry is rebuilt on demand by its tool, so deletion
+/// is safe. This is a pure path construction (no filesystem access); the caller
+/// is responsible for checking existence and sizing.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::global_cache_candidates;
+/// use std::path::Path;
+///
+/// let cands = global_cache_candidates(Path::new("/Users/u"));
+///
+/// // Positive case: the user's Library cache is nominated, under home.
+/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/u/Library/Caches")));
+///
+/// // Refusal case: nothing system-level (outside home) is ever nominated.
+/// assert!(cands.iter().all(|(p, _)| p.starts_with("/Users/u")));
+/// ```
+pub fn global_cache_candidates(home: &Path) -> Vec<(std::path::PathBuf, String)> {
+    [
+        ("Library/Caches", "macOS/app user cache"),
+        ("Library/Developer/Xcode/DerivedData", "Xcode derived data"),
+        (
+            "Library/Developer/CoreSimulator/Caches",
+            "CoreSimulator cache",
+        ),
+        (".cache", "generic user cache"),
+        (".cargo/registry/cache", "cargo registry cache (.crate)"),
+        (".cargo/registry/src", "cargo registry unpacked sources"),
+        (".npm/_cacache", "npm content cache"),
+        ("go/pkg/mod/cache", "go module download cache"),
+    ]
+    .iter()
+    .map(|(rel, reason)| (home.join(rel), reason.to_string()))
+    .collect()
+}
+
 /// Returns true when a directory name should be treated as a rebuildable
 /// artifact/dependency leaf during scanning.
 ///

@@ -152,6 +152,76 @@ pub fn parse_size_in_bytes(s: &str) -> Result<u64, String> {
     Ok((val * multiplier as f64) as u64)
 }
 
+/// Formats a byte count using SI decimal units (1000-base) — the crate's single
+/// canonical size convention. This is the exact inverse of [`parse_size_in_bytes`]
+/// at unit boundaries, so `human_bytes(parse_size_in_bytes("1GB")?) == "1.00 GB"`.
+///
+/// This is the one definition; `integration::progress::human_bytes` and
+/// `domain::tool_roots::human_bytes` re-export it so the two paths cannot drift.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::time::{human_bytes, parse_size_in_bytes};
+///
+/// assert_eq!(human_bytes(0), "0.00 B");
+/// assert_eq!(human_bytes(1_000), "1.00 KB");
+/// assert_eq!(human_bytes(1_000_000_000), "1.00 GB");
+///
+/// // Inverse round-trip is lossless at unit boundaries.
+/// assert_eq!(human_bytes(parse_size_in_bytes("1GB").unwrap()), "1.00 GB");
+/// ```
+pub fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1000.0 && unit < UNITS.len() - 1 {
+        size /= 1000.0;
+        unit += 1;
+    }
+    format!("{:.2} {}", size, UNITS[unit])
+}
+
+/// Selects the date suffixes of the `n` oldest local snapshots, oldest first.
+///
+/// Snapshots are ordered by their parsed date (see [`parse_snapshot_date`]);
+/// entries without a parseable date are ignored. The returned strings are the
+/// date suffixes accepted by `tmutil deletelocalsnapshots`.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::time::select_oldest_snapshots;
+///
+/// let snaps = vec![
+///     "com.apple.TimeMachine.2026-05-26-140000.local".to_string(),
+///     "com.apple.TimeMachine.2026-05-26-135630.local".to_string(),
+///     "com.apple.TimeMachine.2026-05-27-090000.local".to_string(),
+/// ];
+///
+/// // Positive case: the two oldest by date, oldest first
+/// assert_eq!(
+///     select_oldest_snapshots(&snaps, 2),
+///     vec!["2026-05-26-135630".to_string(), "2026-05-26-140000".to_string()]
+/// );
+///
+/// // Refusal case: n == 0 selects nothing
+/// assert!(select_oldest_snapshots(&snaps, 0).is_empty());
+///
+/// // Refusal case: unparseable names are ignored
+/// assert!(select_oldest_snapshots(&["garbage".to_string()], 1).is_empty());
+/// ```
+pub fn select_oldest_snapshots(snapshots: &[String], n: usize) -> Vec<String> {
+    let mut dated: Vec<String> = snapshots
+        .iter()
+        .filter_map(|s| parse_snapshot_date(s))
+        .collect();
+    // Date suffixes are zero-padded YYYY-MM-DD-HHMMSS, so lexical sort == chronological.
+    dated.sort();
+    dated.truncate(n);
+    dated
+}
+
 /// Represents the terminal receipt of a local snapshot thinning execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SnapshotThinReceipt {

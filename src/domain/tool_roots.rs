@@ -431,26 +431,8 @@ pub fn build_tool_root_report(
     out
 }
 
-/// Formats a byte count into a human-readable string.
-///
-/// # Examples
-///
-/// ```
-/// use osx_clnr::domain::tool_roots::human_bytes;
-///
-/// // Positive case
-/// assert_eq!(human_bytes(1024), "1.00 KB");
-/// assert_eq!(human_bytes(0), "0.00 B");
-/// ```
-pub fn human_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut size = bytes as f64;
-    let mut unit = 0;
-
-    while size >= 1024.0 && unit < UNITS.len() - 1 {
-        size /= 1024.0;
-        unit += 1;
-    }
-
-    format!("{:.2} {}", size, UNITS[unit])
-}
+/// Re-export of the single canonical size formatter (see
+/// [`crate::domain::time::human_bytes`]). Kept at this path so existing
+/// `domain::tool_roots::human_bytes` call sites resolve unchanged; there is now
+/// exactly one definition, so the dedup is structural, not maintained-by-comment.
+pub use crate::domain::time::human_bytes;

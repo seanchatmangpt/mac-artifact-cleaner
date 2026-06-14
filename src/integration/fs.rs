@@ -58,6 +58,86 @@ pub fn read_dir_snapshot(dir: &Path) -> DirSnapshot {
     DirSnapshot { children }
 }
 
+// ── Disk-full-safe writer ──────────────────────────────────────────────────────
+
+/// Writes `contents` to `path`, but if the write fails because the volume is
+/// full (`ENOSPC`), dumps the contents to stdout and returns `Ok` instead.
+///
+/// A plan or receipt is evidence we must not lose to the very condition the tool
+/// exists to fix: at ~0 bytes free, `std::fs::write` of a multi-KB JSON fails,
+/// and silently losing it is how the original deadlock happened. Here we surface
+/// it so the user can capture it and run `oclnr emergency` to recover space.
+pub fn write_or_dump_on_full(path: &Path, contents: &str, label: &str) -> anyhow::Result<()> {
+    match std::fs::write(path, contents) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::StorageFull => {
+            eprintln!(
+                "⚠️  Disk full — could not write {} to {}.",
+                label,
+                path.display()
+            );
+            eprintln!("    Dumping it below; save it elsewhere, then run `oclnr emergency --yes`.");
+            println!("{}", contents);
+            Ok(())
+        }
+        Err(e) => Err(e).with_context(|| format!("writing {} to {}", label, path.display())),
+    }
+}
+
+// ── Volume free-space query ──────────────────────────────────────────────────────
+
+/// Inert snapshot of a volume's capacity, as reported by `statvfs(2)`.
+///
+/// All values are in bytes. `available` is the space usable by an unprivileged
+/// process (`f_bavail`) and is the right number to report as "free" to a user;
+/// `free` (`f_bfree`) includes root-reserved blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VolumeSpace {
+    pub total: u64,
+    pub free: u64,
+    pub available: u64,
+}
+
+impl VolumeSpace {
+    /// Percentage of capacity used, 0–100. Returns 0 if `total` is 0.
+    pub fn percent_used(&self) -> u8 {
+        if self.total == 0 {
+            return 0;
+        }
+        let used = self.total.saturating_sub(self.available);
+        ((used as f64 / self.total as f64) * 100.0).round() as u8
+    }
+}
+
+/// Queries the capacity of the volume containing `path` via `statvfs(2)`.
+///
+/// This is the integration layer's responsibility: it performs the OS call and
+/// returns an inert [`VolumeSpace`] DTO for the domain/noun layers to format.
+pub fn volume_space(path: &Path) -> anyhow::Result<VolumeSpace> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .with_context(|| format!("path contains NUL byte: {}", path.display()))?;
+
+    // SAFETY: `stat` is zeroed and `c_path` is a valid NUL-terminated C string
+    // that outlives the call. `statvfs` only writes into `stat` on success.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("statvfs failed for {}", path.display()));
+    }
+
+    // `f_frsize` is the fundamental block size used by the block counts.
+    let frsize = stat.f_frsize as u64;
+    Ok(VolumeSpace {
+        total: frsize * stat.f_blocks as u64,
+        free: frsize * stat.f_bfree as u64,
+        available: frsize * stat.f_bavail as u64,
+    })
+}
+
 // ── Size estimation ────────────────────────────────────────────────────────────
 
 /// Estimates size of a path recursively.

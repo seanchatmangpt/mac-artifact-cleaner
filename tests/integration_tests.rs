@@ -59,6 +59,7 @@ fn test_plan_bound_deletion_validation() {
             path: PathBuf::from("/Users/user/dev/project/target"),
             kind: PlanItemKind::Dir,
             reason: "rust target".to_string(),
+            bytes: 0,
         }],
         vec![],
     );
@@ -81,6 +82,7 @@ fn test_plan_bound_deletion_validation() {
         path: PathBuf::from("/System"),
         kind: PlanItemKind::Dir,
         reason: "fake target".to_string(),
+        bytes: 0,
     });
     assert!(
         DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(bad_plan))
@@ -161,6 +163,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
             path: c.path.clone(),
             kind,
             reason: c.reason.clone(),
+            bytes: 0,
         });
     }
 
@@ -185,6 +188,8 @@ fn test_end_to_end_artifact_scan_build_delete() {
                 path: item.path.clone(),
                 status: DeletionStatus::SkippedMissing,
                 error: None,
+                blake3_hash: None,
+                bytes_freed: 0,
             });
             continue;
         }
@@ -196,11 +201,15 @@ fn test_end_to_end_artifact_scan_build_delete() {
                     path: item.path.clone(),
                     status: DeletionStatus::Deleted,
                     error: None,
+                    blake3_hash: None,
+                    bytes_freed: 0,
                 },
                 Err(e) => osx_clnr::domain::receipt::DeletionResult {
                     path: item.path.clone(),
                     status: DeletionStatus::Failed,
                     error: Some(e.to_string()),
+                    blake3_hash: None,
+                    bytes_freed: 0,
                 },
             },
             PlanItemKind::Dir => match delete_dir_all(&item.path) {
@@ -208,11 +217,15 @@ fn test_end_to_end_artifact_scan_build_delete() {
                     path: item.path.clone(),
                     status: DeletionStatus::Deleted,
                     error: None,
+                    blake3_hash: None,
+                    bytes_freed: 0,
                 },
                 Err(e) => osx_clnr::domain::receipt::DeletionResult {
                     path: item.path.clone(),
                     status: DeletionStatus::Failed,
                     error: Some(e.to_string()),
+                    blake3_hash: None,
+                    bytes_freed: 0,
                 },
             },
         };
@@ -230,6 +243,8 @@ fn test_end_to_end_artifact_scan_build_delete() {
         start_time,
         end_time,
         results,
+        None,
+        None,
     );
     assert_eq!(receipt.execution_record.results.len(), 2);
     assert!(receipt
@@ -392,6 +407,7 @@ fn test_receipt_verification_and_plan_correlation() {
             path: file_to_delete.clone(),
             kind: PlanItemKind::File,
             reason: "temp file".to_string(),
+            bytes: 0,
         }],
         vec![],
     );
@@ -407,7 +423,11 @@ fn test_receipt_verification_and_plan_correlation() {
             path: file_to_delete.clone(),
             status: DeletionStatus::Deleted,
             error: None,
+            blake3_hash: None,
+            bytes_freed: 0,
         }],
+        None,
+        None,
     );
     let report = consistent_receipt.verify(Some(&plan));
     assert!(report.is_consistent);
@@ -433,13 +453,19 @@ fn test_receipt_verification_and_plan_correlation() {
                 path: file_to_delete.clone(),
                 status: DeletionStatus::Deleted,
                 error: None,
+                blake3_hash: None,
+                bytes_freed: 0,
             },
             DeletionResult {
                 path: tmp.path().join("extra_file.txt"),
                 status: DeletionStatus::Deleted,
                 error: None,
+                blake3_hash: None,
+                bytes_freed: 0,
             },
         ],
+        None,
+        None,
     );
     let report3 = mismatched_receipt.verify(Some(&plan));
     assert!(!report3.is_consistent);
@@ -447,6 +473,185 @@ fn test_receipt_verification_and_plan_correlation() {
         .issues
         .iter()
         .any(|i| i.issue_type == IssueType::ExtraReceiptItem));
+}
+
+#[test]
+fn test_bytes_freed_mismatch_on_zero_movement() {
+    use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
+
+    // Receipt claims it freed 2 GB, but the volume free-space delta is zero
+    // (available_before == available_after). Under the REALITY law this is a
+    // BytesFreedMismatch hard-fail.
+    let receipt = DeletionReceipt::new(
+        "bytes-mismatch-chain".to_string(),
+        0,
+        1716768000,
+        1716768100,
+        vec![DeletionResult {
+            path: std::path::PathBuf::from("/nonexistent/zero/movement"),
+            status: DeletionStatus::SkippedMissing,
+            error: None,
+            blake3_hash: None,
+            bytes_freed: 2_000_000_000,
+        }],
+        Some(5_000_000_000),
+        Some(5_000_000_000),
+    );
+
+    let report = receipt.verify(None);
+    assert!(!report.is_consistent);
+    let issue = report
+        .issues
+        .iter()
+        .find(|i| i.issue_type == IssueType::BytesFreedMismatch)
+        .expect("BytesFreedMismatch must be raised on zero free-space movement");
+    assert!(issue.message.contains("2000000000"));
+    assert!(issue.message.contains("measured"));
+}
+
+#[test]
+fn test_no_false_positive_within_tolerance() {
+    use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
+
+    // Legit path: receipt claims 4 GB freed; volume free-space delta measured
+    // 3 GB. That is 75% recovery, comfortably above the 50% floor (e.g. 1 GB
+    // remained pinned by an APFS snapshot / measurement noise). This MUST NOT
+    // raise BytesFreedMismatch -- proving no false positive on a real delta
+    // that lands within tolerance of bytes_freed_total.
+    let receipt = DeletionReceipt::new(
+        "within-tolerance-chain".to_string(),
+        0,
+        1716768000,
+        1716768100,
+        vec![DeletionResult {
+            path: std::path::PathBuf::from("/nonexistent/within/tolerance"),
+            status: DeletionStatus::SkippedMissing,
+            error: None,
+            blake3_hash: None,
+            bytes_freed: 4_000_000_000,
+        }],
+        Some(10_000_000_000),
+        Some(13_000_000_000), // delta = +3 GB == 75% of 4 GB claim
+    );
+
+    let report = receipt.verify(None);
+    assert!(
+        report.is_consistent,
+        "within-tolerance delta must stay consistent, got issues: {:?}",
+        report.issues
+    );
+    assert!(!report
+        .issues
+        .iter()
+        .any(|i| i.issue_type == IssueType::BytesFreedMismatch));
+}
+
+#[test]
+fn test_back_compat_none_samples_no_mismatch() {
+    use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
+
+    // Back-compat: old receipts predate volume sampling and carry
+    // available_before/after == None. Even with an enormous claimed reclaim
+    // (5 GB, well over the 1 GB enforcement threshold), the absence of samples
+    // means the REALITY law cannot run and MUST NOT raise BytesFreedMismatch.
+    let receipt = DeletionReceipt::new(
+        "old-receipt-chain".to_string(),
+        0,
+        1716768000,
+        1716768100,
+        vec![DeletionResult {
+            path: std::path::PathBuf::from("/nonexistent/old/receipt"),
+            status: DeletionStatus::SkippedMissing,
+            error: None,
+            blake3_hash: None,
+            bytes_freed: 5_000_000_000,
+        }],
+        None, // available_before
+        None, // available_after
+    );
+
+    let report = receipt.verify(None);
+    assert!(
+        report.is_consistent,
+        "old receipt with None samples must stay consistent, got issues: {:?}",
+        report.issues
+    );
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|i| i.issue_type == IssueType::BytesFreedMismatch),
+        "None samples must NOT raise BytesFreedMismatch (back-compat)"
+    );
+}
+
+#[test]
+fn test_bytes_freed_mismatch_plan_bound_deleted_results() {
+    use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
+
+    // Plan-bound refusal: two Deleted results summing to 3 GB (> 2 GB), but the
+    // volume free-space delta is zero (available_before == available_after).
+    // Verified via verify(Some(&plan)). Under the REALITY law this MUST raise
+    // BytesFreedMismatch and the report MUST be inconsistent.
+    let p1 = std::path::PathBuf::from("/nonexistent/plan/bound/one");
+    let p2 = std::path::PathBuf::from("/nonexistent/plan/bound/two");
+
+    let plan = DeletionPlan::new(
+        vec![std::path::PathBuf::from("/nonexistent/plan/bound")],
+        false,
+        false,
+        vec![
+            PlanItem {
+                path: p1.clone(),
+                kind: PlanItemKind::File,
+                reason: "big artifact".to_string(),
+                bytes: 2_000_000_000,
+            },
+            PlanItem {
+                path: p2.clone(),
+                kind: PlanItemKind::File,
+                reason: "big artifact".to_string(),
+                bytes: 1_000_000_000,
+            },
+        ],
+        vec![],
+    );
+
+    let receipt = DeletionReceipt::new(
+        "plan-bound-bytes-mismatch".to_string(),
+        plan.created_unix,
+        1716768000,
+        1716768100,
+        vec![
+            DeletionResult {
+                path: p1.clone(),
+                status: DeletionStatus::Deleted,
+                error: None,
+                blake3_hash: None,
+                bytes_freed: 2_000_000_000,
+            },
+            DeletionResult {
+                path: p2.clone(),
+                status: DeletionStatus::Deleted,
+                error: None,
+                blake3_hash: None,
+                bytes_freed: 1_000_000_000,
+            },
+        ],
+        Some(7_000_000_000),
+        Some(7_000_000_000), // delta = 0, claim = 3 GB
+    );
+
+    let report = receipt.verify(Some(&plan));
+    assert!(!report.is_consistent);
+    let issue = report
+        .issues
+        .iter()
+        .find(|i| i.issue_type == IssueType::BytesFreedMismatch)
+        .expect("BytesFreedMismatch must be raised on plan-bound zero-movement deletion");
+    assert!(issue.message.contains("3000000000"));
+    assert!(issue.message.contains("measured"));
 }
 
 #[test]
@@ -564,6 +769,7 @@ fn test_exclusion_planning_and_application() {
         path: mock_project_dir.clone(),
         kind: PlanItemKind::Dir,
         reason: "Mock rust target".to_string(),
+        bytes: 0,
     }];
 
     let tool_roots = vec![ToolRootReport {
@@ -677,5 +883,157 @@ fn test_traversal_barriers() {
     assert!(
         pruned >= 1,
         "Expected traversal barrier to prune node_modules"
+    );
+}
+
+#[test]
+fn test_verify_unsupported_version() {
+    use osx_clnr::domain::receipt::{DeletionReceipt, IssueType};
+
+    // new() always stamps version 1; deserialized/tampered receipts can carry
+    // another version, so verify must still flag it. Mutate the record to simulate.
+    let mut receipt = DeletionReceipt::new("c".to_string(), 0, 1, 2, vec![], None, None);
+    receipt.execution_record.version = 2;
+
+    let report = receipt.verify(None);
+    assert!(!report.is_consistent);
+    assert!(report
+        .issues
+        .iter()
+        .any(|i| i.issue_type == IssueType::UnsupportedVersion));
+}
+
+#[test]
+fn test_verify_invalid_timestamps() {
+    use osx_clnr::domain::receipt::{DeletionReceipt, IssueType};
+
+    // completed (1) before started (2) is an impossible lifecycle.
+    let receipt = DeletionReceipt::new("c".to_string(), 0, 2, 1, vec![], None, None);
+
+    let report = receipt.verify(None);
+    assert!(!report.is_consistent);
+    assert!(report
+        .issues
+        .iter()
+        .any(|i| i.issue_type == IssueType::InvalidTimestamps));
+}
+
+#[test]
+fn test_verify_missing_plan_item() {
+    use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    use osx_clnr::domain::receipt::{DeletionReceipt, IssueType};
+
+    // Plan schedules a path that the receipt's results never mention -> the plan
+    // item is missing from execution evidence.
+    let plan = DeletionPlan::new(
+        vec![PathBuf::from("/Users/user")],
+        false,
+        true,
+        vec![PlanItem {
+            path: PathBuf::from("/Users/user/dev/project/target"),
+            kind: PlanItemKind::Dir,
+            reason: "rust target".to_string(),
+            bytes: 0,
+        }],
+        vec![],
+    );
+    let receipt = DeletionReceipt::new("c".to_string(), 0, 1, 2, vec![], None, None);
+
+    let report = receipt.verify(Some(&plan));
+    assert!(!report.is_consistent);
+    assert!(report
+        .issues
+        .iter()
+        .any(|i| i.issue_type == IssueType::MissingPlanItem));
+}
+
+#[test]
+fn test_check_reclaim_shared_law() {
+    use osx_clnr::domain::receipt::{check_reclaim, ReclaimCheck};
+
+    // Witnessed: measured delta recovers the full claim.
+    assert_eq!(
+        check_reclaim(3_000_000_000, Some(10_000_000_000), Some(13_000_000_000)),
+        ReclaimCheck::Witnessed
+    );
+
+    // Shortfall: large claim, zero movement (the snapshot-pinned / never-freed case
+    // the emergency path warns on and verify() flags as BytesFreedMismatch).
+    assert_eq!(
+        check_reclaim(3_000_000_000, Some(7_000_000_000), Some(7_000_000_000)),
+        ReclaimCheck::Shortfall {
+            claimed: 3_000_000_000,
+            measured: 0
+        }
+    );
+
+    // NotApplicable: below the 1 GB witness floor, and missing samples (back-compat).
+    assert_eq!(
+        check_reclaim(500_000_000, Some(0), Some(0)),
+        ReclaimCheck::NotApplicable
+    );
+    assert_eq!(
+        check_reclaim(5_000_000_000, None, None),
+        ReclaimCheck::NotApplicable
+    );
+}
+
+#[test]
+fn test_size_string_roundtrip_convention_resolved() {
+    // RESOLVED SEAM (was: type-identical inverses with divergent bases). The
+    // canonical size base for this crate is now SI/1000 everywhere:
+    // `parse_size_in_bytes` (parser) and both `human_bytes` definitions (display)
+    // are inverses on the SAME base, so the round-trip is lossless at unit
+    // boundaries. This test now witnesses CONVERGENCE; if either side ever drifts
+    // back to binary/1024, the round-trip breaks here and forces a conscious fix.
+    use osx_clnr::domain::time::parse_size_in_bytes;
+    use osx_clnr::domain::tool_roots::human_bytes as hb_domain;
+    use osx_clnr::integration::progress::human_bytes as hb_integration;
+
+    assert_eq!(parse_size_in_bytes("1GB"), Ok(1_000_000_000));
+
+    // Clean round-trip: "1GB" -> bytes -> "1.00 GB".
+    let bytes = parse_size_in_bytes("1GB").unwrap();
+    assert_eq!(hb_integration(bytes), "1.00 GB");
+
+    // The two byte-identical definitions agree (same canonical base).
+    assert_eq!(hb_integration(bytes), hb_domain(bytes));
+    assert_eq!(hb_domain(2_500_000), "2.50 MB");
+}
+
+#[test]
+fn test_snapshot_delete_ocel_is_truthfully_typed() {
+    // WITNESS for the selective-delete OCEL edge. The delete path must emit a
+    // `snapshot_delete_requested` event — NOT `snapshot_thin_requested` — so the
+    // event log does not conflate a selection-driven delete with a byte-driven
+    // thin (model-vs-log truth). The log must also be admissible.
+    use osx_clnr::domain::ocel::{
+        build_snapshot_delete_ocel, build_snapshot_thin_ocel, OcelLogAdjudicator,
+    };
+    use wasm4pm_compat::admission::Admit;
+    use wasm4pm_compat::evidence::Evidence;
+
+    let before = vec!["snap-a".to_string(), "snap-b".to_string()];
+    let after = vec!["snap-b".to_string()];
+    let deleted = vec!["snap-a".to_string()];
+
+    let delete_log = build_snapshot_delete_ocel("/", &before, &after, &deleted);
+
+    // Admissible (passes the OCEL law).
+    assert!(OcelLogAdjudicator::admit(Evidence::raw(delete_log.clone())).is_ok());
+
+    // Truthfully typed — a delete, not a thin.
+    assert_eq!(delete_log.events[0].event_type, "snapshot_delete_requested");
+    assert_eq!(delete_log.objects[0].object_type, "snapshot_state");
+    assert!(delete_log.events[0]
+        .attributes
+        .iter()
+        .any(|a| a.name == "deleted_count"));
+
+    // The two operations are now distinguishable in the log.
+    let thin_log = build_snapshot_thin_ocel("/", 500_000_000, &before, &after, &deleted);
+    assert_ne!(
+        delete_log.events[0].event_type,
+        thin_log.events[0].event_type
     );
 }

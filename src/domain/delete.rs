@@ -21,6 +21,7 @@ use std::path::Path;
 ///         path: PathBuf::from("/Users/user/dev/project/target"),
 ///         kind: PlanItemKind::Dir,
 ///         reason: "rust target".to_string(),
+///         bytes: 0,
 ///     }],
 ///     vec![],
 /// );
@@ -40,6 +41,7 @@ use std::path::Path;
 ///         path: PathBuf::from("/System"),
 ///         kind: PlanItemKind::Dir,
 ///         reason: "system directory".to_string(),
+///         bytes: 0,
 ///     }],
 ///     vec![],
 /// );
@@ -72,6 +74,7 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 ///         path: PathBuf::from("/Users/user/dev/project/target"),
 ///         kind: PlanItemKind::Dir,
 ///         reason: "rust target".to_string(),
+///         bytes: 0,
 ///     }],
 ///     vec![],
 /// );
@@ -88,6 +91,7 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 ///         path: PathBuf::from("/System"),
 ///         kind: PlanItemKind::Dir,
 ///         reason: "system directory".to_string(),
+///         bytes: 0,
 ///     }],
 ///     vec![],
 /// );
