@@ -79,6 +79,40 @@ oclnr snapshot audit
 
 # Thin local snapshots to try and reclaim up to 200 GB
 oclnr snapshot thin --bytes 200GB
+
+# Delete the single oldest snapshot (precise, count-driven)
+oclnr snapshot delete --which oldest
+
+# Delete the three oldest snapshots
+oclnr snapshot delete --which oldest --oldest-n 3
+
+# Delete all local snapshots
+oclnr snapshot delete --which all
+
+# Delete a specific snapshot by date suffix
+oclnr snapshot delete --which 2026-05-26-135630
 ```
+
+`snapshot delete` emits `snapshot_delete_requested` OCEL events (distinct from `snapshot_thin_requested`) and prints before/after free-space deltas.
+
+### 3.3 Emergency Reclaim
+
+When disk is critically full and standard tools can't write output files:
+
+```bash
+# Dry run: show what would be reclaimed without deleting
+oclnr emergency
+
+# Execute: delete all local snapshots + sweep regenerable global caches
+oclnr emergency --yes
+```
+
+`oclnr emergency` is the escalation path for ENOSPC conditions. It combines snapshot deletion and global cache nomination in a single command. The `check_reclaim` law (in `domain::receipt`) then validates that the measured volume delta is within 50% of the claimed reclaim — signaling when APFS snapshot pinning is still blocking freed space.
+
+### 3.4 The APFS Snapshot Caveat in Receipt Verification
+
+`domain::receipt::check_reclaim` compares `bytes_freed_total` (sum of plan-declared sizes) against the actual `available_after - available_before` volume delta. When this delta falls below 50% of the claimed value, `BytesFreedMismatch` is raised in the receipt verification report.
+
+This is **correct signal**, not a false positive: it means blocks were deleted but are still pinned by snapshots. The right response is to run `oclnr snapshot thin` or `oclnr emergency`.
 
 Every snapshot operation is logged in the final delete receipt, showing the before-and-after free space comparison to verify successful block reclamation.

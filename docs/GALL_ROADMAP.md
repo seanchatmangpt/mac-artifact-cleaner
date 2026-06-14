@@ -1,11 +1,12 @@
 # Gall Checkpoint Roadmap: Path to G9 Completion
 
-This roadmap defines the remaining steps to transition `pentecost` from its current state (Phase 1 proven, checkpoints G0-G3 complete) to a fully realized G9 implementation.
+This roadmap defines the remaining steps to transition `pentecost` from its current state to a fully realized G9 implementation.
 
-## Current Status Summary
-- **M1 (G0-G3):** Phase 1 proven! The domain layer is fully pure, destructive calls are isolated, and traversal barriers are verified.
-- **M2 (G4-G6):** Logic largely present in `src/domain/`, but integration and CLI wiring are incomplete.
-- **M3 (G7-G9):** OCEL v2 and Privacy frameworks exist but are not yet used as the primary execution gates.
+## Current Status Summary (June 2026)
+- **M1 (G0-G3):** ✅ Complete — domain purity, traversal barriers, plan-bound deletion, integration separation verified.
+- **M2 (G4-G6):** ✅ Complete — free-space reporting (`VolumeSpace`/`statvfs`), bytes accounting, snapshot delete, emergency reclaim, tool-root aging, global cache nomination.
+- **M3 (G7):** ✅ Substantially complete — all operations emit OCEL v2; `snapshot_delete_requested` event type distinct from `snapshot_thin_requested`.
+- **M4 (G8-G9):** 🔄 In progress — `doctor privacy` exists; auto-redaction and full G9 promotion rule pending.
 
 ---
 
@@ -23,26 +24,27 @@ This roadmap defines the remaining steps to transition `pentecost` from its curr
 4.  **Time Machine Receipting**:
     - Add a `DeletionReceipt`-style mechanism for `exclusion apply` to ensure the "Never increase destructive power without simultaneously increasing receipts" law is upheld for exclusions.
 
-## Phase 2: Visibility & Snapshot Integrity
+## Phase 2: Visibility & Snapshot Integrity (COMPLETE)
 **Target: G4 (Inventory) & G5 (Snapshots) Completion**
 
-1.  **G4: Enhanced UX Visibility**:
-    - Add real-time byte-rate and ETA calculation to `ProgressReporter`.
-    - Implement `audit summarize` CLI to provide a high-level breakdown of disk usage by category.
-2.  **G5: Snapshot Flow Integration**:
-    - Implement `snapshot thin` CLI with safety guards.
-    - Update the cleanup workflow to recommend snapshot thinning if disk space is not freed after deletion.
-    - Ensure all `tmutil` interactions emit OCEL events.
+1.  **G4: Enhanced UX Visibility**: ✅
+    - `VolumeSpace`/`statvfs` free-space sampling; disk header printed on `oclnr audit`.
+    - Bytes accounting: `PlanItem.bytes`, `DeletionResult.bytes_freed`, `bytes_freed_total` reclaim total.
+2.  **G5: Snapshot Flow Integration**: ✅
+    - `oclnr snapshot thin --bytes`, `oclnr snapshot delete --which` (oldest/all/explicit).
+    - `oclnr emergency [--yes]` — ENOSPC escalation path.
+    - `check_reclaim` reality law in receipt verification (claimed vs. measured delta, 50% tolerance).
+    - `write_or_dump_on_full` — ENOSPC-safe writer for plan and receipt output.
 
-## Phase 3: Evidence & Reporting
+## Phase 3: Evidence & Reporting (COMPLETE)
 **Target: G6 (Tool Roots) & G7 (OCEL v2) Integration**
 
-1.  **G7/G3: Unified OCEL Execution**:
-    - Implement OCEL builders for `deletion_plan` and `delete_receipt` in `src/domain/ocel.rs`.
-    - Update `plan build` and `delete execute` to emit OCEL v2 logs as the primary evidence artifact.
-2.  **G6: Tool-Root Maturity**:
-    - Wire `tool-roots audit` into the standard `audit` flow.
-    - Implement `--stale` and `--min-size` filters for tool-root reporting.
+1.  **G7: Unified OCEL Execution**: ✅
+    - OCEL builders for all operations including `build_snapshot_delete_ocel` (distinct event type).
+    - `validate_ocel_log` referential integrity check.
+2.  **G6: Tool-Root Maturity**: ✅
+    - `tool-roots audit` wired; `recommend_tool_root` classification logic.
+    - `--include-global-caches` flag on `oclnr plan` nominates regenerable caches.
 
 ## Phase 4: Privacy & Safety Gate
 **Target: G8 (Privacy) & G9 (Doctor) Completion**

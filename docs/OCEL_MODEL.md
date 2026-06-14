@@ -68,7 +68,8 @@ graph TD
 | `artifact_delete_failed` | System call error during deletion. | `artifact_candidate`, `delete_receipt` |
 | `deletion_completed` | The plan-bound deletion execution finished. | `delete_receipt` |
 | `snapshot_state_observed` | APFS/Time Machine snapshot footprint measured. | `snapshot_state`, `disk_audit` |
-| `snapshot_thin_requested` | Command issued to thin/prune local snapshots. | `snapshot_state`, `delete_receipt` |
+| `snapshot_thin_requested` | Command issued to thin/prune local snapshots (`oclnr snapshot thin`). | `snapshot_state`, `delete_receipt` |
+| `snapshot_delete_requested` | Command issued to delete specific snapshots by name/date (`oclnr snapshot delete`). Distinct from thinning — a delete is count-driven, not byte-driven. | `snapshot_state`, `delete_receipt` |
 | `tm_exclusion_plan_written` | Time Machine exclusion script generated. | `tm_exclusion_plan`, `disk_audit` |
 
 ---

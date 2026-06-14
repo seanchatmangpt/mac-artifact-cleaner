@@ -28,10 +28,30 @@ It makes local command execution pass through public naming, separated powers, p
 Deletion is plan-bound by design:
 
 1. **Audit observes:** The filesystem is scanned with intelligent traversal barriers to avoid crawling massive dependencies (like `node_modules` or `target`) while accurately inventorying hidden tool caches (`.cargo`, `.cache`, `.npm`, etc.).
-2. **Plan proposes:** A dry run generates a reviewable JSON plan identifying cleanup candidates based on age, size, and tool-specific heuristics.
+2. **Plan proposes:** A dry run generates a reviewable JSON plan identifying cleanup candidates based on age, size, and tool-specific heuristics. Add `--include-global-caches` to nominate regenerable global caches (`.cargo/registry`, `Library/Caches`, etc.).
 3. **Human reviews:** The user inspects the plan or the emitted Object-Centric Event Log (OCEL v2) to verify what will be deleted.
 4. **Delete executes only from a saved plan:** The scanner is disabled during deletion. The utility reads the reviewed plan and strictly deletes only the exact paths listed.
-5. **Receipt records the result:** Progress and consequences are tracked without fresh discovery.
+5. **Receipt records the result:** Progress and consequences are tracked without fresh discovery. Receipt verification (`oclnr receipt verify`) checks that measured volume delta is within tolerance of claimed reclaim — surfacing APFS snapshot pinning if space didn't come back.
+
+### Snapshot Management
+
+APFS local snapshots can pin deleted blocks, preventing freed space from appearing in `df`. Use:
+
+```bash
+oclnr snapshot audit          # list all local snapshots
+oclnr snapshot thin --bytes 20GB
+oclnr snapshot delete --which oldest
+oclnr snapshot delete --which all
+```
+
+### Emergency Reclaim
+
+When disk is critically full (ENOSPC):
+
+```bash
+oclnr emergency        # dry run: show what would be reclaimed
+oclnr emergency --yes  # execute: delete all local snapshots + sweep regenerable caches
+```
 
 ## Privacy and Safety
 

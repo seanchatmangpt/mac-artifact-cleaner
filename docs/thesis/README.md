@@ -1,1 +1,3 @@
 # osx-clnr PhD Thesis
+
+> **Archival note (June 2026):** This thesis was written against the G0–G3 milestone (domain purity, traversal barriers, plan-bound deletion). It does not cover the capabilities shipped in the G4–G7 wave: free-space sampling (`VolumeSpace`/`statvfs`), bytes accounting, `snapshot delete`, `emergency` reclaim, `check_reclaim` reality law, global cache nomination, or the `BytesFreedMismatch` receipt verification law. Treat this document as a historical artifact capturing the project's architectural foundations. Current state of the system is documented in `docs/GALL_CHECKPOINTS.md`.

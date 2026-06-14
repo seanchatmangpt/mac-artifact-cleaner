@@ -98,5 +98,22 @@ This sequence proves the core architectural law of the project:
 
 ---
 
+---
+
+## Current Status (June 2026)
+
+| Checkpoint | Status | Notes |
+|---|---|---|
+| G0 Simple Artifact Cleaner | ✅ Complete | |
+| G1 Language/Project Detection | ✅ Complete | |
+| G2 Traversal Barriers | ✅ Complete | `traversal_barrier_names()`, doctor architecture gate |
+| G3 Dry-Run Plan File | ✅ Complete | plan-bound deletion, receipt verify |
+| G4 Disk Inventory & UX | ✅ Complete | `VolumeSpace`/`statvfs`, free-space header, bytes accounting |
+| G5 Time Machine / Snapshots | ✅ Complete | `snapshot audit/thin/delete`, `emergency`, `check_reclaim` law |
+| G6 Root-Tool Aging Analysis | ✅ Complete | `tool-roots audit`, `recommend_tool_root`, `--include-global-caches` |
+| G7 OCEL v2 Reporting | ✅ Substantially complete | All operations emit OCEL; `snapshot_delete_requested` distinct from thin |
+| G8 Privacy / Redaction Gate | 🔄 In progress | `doctor privacy` exists; auto-redaction path not yet wired |
+| G9 Doctor / Self-Verification | 🔄 In progress | `doctor architecture/substrate/doctests` pass; full G9 promotion rule pending |
+
 ## Roadmap to G9
 For the current execution plan and status of remaining checkpoints, see the [Gall Checkpoint Roadmap](GALL_ROADMAP.md).

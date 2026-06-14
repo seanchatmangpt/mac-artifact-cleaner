@@ -60,6 +60,7 @@ Each `Command` variant maps to a nouns submodule with its own `Action` enum and 
 | `tool-roots` | `domain::tool_roots` |
 | `ocel` | `domain::ocel` |
 | `snapshot` | `integration::tmutil` |
+| `emergency` | `domain::artifact`, `integration::fs` |
 | `doctor` | `domain::doctor`, `integration::doctor` |
 | `privacy` | `domain::redaction` |
 | `exclusion` | — |
@@ -75,7 +76,9 @@ oclnr receipt verify →  deletion-receipt.jsonocel
 
 ### OCEL v2 (`src/domain/ocel.rs`)
 
-Every operation emits an Object-Centric Event Log v2. `build_disk_audit_ocel`, `build_tool_roots_ocel`, `build_snapshot_audit_ocel`, etc. are the builders. All builders are pure functions — they take data, return `OcelLog`. `validate_ocel_log` checks referential integrity and type conformance. Delete events must carry relationships to `delete_receipt`, `deletion_plan`, `artifact_candidate`, and `filesystem_object` objects or validation fails.
+Every operation emits an Object-Centric Event Log v2. `build_disk_audit_ocel`, `build_tool_roots_ocel`, `build_snapshot_audit_ocel`, `build_snapshot_thin_ocel`, `build_snapshot_delete_ocel`, etc. are the builders. All builders are pure functions — they take data, return `OcelLog`. `validate_ocel_log` checks referential integrity and type conformance. Delete events must carry relationships to `delete_receipt`, `deletion_plan`, `artifact_candidate`, and `filesystem_object` objects or validation fails.
+
+`build_snapshot_delete_ocel` (distinct from `build_snapshot_thin_ocel`) emits `snapshot_delete_requested` events — the event type must truthfully reflect the operation (a delete is not a thin).
 
 ### Domain DTOs
 
@@ -99,6 +102,10 @@ Domain functions carry doctests with positive + negative + refusal cases. These 
 
 `.gitignore` protects: `disk-audit.json`, `*.jsonocel`, `cleanup-plan.json`, `deletion-receipt.jsonocel`. These contain absolute paths, project names, and timestamps from the local machine.
 
+## Key Dependencies
+
+- `libc = "0.2"` — used by `integration::fs::volume_space` for `statvfs` free-space sampling
+
 ## Gall Checkpoints
 
-The system evolves through checkpoints G0–G9 (see `docs/GALL_CHECKPOINTS.md`). Current state: G0–G3 complete (domain purity, traversal barriers, plan-bound deletion, integration separation). G4–G9 are in-progress. Do not add new capabilities without adding corresponding receipts/evidence.
+The system evolves through checkpoints G0–G9 (see `docs/GALL_CHECKPOINTS.md`). Current state: G0–G7 substantially complete. G8 (privacy gate) and G9 (doctor self-verification) are in-progress. Do not add new capabilities without adding corresponding receipts/evidence.
