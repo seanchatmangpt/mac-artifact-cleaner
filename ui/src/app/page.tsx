@@ -1,8 +1,12 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import DiskBreakdown from "@/components/DiskBreakdown";
 import SnapshotPanel from "@/components/SnapshotPanel";
 import DoctorPanel from "@/components/DoctorPanel";
 import ReceiptPanel from "@/components/ReceiptPanel";
+import DoctestPanel from "@/components/DoctestPanel";
+import PrivacyPanel from "@/components/PrivacyPanel";
+import PlanPanel from "@/components/PlanPanel";
 
 function Skeleton({ rows = 4 }: { rows?: number }) {
   return (
@@ -61,11 +65,49 @@ export default function Home() {
           </Card>
         </div>
 
-        <Card>
-          <Suspense fallback={<Skeleton rows={6} />}>
-            <DoctorPanel />
-          </Suspense>
-        </Card>
+        {/* Doctor + Doctests */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card>
+            <Suspense fallback={<Skeleton rows={6} />}>
+              <DoctorPanel />
+            </Suspense>
+          </Card>
+          <Card>
+            <Suspense fallback={<Skeleton rows={6} />}>
+              <DoctestPanel />
+            </Suspense>
+          </Card>
+        </div>
+
+        {/* Privacy + Plan */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card>
+            <Suspense fallback={<Skeleton rows={5} />}>
+              <PrivacyPanel />
+            </Suspense>
+          </Card>
+          <Card>
+            <Suspense fallback={<Skeleton rows={5} />}>
+              <PlanPanel />
+            </Suspense>
+          </Card>
+        </div>
+
+        {/* Large file scan — separate page (slow command) */}
+        <div className="rounded-xl border border-slate-700 border-dashed bg-slate-900/50 p-6 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-slate-200">Large File Scan</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Run <code className="font-mono">oclnr audit find-large</code> — streams results as they arrive
+            </p>
+          </div>
+          <Link
+            href="/find-large"
+            className="rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition-colors"
+          >
+            Run Scan →
+          </Link>
+        </div>
       </main>
 
       <footer className="border-t border-slate-800 px-6 py-4 text-center">
