@@ -544,10 +544,7 @@ fn print_breakdown(root: &std::path::Path, results: &[(PathBuf, u64)], top: usiz
         results.len()
     );
 
-    println!(
-        "  {:<50} {:>10}  {:>6}  Category",
-        "Path", "Size", "% of ~"
-    );
+    println!("  {:<50} {:>10}  {:>6}  Category", "Path", "Size", "% of ~");
     println!("  {}", "─".repeat(80));
 
     for (path, bytes) in &visible {

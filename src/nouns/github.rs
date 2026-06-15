@@ -129,7 +129,8 @@ pub fn github_scan(
         issue_days.unwrap_or(30),
         pr_days.unwrap_or(30),
         min_asset_size_mb.unwrap_or(0),
-    ).map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+    )
+    .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
 
     print_scan_summary(&candidates);
 
@@ -159,8 +160,7 @@ pub fn github_plan(
     issue_days: Option<i64>,
     pr_days: Option<i64>,
     min_asset_size_mb: Option<u64>,
-    #[arg(short = 'o')]
-    output: String,
+    #[arg(short = 'o')] output: String,
 ) -> clap_noun_verb::Result<serde_json::Value> {
     let executor = RealCommandExecutor;
     let candidates = discover_candidates(
@@ -172,7 +172,8 @@ pub fn github_plan(
         issue_days.unwrap_or(30),
         pr_days.unwrap_or(30),
         min_asset_size_mb.unwrap_or(0),
-    ).map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+    )
+    .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
 
     let plan = DeletionPlan::new(
         vec![PathBuf::from("github://")],
@@ -203,12 +204,9 @@ pub fn github_plan(
 /// * `yes` - Skip interactive confirmation
 #[clap_noun_verb_macros::verb("delete", "github")]
 pub fn github_delete(
-    #[arg(short = 'p')]
-    plan: String,
-    #[arg(short = 'r')]
-    receipt: String,
-    #[arg(short = 'y')]
-    yes: bool,
+    #[arg(short = 'p')] plan: String,
+    #[arg(short = 'r')] receipt: String,
+    #[arg(short = 'y')] yes: bool,
 ) -> clap_noun_verb::Result<serde_json::Value> {
     let plan_path = PathBuf::from(plan);
     let receipt_path = PathBuf::from(receipt);
@@ -217,11 +215,12 @@ pub fn github_delete(
     let plan_item: DeletionPlan = serde_json::from_str(&content)
         .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
 
-    execute_delete_plan_helper(plan_item, receipt_path, yes)
+    execute_delete_plan_helper(&RealCommandExecutor, plan_item, receipt_path, yes)
         .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))
 }
 
-fn execute_delete_plan_helper(
+pub fn execute_delete_plan_helper(
+    executor: &dyn CommandExecutor,
     plan: DeletionPlan,
     receipt_path: PathBuf,
     yes: bool,
@@ -229,7 +228,12 @@ fn execute_delete_plan_helper(
     let raw_evidence = Evidence::<_, Raw, PlanSafetyWitness>::raw(plan);
     let admitted_plan = match DeletionPlanAdjudicator::admit(raw_evidence) {
         Ok(admitted) => admitted.into_evidence(),
-        Err(refusal) => return Err(anyhow::anyhow!("Plan validation failed: {}", refusal.reason)),
+        Err(refusal) => {
+            return Err(anyhow::anyhow!(
+                "Plan validation failed: {}",
+                refusal.reason
+            ))
+        }
     };
     let plan = admitted_plan.into_inner();
 
@@ -249,7 +253,6 @@ fn execute_delete_plan_helper(
     );
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-    let executor = RealCommandExecutor;
     let mut results = Vec::new();
     for item in &plan.items {
         pb.set_message(format!("Deleting {} ...", item.path.display()));
@@ -282,7 +285,7 @@ fn execute_delete_plan_helper(
                 bytes_freed: 0,
             }
         } else if let Some(target) = GithubTarget::parse(&item.path) {
-            match delete_github_target(&executor, &target) {
+            match delete_github_target(executor, &target) {
                 Ok(()) => {
                     let bytes_freed = match target {
                         GithubTarget::Cache { .. } | GithubTarget::ReleaseAsset { .. } => {
@@ -345,12 +348,27 @@ fn execute_delete_plan_helper(
 
     let receipt_json = serde_json::to_string_pretty(&receipt_obj)?;
     std::fs::write(&receipt_path, receipt_json)?;
-    println!("Successfully wrote execution receipt to {}", receipt_path.display());
+    println!(
+        "Successfully wrote execution receipt to {}",
+        receipt_path.display()
+    );
 
-    let deleted_count = results.iter().filter(|r| r.status == DeletionStatus::Deleted).count();
-    let failed_count = results.iter().filter(|r| r.status == DeletionStatus::Failed).count();
-    let skipped_count = results.iter().filter(|r| r.status == DeletionStatus::SkippedMissing).count();
-    let refused_count = results.iter().filter(|r| r.status == DeletionStatus::Refused).count();
+    let deleted_count = results
+        .iter()
+        .filter(|r| r.status == DeletionStatus::Deleted)
+        .count();
+    let failed_count = results
+        .iter()
+        .filter(|r| r.status == DeletionStatus::Failed)
+        .count();
+    let skipped_count = results
+        .iter()
+        .filter(|r| r.status == DeletionStatus::SkippedMissing)
+        .count();
+    let refused_count = results
+        .iter()
+        .filter(|r| r.status == DeletionStatus::Refused)
+        .count();
 
     Ok(serde_json::json!({
         "status": "success",
@@ -369,10 +387,8 @@ fn execute_delete_plan_helper(
 /// * `plan` - Optional path to the original deletion plan to check completeness
 #[clap_noun_verb_macros::verb("receipt", "github")]
 pub fn github_receipt(
-    #[arg(short = 'r')]
-    receipt: String,
-    #[arg(short = 'p')]
-    plan: Option<String>,
+    #[arg(short = 'r')] receipt: String,
+    #[arg(short = 'p')] plan: Option<String>,
 ) -> clap_noun_verb::Result<serde_json::Value> {
     let receipt_path = PathBuf::from(receipt);
     let content = std::fs::read_to_string(&receipt_path)
@@ -383,8 +399,10 @@ pub fn github_receipt(
     let plan = if let Some(ref p_str) = plan {
         let p_content = std::fs::read_to_string(p_str)
             .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
-        Some(serde_json::from_str::<DeletionPlan>(&p_content)
-            .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?)
+        Some(
+            serde_json::from_str::<DeletionPlan>(&p_content)
+                .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?,
+        )
     } else {
         None
     };
@@ -407,7 +425,9 @@ pub fn github_receipt(
                 issue.message
             );
         }
-        return Err(clap_noun_verb::NounVerbError::execution_error("Receipt verification failed (inconsistent evidence)."));
+        return Err(clap_noun_verb::NounVerbError::execution_error(
+            "Receipt verification failed (inconsistent evidence).",
+        ));
     } else {
         println!("\nAll checks passed. Receipt matches deletion plan and reality rules.");
     }
@@ -438,7 +458,8 @@ pub fn handle(action: GithubAction) -> anyhow::Result<()> {
                 Some(issue_days),
                 Some(pr_days),
                 Some(min_asset_size_mb),
-            ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            )
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
         GithubAction::Plan {
             repo_days,
@@ -459,27 +480,23 @@ pub fn handle(action: GithubAction) -> anyhow::Result<()> {
                 Some(pr_days),
                 Some(min_asset_size_mb),
                 output.to_string_lossy().to_string(),
-            ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            )
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
-        GithubAction::Delete {
-            plan,
-            receipt,
-            yes,
-        } => {
+        GithubAction::Delete { plan, receipt, yes } => {
             github_delete(
                 plan.to_string_lossy().to_string(),
                 receipt.to_string_lossy().to_string(),
                 yes,
-            ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            )
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
-        GithubAction::Receipt {
-            receipt,
-            plan,
-        } => {
+        GithubAction::Receipt { receipt, plan } => {
             github_receipt(
                 receipt.to_string_lossy().to_string(),
                 plan.map(|p| p.to_string_lossy().to_string()),
-            ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            )
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
     }
     Ok(())

@@ -1,5 +1,5 @@
 # Build outputs
-/target/
+target/
 
 # Real audit / deletion outputs
 *.jsonocel

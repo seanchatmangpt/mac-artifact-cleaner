@@ -1119,3 +1119,462 @@ fn test_github_confirmation_and_refused() {
         Some("Deletion refused by user".to_string())
     );
 }
+
+#[test]
+fn test_github_protection_markers() {
+    use osx_clnr::domain::github::{is_issue_stale, is_pr_stale, GhIssue, GhLabel, GhPr};
+
+    // 1. Issue protection checks
+    let base_issue = GhIssue {
+        number: 42,
+        title: "A bug".into(),
+        state: "OPEN".into(),
+        created_at: "2026-05-10T12:00:00Z".into(),
+        updated_at: "2026-05-10T12:00:00Z".into(),
+        labels: vec![],
+    };
+
+    // Default stale issue
+    assert!(is_issue_stale(&base_issue, 30, "2026-06-14T12:00:00Z"));
+
+    // Stale issue with irrelevant label
+    let mut bug_issue = base_issue.clone();
+    bug_issue.labels.push(GhLabel { name: "bug".into() });
+    assert!(is_issue_stale(&bug_issue, 30, "2026-06-14T12:00:00Z"));
+
+    // Protected labels: keep, pinned, no-stale, critical (case insensitive)
+    for protected_name in &[
+        "keep", "pinned", "no-stale", "critical", "KeEp", "PINNED", "no-STALE", "CRITICAL",
+    ] {
+        let mut protected_issue = base_issue.clone();
+        protected_issue.labels.push(GhLabel {
+            name: protected_name.to_string(),
+        });
+        assert!(
+            !is_issue_stale(&protected_issue, 30, "2026-06-14T12:00:00Z"),
+            "Issue with label '{}' should not be stale",
+            protected_name
+        );
+    }
+
+    // 2. PR protection checks
+    let base_pr = GhPr {
+        number: 101,
+        title: "A feature".into(),
+        state: "OPEN".into(),
+        created_at: "2026-05-10T12:00:00Z".into(),
+        updated_at: "2026-05-10T12:00:00Z".into(),
+        labels: vec![],
+    };
+
+    // Default stale PR
+    assert!(is_pr_stale(&base_pr, 30, "2026-06-14T12:00:00Z"));
+
+    // Stale PR with irrelevant label
+    let mut refactor_pr = base_pr.clone();
+    refactor_pr.labels.push(GhLabel {
+        name: "refactor".into(),
+    });
+    assert!(is_pr_stale(&refactor_pr, 30, "2026-06-14T12:00:00Z"));
+
+    // Protected labels
+    for protected_name in &[
+        "keep", "pinned", "no-stale", "critical", "KeEp", "PINNED", "no-STALE", "CRITICAL",
+    ] {
+        let mut protected_pr = base_pr.clone();
+        protected_pr.labels.push(GhLabel {
+            name: protected_name.to_string(),
+        });
+        assert!(
+            !is_pr_stale(&protected_pr, 30, "2026-06-14T12:00:00Z"),
+            "PR with label '{}' should not be stale",
+            protected_name
+        );
+    }
+}
+
+#[test]
+fn test_github_execute_delete_plan_helper_success() {
+    use osx_clnr::nouns::github::execute_delete_plan_helper;
+    let mock = MockCommandExecutor::new();
+    // Register mock responses for all 8 target types
+    mock.add_response(
+        "gh",
+        &["repo", "delete", "my-org/empty-repo", "--yes"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &["run", "delete", "111", "--repo", "my-org/active-repo"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &[
+            "api",
+            "-X",
+            "DELETE",
+            "repos/my-org/active-repo/git/refs/heads/feature/merged",
+        ],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &[
+            "release",
+            "delete",
+            "v1.0.0-draft",
+            "--repo",
+            "my-org/active-repo",
+            "--yes",
+            "--cleanup-tag",
+        ],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &["cache", "delete", "333", "--repo", "my-org/active-repo"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &["issue", "close", "12", "--repo", "my-org/active-repo"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &["pr", "close", "24", "--repo", "my-org/active-repo"],
+        0,
+        "",
+        "",
+    );
+    mock.add_response(
+        "gh",
+        &[
+            "api",
+            "-X",
+            "DELETE",
+            "repos/my-org/active-repo/releases/assets/555",
+        ],
+        0,
+        "",
+        "",
+    );
+
+    let items = vec![
+        PlanItem {
+            path: PathBuf::from("github://repo/my-org/empty-repo"),
+            kind: PlanItemKind::GithubRepo,
+            reason: "Empty repository".to_string(),
+            bytes: 0,
+        },
+        PlanItem {
+            path: PathBuf::from("github://run/my-org/active-repo/111"),
+            kind: PlanItemKind::GithubRun,
+            reason: "Stale workflow run".to_string(),
+            bytes: 0,
+        },
+        PlanItem {
+            path: PathBuf::from("github://branch/my-org/active-repo/feature/merged"),
+            kind: PlanItemKind::GithubBranch,
+            reason: "Merged branch".to_string(),
+            bytes: 0,
+        },
+        PlanItem {
+            path: PathBuf::from("github://release/my-org/active-repo/v1.0.0-draft"),
+            kind: PlanItemKind::GithubRelease,
+            reason: "Draft release".to_string(),
+            bytes: 0,
+        },
+        PlanItem {
+            path: PathBuf::from("github://cache/my-org/active-repo/333/stale-cache"),
+            kind: PlanItemKind::GithubCache,
+            reason: "Stale cache".to_string(),
+            bytes: 5000,
+        },
+        PlanItem {
+            path: PathBuf::from("github://issue/my-org/active-repo/12"),
+            kind: PlanItemKind::GithubIssue,
+            reason: "Stale issue".to_string(),
+            bytes: 0,
+        },
+        PlanItem {
+            path: PathBuf::from("github://pr/my-org/active-repo/24"),
+            kind: PlanItemKind::GithubPr,
+            reason: "Stale PR".to_string(),
+            bytes: 0,
+        },
+        PlanItem {
+            path: PathBuf::from("github://release-asset/my-org/active-repo/555/large-asset.zip"),
+            kind: PlanItemKind::GithubReleaseAsset,
+            reason: "Large asset".to_string(),
+            bytes: 10485760,
+        },
+    ];
+
+    let plan = DeletionPlan::new(
+        vec![PathBuf::from("github://")],
+        false,
+        false,
+        items,
+        vec![],
+    );
+
+    let plan_dir = tempfile::tempdir().unwrap();
+    let receipt_path = plan_dir.path().join("receipt.json");
+
+    let res = execute_delete_plan_helper(&mock, plan, receipt_path.clone(), true).unwrap();
+    assert_eq!(res["status"], "success");
+    assert_eq!(res["deleted_count"], 8);
+    assert_eq!(res["failed_count"], 0);
+
+    // Verify written receipt
+    let receipt_content = std::fs::read_to_string(&receipt_path).unwrap();
+    let receipt: DeletionReceipt = serde_json::from_str(&receipt_content).unwrap();
+    assert_eq!(receipt.execution_record.results.len(), 8);
+    for r in &receipt.execution_record.results {
+        assert_eq!(r.status, DeletionStatus::Deleted);
+    }
+}
+
+#[test]
+fn test_github_execute_delete_plan_helper_failures() {
+    use osx_clnr::nouns::github::execute_delete_plan_helper;
+    let mock = MockCommandExecutor::new();
+
+    // Target 1: Repo deletion returns status 1, generic error
+    mock.add_response(
+        "gh",
+        &["repo", "delete", "my-org/repo-fail", "--yes"],
+        1,
+        "",
+        "internal server error",
+    );
+
+    // Target 2: Branch deletion returns status 1, "not found" in stderr
+    mock.add_response(
+        "gh",
+        &[
+            "api",
+            "-X",
+            "DELETE",
+            "repos/my-org/active-repo/git/refs/heads/feature/missing",
+        ],
+        1,
+        "",
+        "branch not found",
+    );
+
+    // Target 3: Issue close returns status 1, "404" in stderr
+    mock.add_response(
+        "gh",
+        &["issue", "close", "999", "--repo", "my-org/active-repo"],
+        1,
+        "",
+        "HTTP 404: Not Found",
+    );
+
+    let items = vec![
+        // Target 1: Generic failure
+        PlanItem {
+            path: PathBuf::from("github://repo/my-org/repo-fail"),
+            kind: PlanItemKind::GithubRepo,
+            reason: "Failure repo".to_string(),
+            bytes: 0,
+        },
+        // Target 2: Not found branch
+        PlanItem {
+            path: PathBuf::from("github://branch/my-org/active-repo/feature/missing"),
+            kind: PlanItemKind::GithubBranch,
+            reason: "Missing branch".to_string(),
+            bytes: 0,
+        },
+        // Target 3: 404 issue
+        PlanItem {
+            path: PathBuf::from("github://issue/my-org/active-repo/999"),
+            kind: PlanItemKind::GithubIssue,
+            reason: "Missing issue".to_string(),
+            bytes: 0,
+        },
+        // Target 4: Non-GitHub URI (Should be SkippedMissing)
+        PlanItem {
+            path: PathBuf::from("/Users/user/some-local-file"),
+            kind: PlanItemKind::Dir,
+            reason: "Local file".to_string(),
+            bytes: 100,
+        },
+        // Target 5: Invalid GitHub URI (Should be Failed)
+        PlanItem {
+            path: PathBuf::from("github://invalid"),
+            kind: PlanItemKind::GithubRepo,
+            reason: "Invalid URI".to_string(),
+            bytes: 0,
+        },
+    ];
+
+    let plan = DeletionPlan::new(
+        vec![PathBuf::from("github://")],
+        false,
+        false,
+        items,
+        vec![],
+    );
+
+    let plan_dir = tempfile::tempdir().unwrap();
+    let receipt_path = plan_dir.path().join("receipt.json");
+
+    let res = execute_delete_plan_helper(&mock, plan, receipt_path.clone(), true).unwrap();
+    assert_eq!(res["status"], "success");
+    assert_eq!(res["deleted_count"], 0);
+    assert_eq!(res["failed_count"], 2); // Target 1 and Target 5
+    assert_eq!(res["skipped_count"], 3); // Target 2, Target 3, and Target 4
+
+    // Verify written receipt
+    let receipt_content = std::fs::read_to_string(&receipt_path).unwrap();
+    let receipt: DeletionReceipt = serde_json::from_str(&receipt_content).unwrap();
+
+    assert_eq!(
+        receipt.execution_record.results[0].status,
+        DeletionStatus::Failed
+    );
+    assert!(receipt.execution_record.results[0]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("internal server error"));
+
+    assert_eq!(
+        receipt.execution_record.results[1].status,
+        DeletionStatus::SkippedMissing
+    );
+    assert!(receipt.execution_record.results[1]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("branch not found"));
+
+    assert_eq!(
+        receipt.execution_record.results[2].status,
+        DeletionStatus::SkippedMissing
+    );
+    assert!(receipt.execution_record.results[2]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("HTTP 404: Not Found"));
+
+    assert_eq!(
+        receipt.execution_record.results[3].status,
+        DeletionStatus::SkippedMissing
+    );
+    assert!(receipt.execution_record.results[3]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("Non-GitHub item skipped"));
+
+    assert_eq!(
+        receipt.execution_record.results[4].status,
+        DeletionStatus::Failed
+    );
+    assert!(receipt.execution_record.results[4]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("Invalid github:// URI"));
+}
+
+#[test]
+fn test_github_list_branches_paging() {
+    let mock = MockCommandExecutor::new();
+
+    // Generate 100 branch items for page 1
+    let mut page1_items = Vec::new();
+    for i in 1..=100 {
+        page1_items.push(serde_json::json!({
+            "name": format!("branch-{}", i),
+            "commit": {
+                "sha": format!("sha-{}", i),
+                "url": format!("url-{}", i),
+            },
+            "protected": false
+        }));
+    }
+    let page1_json = serde_json::to_string(&page1_items).unwrap();
+
+    // Generate 50 branch items for page 2
+    let mut page2_items = Vec::new();
+    for i in 101..=150 {
+        page2_items.push(serde_json::json!({
+            "name": format!("branch-{}", i),
+            "commit": {
+                "sha": format!("sha-{}", i),
+                "url": format!("url-{}", i),
+            },
+            "protected": false
+        }));
+    }
+    let page2_json = serde_json::to_string(&page2_items).unwrap();
+
+    mock.add_response(
+        "gh",
+        &["api", "repos/my-org/my-repo/branches?per_page=100&page=1"],
+        0,
+        &page1_json,
+        "",
+    );
+
+    mock.add_response(
+        "gh",
+        &["api", "repos/my-org/my-repo/branches?per_page=100&page=2"],
+        0,
+        &page2_json,
+        "",
+    );
+
+    let branches =
+        osx_clnr::integration::github::list_branches(&mock, "my-org", "my-repo").unwrap();
+    assert_eq!(branches.len(), 150);
+    assert_eq!(branches[0].name, "branch-1");
+    assert_eq!(branches[99].name, "branch-100");
+    assert_eq!(branches[100].name, "branch-101");
+    assert_eq!(branches[149].name, "branch-150");
+}
+
+#[test]
+fn test_github_integration_failures() {
+    let mock = MockCommandExecutor::new();
+
+    // Setup failures for list commands
+    mock.add_response(
+        "gh",
+        &[
+            "repo",
+            "list",
+            "--limit",
+            "1000",
+            "--json",
+            "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility,defaultBranchRef",
+        ],
+        1,
+        "",
+        "authentication failed",
+    );
+
+    let err = osx_clnr::integration::github::list_repositories(&mock).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("gh command failed: authentication failed"));
+}

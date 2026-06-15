@@ -189,6 +189,26 @@ impl GithubTarget {
     ///
     /// // Invalid scheme
     /// assert!(GithubTarget::parse(Path::new("/Users/user/project")).is_none());
+    ///
+    /// // Empty owner or repo
+    /// assert!(GithubTarget::parse(Path::new("github://repo//my-repo")).is_none());
+    /// assert!(GithubTarget::parse(Path::new("github://repo/my-owner/")).is_none());
+    /// assert!(GithubTarget::parse(Path::new("github://repo//")).is_none());
+    ///
+    /// // Trailing slashes
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature/issue-1/")).is_none());
+    ///
+    /// // Double slashes
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo//feature")).is_none());
+    ///
+    /// // Invalid git ref characters/patterns in branch/tag name
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature?")).is_none());
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature.lock")).is_none());
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature@{ref}")).is_none());
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature\\ref")).is_none());
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature/..")).is_none());
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/.feature")).is_none());
+    /// assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature/.ref")).is_none());
     /// ```
     pub fn parse(path: &Path) -> Option<Self> {
         let path_str = path.to_str()?;
@@ -197,6 +217,10 @@ impl GithubTarget {
         }
 
         let stripped = path_str.strip_prefix("github://")?;
+        if stripped.ends_with('/') || stripped.contains("//") {
+            return None;
+        }
+
         let parts: Vec<&str> = stripped.split('/').collect();
         if parts.len() < 3 {
             return None;
@@ -205,6 +229,10 @@ impl GithubTarget {
         let resource_type = parts[0];
         let owner = parts[1].to_string();
         let repo = parts[2].to_string();
+
+        if owner.is_empty() || repo.is_empty() {
+            return None;
+        }
 
         match resource_type {
             "repo" => {
@@ -216,7 +244,7 @@ impl GithubTarget {
             }
             "branch" => {
                 let branch = parts[3..].join("/");
-                if !branch.is_empty() {
+                if !branch.is_empty() && is_valid_git_ref_format(&branch) {
                     Some(GithubTarget::Branch {
                         owner,
                         repo,
@@ -240,7 +268,7 @@ impl GithubTarget {
             }
             "release" => {
                 let tag = parts[3..].join("/");
-                if !tag.is_empty() {
+                if !tag.is_empty() && is_valid_git_ref_format(&tag) {
                     Some(GithubTarget::Release { owner, repo, tag })
                 } else {
                     None
@@ -379,6 +407,50 @@ impl GithubTarget {
         };
         PathBuf::from(path_str)
     }
+}
+
+/// Helper function to validate Git ref format.
+/// Follows the standard rules defined in `git-check-ref-format`.
+fn is_valid_git_ref_format(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    if s.starts_with('/') || s.ends_with('/') {
+        return false;
+    }
+    if s.contains("//") {
+        return false;
+    }
+    if s.contains("..") {
+        return false;
+    }
+    if s.ends_with(".lock") {
+        return false;
+    }
+    if s.contains("@{") {
+        return false;
+    }
+    if s.contains('\\') {
+        return false;
+    }
+    if s == "@" {
+        return false;
+    }
+    for c in s.chars() {
+        if c.is_ascii_control() {
+            return false;
+        }
+        match c {
+            ' ' | '~' | '^' | ':' | '?' | '*' | '[' => return false,
+            _ => {}
+        }
+    }
+    for part in s.split('/') {
+        if part.starts_with('.') {
+            return false;
+        }
+    }
+    true
 }
 
 /// Helper function to check if a date is older than `threshold_days` compared to `current_time_iso`.
@@ -629,12 +701,20 @@ pub fn is_cache_stale(cache: &GhCache, threshold_days: i64, current_time_iso: &s
     is_older_than(&cache.last_accessed_at, threshold_days, current_time_iso)
 }
 
+/// Helper to check if any label contains a protection marker.
+fn has_protection_label(labels: &[GhLabel]) -> bool {
+    labels.iter().any(|l| {
+        let name = l.name.to_lowercase();
+        name == "pinned" || name == "keep" || name == "no-stale" || name == "critical"
+    })
+}
+
 /// Evaluates if an issue is stale.
 ///
 /// # Examples
 ///
 /// ```
-/// use osx_clnr::domain::github::{GhIssue, is_issue_stale};
+/// use osx_clnr::domain::github::{GhIssue, GhLabel, is_issue_stale};
 ///
 /// let issue = GhIssue {
 ///     number: 42,
@@ -655,9 +735,22 @@ pub fn is_cache_stale(cache: &GhCache, threshold_days: i64, current_time_iso: &s
 /// let mut closed_issue = issue.clone();
 /// closed_issue.state = "CLOSED".into();
 /// assert!(!is_issue_stale(&closed_issue, 30, "2026-06-14T12:00:00Z"));
+///
+/// // Open issue older than 30 days but has a protection label ("keep")
+/// let mut protected_issue = issue.clone();
+/// protected_issue.labels.push(GhLabel { name: "keep".into() });
+/// assert!(!is_issue_stale(&protected_issue, 30, "2026-06-14T12:00:00Z"));
+///
+/// // Open issue older than 30 days but has a protection label ("pinned" case-insensitive)
+/// let mut protected_issue_2 = issue.clone();
+/// protected_issue_2.labels.push(GhLabel { name: "PinNeD".into() });
+/// assert!(!is_issue_stale(&protected_issue_2, 30, "2026-06-14T12:00:00Z"));
 /// ```
 pub fn is_issue_stale(issue: &GhIssue, threshold_days: i64, current_time_iso: &str) -> bool {
     if issue.state != "OPEN" {
+        return false;
+    }
+    if has_protection_label(&issue.labels) {
         return false;
     }
     is_older_than(&issue.updated_at, threshold_days, current_time_iso)
@@ -668,7 +761,7 @@ pub fn is_issue_stale(issue: &GhIssue, threshold_days: i64, current_time_iso: &s
 /// # Examples
 ///
 /// ```
-/// use osx_clnr::domain::github::{GhPr, is_pr_stale};
+/// use osx_clnr::domain::github::{GhPr, GhLabel, is_pr_stale};
 ///
 /// let pr = GhPr {
 ///     number: 101,
@@ -689,10 +782,113 @@ pub fn is_issue_stale(issue: &GhIssue, threshold_days: i64, current_time_iso: &s
 /// let mut closed_pr = pr.clone();
 /// closed_pr.state = "MERGED".into();
 /// assert!(!is_pr_stale(&closed_pr, 30, "2026-06-14T12:00:00Z"));
+///
+/// // Open PR older than 30 days but has a protection label ("critical")
+/// let mut protected_pr = pr.clone();
+/// protected_pr.labels.push(GhLabel { name: "critical".into() });
+/// assert!(!is_pr_stale(&protected_pr, 30, "2026-06-14T12:00:00Z"));
+///
+/// // Open PR older than 30 days but has a protection label ("no-stale" case-insensitive)
+/// let mut protected_pr_2 = pr.clone();
+/// protected_pr_2.labels.push(GhLabel { name: "No-Stale".into() });
+/// assert!(!is_pr_stale(&protected_pr_2, 30, "2026-06-14T12:00:00Z"));
 /// ```
 pub fn is_pr_stale(pr: &GhPr, threshold_days: i64, current_time_iso: &str) -> bool {
     if pr.state != "OPEN" {
         return false;
     }
+    if has_protection_label(&pr.labels) {
+        return false;
+    }
     is_older_than(&pr.updated_at, threshold_days, current_time_iso)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_harden_github_target_parse() {
+        // Valid targets
+        assert!(GithubTarget::parse(Path::new("github://repo/my-owner/my-repo")).is_some());
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/main")).is_some());
+        assert!(GithubTarget::parse(Path::new(
+            "github://branch/my-owner/my-repo/feature/issue-12"
+        ))
+        .is_some());
+        assert!(
+            GithubTarget::parse(Path::new("github://release/my-owner/my-repo/v1.0.0")).is_some()
+        );
+
+        // Empty owner or repo
+        assert!(GithubTarget::parse(Path::new("github://repo//my-repo")).is_none());
+        assert!(GithubTarget::parse(Path::new("github://repo/my-owner/")).is_none());
+        assert!(GithubTarget::parse(Path::new("github://repo//")).is_none());
+        assert!(GithubTarget::parse(Path::new("github://branch//my-repo/main")).is_none());
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner//main")).is_none());
+
+        // Trailing slash
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/main/")).is_none());
+        assert!(GithubTarget::parse(Path::new("github://repo/my-owner/my-repo/")).is_none());
+
+        // Double slash
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo//main")).is_none());
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner//my-repo/main")).is_none());
+
+        // Invalid Git ref formats (e.g. invalid chars, lock extension, consecutive dots, start with dot)
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature?")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature*")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature~")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature^")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature:")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature[abc]"))
+                .is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature.lock"))
+                .is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature/..")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/..feature")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/.feature")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature/.ref"))
+                .is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature\\ref"))
+                .is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature@{ref}"))
+                .is_none()
+        );
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/@")).is_none());
+
+        // Release targets with invalid ref formats
+        assert!(
+            GithubTarget::parse(Path::new("github://release/my-owner/my-repo/.v1.0")).is_none()
+        );
+        assert!(
+            GithubTarget::parse(Path::new("github://release/my-owner/my-repo/v1.0.lock")).is_none()
+        );
+    }
 }

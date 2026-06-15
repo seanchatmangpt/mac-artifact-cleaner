@@ -419,4 +419,44 @@ The companion tool must support the following new targets:
 - [ ] Verify that correct cleanup commands (e.g. `gh cache delete`, `gh issue close`) are built and executed.
 
 ### CLI Execution
-- [ ] Running the binary with the new targets added to the `github` subcommand runs successfully, outputs valid help text, builds plans, and executes deletions strictly from plans.```
+- [ ] Running the binary with the new targets added to the `github` subcommand runs successfully, outputs valid help text, builds plans, and executes deletions strictly from plans.
+
+## Follow-up — 2026-06-15T00:54:17Z
+
+Implement a new standalone library crate `cfab-surface` in the `osx-clnr` workspace that formalizes Sean Chatman's "Chatman Fabric" thesis by representing digital resources as **Surfaces** and modeling their relationships as a **Fabric** graph, enabling formal lifecycle and provenance tracking.
+
+Working directory: `/Users/sac/osx-clnr`
+Integrity mode: benchmark
+
+## Requirements
+
+### R1. Surface Representation
+Implement the `Surface` abstraction to represent diverse types of digital resources.
+- Support typed URIs/identifiers for each surface:
+  - `file:///path/to/local` (Local Directory Surface)
+  - `github://owner/repo` (GitHub Repository Surface)
+  - `plan:///path/to/plan.json` (Plan Surface)
+  - `receipt:///path/to/receipt.json` (Receipt Surface)
+  - `doc:///path/to/doc.md` (Document Surface)
+- Provide query functions to observe the state ($O^*$) and metadata of each Surface.
+
+### R2. Fabric Relation Graph
+Implement the `Fabric` graph representation, allowing Surfaces to be connected by directed edges that represent semantic operations and relations:
+- Dependency / Parent-Child links.
+- Transformation mappings ($\mu$).
+- Evidence turnstiles ($R \vdash A = \mu(O^*)$).
+
+### R3. Standalone Crate Integration
+- Scaffold the `cfab-surface` crate as a member of the existing Cargo workspace.
+- Utilize existing dependencies where appropriate (e.g., `petgraph` for the graph, `serde` for serialization, `uriparse` or standard library path/URI parsing).
+
+## Acceptance Criteria
+
+### API Design & Graph Integrity
+- [ ] The `cfab-surface` crate compiles cleanly without warnings or errors.
+- [ ] A `Fabric` graph can be constructed containing at least one node of each Surface type (`Local`, `Github`, `Plan`, `Receipt`, `Document`) and verified programmatically.
+- [ ] The graph can detect cyclic dependencies or invalid edge connections (e.g., a Receipt pointing to a Plan instead of the other way around).
+
+### Test Verification
+- [ ] A comprehensive test suite (`cargo test -p cfab-surface`) is implemented verifying graph creation, node attributes, edge relationships, and cycle detection.
+- [ ] Doctests cover the public trait and structure functions.```
