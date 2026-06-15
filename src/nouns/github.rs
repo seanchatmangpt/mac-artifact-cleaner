@@ -99,8 +99,327 @@ pub enum GithubAction {
     },
 }
 
-pub fn handle(action: GithubAction) -> anyhow::Result<()> {
+/// Scan GitHub for empty/stale repositories, merged branches, stale runs, and draft/stale releases.
+///
+/// # Arguments
+/// * `repo_days` - Number of days of inactivity to consider a repository stale [default: 180]
+/// * `run_days` - Number of days of age to consider a workflow run stale [default: 30]
+/// * `release_days` - Number of days of age to consider a release stale [default: 30]
+/// * `cache_days` - Number of days of age to consider a cache stale [default: 30]
+/// * `issue_days` - Number of days of inactivity to consider an issue stale [default: 30]
+/// * `pr_days` - Number of days of inactivity to consider a pull request stale [default: 30]
+/// * `min_asset_size_mb` - Minimum size of release assets in MB to consider for cleanup [default: 0]
+#[clap_noun_verb_macros::verb("scan", "github")]
+pub fn github_scan(
+    repo_days: Option<i64>,
+    run_days: Option<i64>,
+    release_days: Option<i64>,
+    cache_days: Option<i64>,
+    issue_days: Option<i64>,
+    pr_days: Option<i64>,
+    min_asset_size_mb: Option<u64>,
+) -> clap_noun_verb::Result<serde_json::Value> {
     let executor = RealCommandExecutor;
+    let candidates = discover_candidates(
+        &executor,
+        repo_days.unwrap_or(180),
+        run_days.unwrap_or(30),
+        release_days.unwrap_or(30),
+        cache_days.unwrap_or(30),
+        issue_days.unwrap_or(30),
+        pr_days.unwrap_or(30),
+        min_asset_size_mb.unwrap_or(0),
+    ).map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+
+    print_scan_summary(&candidates);
+
+    Ok(serde_json::json!({
+        "status": "success",
+        "candidates_count": candidates.len(),
+    }))
+}
+
+/// Build and write a deletion plan containing identified GitHub candidates.
+///
+/// # Arguments
+/// * `repo_days` - Number of days of inactivity to consider a repository stale [default: 180]
+/// * `run_days` - Number of days of age to consider a workflow run stale [default: 30]
+/// * `release_days` - Number of days of age to consider a release stale [default: 30]
+/// * `cache_days` - Number of days of age to consider a cache stale [default: 30]
+/// * `issue_days` - Number of days of inactivity to consider an issue stale [default: 30]
+/// * `pr_days` - Number of days of inactivity to consider a pull request stale [default: 30]
+/// * `min_asset_size_mb` - Minimum size of release assets in MB to consider for cleanup [default: 0]
+/// * `output` - Output path for the deletion plan JSON file
+#[clap_noun_verb_macros::verb("plan", "github")]
+pub fn github_plan(
+    repo_days: Option<i64>,
+    run_days: Option<i64>,
+    release_days: Option<i64>,
+    cache_days: Option<i64>,
+    issue_days: Option<i64>,
+    pr_days: Option<i64>,
+    min_asset_size_mb: Option<u64>,
+    #[arg(short = 'o')]
+    output: String,
+) -> clap_noun_verb::Result<serde_json::Value> {
+    let executor = RealCommandExecutor;
+    let candidates = discover_candidates(
+        &executor,
+        repo_days.unwrap_or(180),
+        run_days.unwrap_or(30),
+        release_days.unwrap_or(30),
+        cache_days.unwrap_or(30),
+        issue_days.unwrap_or(30),
+        pr_days.unwrap_or(30),
+        min_asset_size_mb.unwrap_or(0),
+    ).map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+
+    let plan = DeletionPlan::new(
+        vec![PathBuf::from("github://")],
+        false,
+        false,
+        candidates.clone(),
+        vec![],
+    );
+    let content = serde_json::to_string_pretty(&plan)
+        .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+    std::fs::write(&output, content)
+        .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+
+    println!("Successfully wrote GitHub deletion plan to {}", output);
+
+    Ok(serde_json::json!({
+        "status": "success",
+        "candidates_count": candidates.len(),
+        "output": output,
+    }))
+}
+
+/// Load a deletion plan, validate it, execute GitHub resource deletions, and write a receipt.
+///
+/// # Arguments
+/// * `plan` - Path to the deletion plan
+/// * `receipt` - Path to write the execution receipt
+/// * `yes` - Skip interactive confirmation
+#[clap_noun_verb_macros::verb("delete", "github")]
+pub fn github_delete(
+    #[arg(short = 'p')]
+    plan: String,
+    #[arg(short = 'r')]
+    receipt: String,
+    #[arg(short = 'y')]
+    yes: bool,
+) -> clap_noun_verb::Result<serde_json::Value> {
+    let plan_path = PathBuf::from(plan);
+    let receipt_path = PathBuf::from(receipt);
+    let content = std::fs::read_to_string(&plan_path)
+        .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+    let plan_item: DeletionPlan = serde_json::from_str(&content)
+        .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+
+    execute_delete_plan_helper(plan_item, receipt_path, yes)
+        .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))
+}
+
+fn execute_delete_plan_helper(
+    plan: DeletionPlan,
+    receipt_path: PathBuf,
+    yes: bool,
+) -> anyhow::Result<serde_json::Value> {
+    let raw_evidence = Evidence::<_, Raw, PlanSafetyWitness>::raw(plan);
+    let admitted_plan = match DeletionPlanAdjudicator::admit(raw_evidence) {
+        Ok(admitted) => admitted.into_evidence(),
+        Err(refusal) => return Err(anyhow::anyhow!("Plan validation failed: {}", refusal.reason)),
+    };
+    let plan = admitted_plan.into_inner();
+
+    println!("Executing GitHub deletions from plan");
+    let start_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let pb = ProgressBar::new(plan.items.len() as u64);
+    pb.set_style(
+        ProgressStyle::with_template(
+            "[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}",
+        )
+        .unwrap()
+        .progress_chars("#>-"),
+    );
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    let executor = RealCommandExecutor;
+    let mut results = Vec::new();
+    for item in &plan.items {
+        pb.set_message(format!("Deleting {} ...", item.path.display()));
+        let proceed = if yes {
+            true
+        } else {
+            pb.suspend(|| {
+                dialoguer::Confirm::new()
+                    .with_prompt(format!("Do you want to delete {}?", item.path.display()))
+                    .default(false)
+                    .interact()
+                    .unwrap_or(false)
+            })
+        };
+
+        let res = if !proceed {
+            DeletionResult {
+                path: item.path.clone(),
+                status: DeletionStatus::Refused,
+                error: Some("Deletion refused by user".to_string()),
+                blake3_hash: None,
+                bytes_freed: 0,
+            }
+        } else if !is_github_uri(&item.path) {
+            DeletionResult {
+                path: item.path.clone(),
+                status: DeletionStatus::SkippedMissing,
+                error: Some("Non-GitHub item skipped during github delete".to_string()),
+                blake3_hash: None,
+                bytes_freed: 0,
+            }
+        } else if let Some(target) = GithubTarget::parse(&item.path) {
+            match delete_github_target(&executor, &target) {
+                Ok(()) => {
+                    let bytes_freed = match target {
+                        GithubTarget::Cache { .. } | GithubTarget::ReleaseAsset { .. } => {
+                            item.bytes
+                        }
+                        _ => 0,
+                    };
+                    DeletionResult {
+                        path: item.path.clone(),
+                        status: DeletionStatus::Deleted,
+                        error: None,
+                        blake3_hash: None,
+                        bytes_freed,
+                    }
+                }
+                Err(e) => {
+                    let err_str = e.to_string();
+                    let status = if err_str.contains("not found") || err_str.contains("404") {
+                        DeletionStatus::SkippedMissing
+                    } else {
+                        DeletionStatus::Failed
+                    };
+                    DeletionResult {
+                        path: item.path.clone(),
+                        status,
+                        error: Some(err_str),
+                        blake3_hash: None,
+                        bytes_freed: 0,
+                    }
+                }
+            }
+        } else {
+            DeletionResult {
+                path: item.path.clone(),
+                status: DeletionStatus::Failed,
+                error: Some("Invalid github:// URI".to_string()),
+                blake3_hash: None,
+                bytes_freed: 0,
+            }
+        };
+        results.push(res);
+        pb.inc(1);
+    }
+    pb.finish_with_message("GitHub deletion execution complete.");
+
+    let end_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let receipt_obj = DeletionReceipt::new(
+        "github-deletion-chain-001".to_string(),
+        plan.created_unix,
+        start_time,
+        end_time,
+        results.clone(),
+        None,
+        None,
+    );
+
+    let receipt_json = serde_json::to_string_pretty(&receipt_obj)?;
+    std::fs::write(&receipt_path, receipt_json)?;
+    println!("Successfully wrote execution receipt to {}", receipt_path.display());
+
+    let deleted_count = results.iter().filter(|r| r.status == DeletionStatus::Deleted).count();
+    let failed_count = results.iter().filter(|r| r.status == DeletionStatus::Failed).count();
+    let skipped_count = results.iter().filter(|r| r.status == DeletionStatus::SkippedMissing).count();
+    let refused_count = results.iter().filter(|r| r.status == DeletionStatus::Refused).count();
+
+    Ok(serde_json::json!({
+        "status": "success",
+        "receipt_path": receipt_path.to_string_lossy(),
+        "deleted_count": deleted_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "refused_count": refused_count,
+    }))
+}
+
+/// Verify and summarize a deletion receipt containing GitHub items.
+///
+/// # Arguments
+/// * `receipt` - Path to the deletion receipt
+/// * `plan` - Optional path to the original deletion plan to check completeness
+#[clap_noun_verb_macros::verb("receipt", "github")]
+pub fn github_receipt(
+    #[arg(short = 'r')]
+    receipt: String,
+    #[arg(short = 'p')]
+    plan: Option<String>,
+) -> clap_noun_verb::Result<serde_json::Value> {
+    let receipt_path = PathBuf::from(receipt);
+    let content = std::fs::read_to_string(&receipt_path)
+        .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+    let receipt: DeletionReceipt = serde_json::from_str(&content)
+        .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+
+    let plan = if let Some(ref p_str) = plan {
+        let p_content = std::fs::read_to_string(p_str)
+            .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?;
+        Some(serde_json::from_str::<DeletionPlan>(&p_content)
+            .map_err(|e| clap_noun_verb::NounVerbError::execution_error(e.to_string()))?)
+    } else {
+        None
+    };
+
+    let report = receipt.verify(plan.as_ref());
+    println!("\n==================================================");
+    println!("            RECEIPT VERIFICATION REPORT           ");
+    println!("==================================================");
+    println!("  Consistent:          {}", report.is_consistent);
+    println!("  Total issues found:  {}", report.issues.len());
+    println!("==================================================");
+
+    if !report.is_consistent {
+        println!("\nIssues:");
+        for issue in &report.issues {
+            println!(
+                "  - [{:?}] {}: {}",
+                issue.issue_type,
+                issue.path.display(),
+                issue.message
+            );
+        }
+        return Err(clap_noun_verb::NounVerbError::execution_error("Receipt verification failed (inconsistent evidence)."));
+    } else {
+        println!("\nAll checks passed. Receipt matches deletion plan and reality rules.");
+    }
+
+    Ok(serde_json::json!({
+        "status": "success",
+        "verified": true,
+        "issues_count": report.issues.len(),
+    }))
+}
+
+pub fn handle(action: GithubAction) -> anyhow::Result<()> {
     match action {
         GithubAction::Scan {
             repo_days,
@@ -111,18 +430,15 @@ pub fn handle(action: GithubAction) -> anyhow::Result<()> {
             pr_days,
             min_asset_size_mb,
         } => {
-            println!("Scanning GitHub repositories and resources...");
-            let candidates = discover_candidates(
-                &executor,
-                repo_days,
-                run_days,
-                release_days,
-                cache_days,
-                issue_days,
-                pr_days,
-                min_asset_size_mb,
-            )?;
-            print_scan_summary(&candidates);
+            github_scan(
+                Some(repo_days),
+                Some(run_days),
+                Some(release_days),
+                Some(cache_days),
+                Some(issue_days),
+                Some(pr_days),
+                Some(min_asset_size_mb),
+            ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
         GithubAction::Plan {
             repo_days,
@@ -134,204 +450,36 @@ pub fn handle(action: GithubAction) -> anyhow::Result<()> {
             min_asset_size_mb,
             output,
         } => {
-            println!("Building GitHub cleanup plan...");
-            let candidates = discover_candidates(
-                &executor,
-                repo_days,
-                run_days,
-                release_days,
-                cache_days,
-                issue_days,
-                pr_days,
-                min_asset_size_mb,
-            )?;
-            let plan = DeletionPlan::new(
-                vec![PathBuf::from("github://")],
-                false,
-                false,
-                candidates,
-                vec![],
-            );
-            let content = serde_json::to_string_pretty(&plan)?;
-            std::fs::write(&output, content)?;
-            println!(
-                "Successfully wrote GitHub deletion plan to {}",
-                output.display()
-            );
+            github_plan(
+                Some(repo_days),
+                Some(run_days),
+                Some(release_days),
+                Some(cache_days),
+                Some(issue_days),
+                Some(pr_days),
+                Some(min_asset_size_mb),
+                output.to_string_lossy().to_string(),
+            ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
         GithubAction::Delete {
-            plan: plan_path,
-            receipt: receipt_path,
+            plan,
+            receipt,
             yes,
         } => {
-            let content = std::fs::read_to_string(&plan_path)?;
-            let plan: DeletionPlan = serde_json::from_str(&content)?;
-
-            // Validation step using Evidence typestates.
-            let raw_evidence = Evidence::<_, Raw, PlanSafetyWitness>::raw(plan);
-            let admitted_plan = match DeletionPlanAdjudicator::admit(raw_evidence) {
-                Ok(admitted) => admitted.into_evidence(),
-                Err(refusal) => anyhow::bail!("Plan validation failed: {}", refusal.reason),
-            };
-            let plan = admitted_plan.into_inner();
-
-            println!(
-                "Executing GitHub deletions from plan: {}",
-                plan_path.display()
-            );
-            let start_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-
-            let pb = ProgressBar::new(plan.items.len() as u64);
-            pb.set_style(
-                ProgressStyle::with_template(
-                    "[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}",
-                )
-                .unwrap()
-                .progress_chars("#>-"),
-            );
-            pb.enable_steady_tick(std::time::Duration::from_millis(100));
-
-            let mut results = Vec::new();
-            for item in &plan.items {
-                pb.set_message(format!("Deleting {} ...", item.path.display()));
-                let proceed = if yes {
-                    true
-                } else {
-                    pb.suspend(|| {
-                        dialoguer::Confirm::new()
-                            .with_prompt(format!("Do you want to delete {}?", item.path.display()))
-                            .default(false)
-                            .interact()
-                            .unwrap_or(false)
-                    })
-                };
-
-                let res = if !proceed {
-                    DeletionResult {
-                        path: item.path.clone(),
-                        status: DeletionStatus::Refused,
-                        error: Some("Deletion refused by user".to_string()),
-                        blake3_hash: None,
-                        bytes_freed: 0,
-                    }
-                } else if !is_github_uri(&item.path) {
-                    DeletionResult {
-                        path: item.path.clone(),
-                        status: DeletionStatus::SkippedMissing,
-                        error: Some("Non-GitHub item skipped during github delete".to_string()),
-                        blake3_hash: None,
-                        bytes_freed: 0,
-                    }
-                } else if let Some(target) = GithubTarget::parse(&item.path) {
-                    match delete_github_target(&executor, &target) {
-                        Ok(()) => {
-                            let bytes_freed = match target {
-                                GithubTarget::Cache { .. } | GithubTarget::ReleaseAsset { .. } => {
-                                    item.bytes
-                                }
-                                _ => 0,
-                            };
-                            DeletionResult {
-                                path: item.path.clone(),
-                                status: DeletionStatus::Deleted,
-                                error: None,
-                                blake3_hash: None,
-                                bytes_freed,
-                            }
-                        }
-                        Err(e) => {
-                            let err_str = e.to_string();
-                            // Map "not found" or similar HTTP errors to SkippedMissing if appropriate, or keep as Failed
-                            let status = if err_str.contains("not found") || err_str.contains("404")
-                            {
-                                DeletionStatus::SkippedMissing
-                            } else {
-                                DeletionStatus::Failed
-                            };
-                            DeletionResult {
-                                path: item.path.clone(),
-                                status,
-                                error: Some(err_str),
-                                blake3_hash: None,
-                                bytes_freed: 0,
-                            }
-                        }
-                    }
-                } else {
-                    DeletionResult {
-                        path: item.path.clone(),
-                        status: DeletionStatus::Failed,
-                        error: Some("Invalid github:// URI".to_string()),
-                        blake3_hash: None,
-                        bytes_freed: 0,
-                    }
-                };
-                results.push(res);
-                pb.inc(1);
-            }
-            pb.finish_with_message("GitHub deletion execution complete.");
-
-            let end_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-
-            let receipt = DeletionReceipt::new(
-                "github-deletion-chain-001".to_string(),
-                plan.created_unix,
-                start_time,
-                end_time,
-                results,
-                None,
-                None,
-            );
-
-            let receipt_json = serde_json::to_string_pretty(&receipt)?;
-            std::fs::write(&receipt_path, receipt_json)?;
-            println!(
-                "Successfully wrote execution receipt to {}",
-                receipt_path.display()
-            );
+            github_delete(
+                plan.to_string_lossy().to_string(),
+                receipt.to_string_lossy().to_string(),
+                yes,
+            ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
         GithubAction::Receipt {
-            receipt: receipt_path,
-            plan: plan_path,
+            receipt,
+            plan,
         } => {
-            let content = std::fs::read_to_string(&receipt_path)?;
-            let receipt: DeletionReceipt = serde_json::from_str(&content)?;
-
-            let plan = if let Some(p_path) = plan_path {
-                let p_content = std::fs::read_to_string(&p_path)?;
-                Some(serde_json::from_str::<DeletionPlan>(&p_content)?)
-            } else {
-                None
-            };
-
-            let report = receipt.verify(plan.as_ref());
-            println!("\n==================================================");
-            println!("            RECEIPT VERIFICATION REPORT           ");
-            println!("==================================================");
-            println!("  Consistent:          {}", report.is_consistent);
-            println!("  Total issues found:  {}", report.issues.len());
-            println!("==================================================");
-
-            if !report.issues.is_empty() {
-                println!("\nIssues:");
-                for issue in &report.issues {
-                    println!(
-                        "  - [{:?}] {}: {}",
-                        issue.issue_type,
-                        issue.path.display(),
-                        issue.message
-                    );
-                }
-                anyhow::bail!("Receipt verification failed (inconsistent evidence).");
-            } else {
-                println!("\nAll checks passed. Receipt matches deletion plan and reality rules.");
-            }
+            github_receipt(
+                receipt.to_string_lossy().to_string(),
+                plan.map(|p| p.to_string_lossy().to_string()),
+            ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
     }
     Ok(())
