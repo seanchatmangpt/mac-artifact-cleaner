@@ -220,7 +220,7 @@ These questions require observing the process, not the snapshot.
 Even if static cleanup worked perfectly (which it cannot), it produces no evidence. A user executes:
 
 ```bash
-rm -rf /Users/sean/.cache/pip/*
+rm -rf ~/.cache/pip/*
 ```
 
 The result:
@@ -723,7 +723,7 @@ A critical innovation is the use of BLAKE3 hashing for object identities in the 
 
 ```
 Raw (leaked) path:
-  /Users/sean/projects/internal-fintech-platform/node_modules/crypto-utils
+  ~/projects/<project>/node_modules/<package>
 
 Hashed (safe) object reference:
   ObjectRef {

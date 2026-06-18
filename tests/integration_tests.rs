@@ -252,7 +252,6 @@ fn test_end_to_end_artifact_scan_build_delete() {
         .as_secs();
 
     let receipt = DeletionReceipt::new(
-        "test-chain".to_string(),
         plan.created_unix,
         start_time,
         end_time,
@@ -429,7 +428,6 @@ fn test_receipt_verification_and_plan_correlation() {
     // 1. Consistent receipt case: file is deleted (doesn't exist)
     fs::remove_file(&file_to_delete).unwrap();
     let consistent_receipt = DeletionReceipt::new(
-        "test-chain-1".to_string(),
         plan.created_unix,
         1716768000,
         1716768100,
@@ -458,7 +456,6 @@ fn test_receipt_verification_and_plan_correlation() {
     // 3. Plan mismatch case: extra receipt item not in plan
     fs::remove_file(&file_to_delete).unwrap();
     let mismatched_receipt = DeletionReceipt::new(
-        "test-chain-2".to_string(),
         plan.created_unix,
         1716768000,
         1716768100,
@@ -497,7 +494,6 @@ fn test_bytes_freed_mismatch_on_zero_movement() {
     // (available_before == available_after). Under the REALITY law this is a
     // BytesFreedMismatch hard-fail.
     let receipt = DeletionReceipt::new(
-        "bytes-mismatch-chain".to_string(),
         0,
         1716768000,
         1716768100,
@@ -533,7 +529,6 @@ fn test_no_false_positive_within_tolerance() {
     // raise BytesFreedMismatch -- proving no false positive on a real delta
     // that lands within tolerance of bytes_freed_total.
     let receipt = DeletionReceipt::new(
-        "within-tolerance-chain".to_string(),
         0,
         1716768000,
         1716768100,
@@ -569,7 +564,6 @@ fn test_back_compat_none_samples_no_mismatch() {
     // (5 GB, well over the 1 GB enforcement threshold), the absence of samples
     // means the REALITY law cannot run and MUST NOT raise BytesFreedMismatch.
     let receipt = DeletionReceipt::new(
-        "old-receipt-chain".to_string(),
         0,
         1716768000,
         1716768100,
@@ -633,7 +627,6 @@ fn test_bytes_freed_mismatch_plan_bound_deleted_results() {
     );
 
     let receipt = DeletionReceipt::new(
-        "plan-bound-bytes-mismatch".to_string(),
         plan.created_unix,
         1716768000,
         1716768100,
@@ -906,7 +899,7 @@ fn test_verify_unsupported_version() {
 
     // new() always stamps version 1; deserialized/tampered receipts can carry
     // another version, so verify must still flag it. Mutate the record to simulate.
-    let mut receipt = DeletionReceipt::new("c".to_string(), 0, 1, 2, vec![], None, None);
+    let mut receipt = DeletionReceipt::new(0, 1, 2, vec![], None, None);
     receipt.execution_record.version = 2;
 
     let report = receipt.verify(None);
@@ -922,7 +915,7 @@ fn test_verify_invalid_timestamps() {
     use osx_clnr::domain::receipt::{DeletionReceipt, IssueType};
 
     // completed (1) before started (2) is an impossible lifecycle.
-    let receipt = DeletionReceipt::new("c".to_string(), 0, 2, 1, vec![], None, None);
+    let receipt = DeletionReceipt::new(0, 2, 1, vec![], None, None);
 
     let report = receipt.verify(None);
     assert!(!report.is_consistent);
@@ -951,7 +944,7 @@ fn test_verify_missing_plan_item() {
         }],
         vec![],
     );
-    let receipt = DeletionReceipt::new("c".to_string(), 0, 1, 2, vec![], None, None);
+    let receipt = DeletionReceipt::new(0, 1, 2, vec![], None, None);
 
     let report = receipt.verify(Some(&plan));
     assert!(!report.is_consistent);

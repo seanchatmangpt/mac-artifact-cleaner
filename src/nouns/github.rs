@@ -337,7 +337,6 @@ pub fn execute_delete_plan_helper(
         .as_secs();
 
     let receipt_obj = DeletionReceipt::new(
-        "github-deletion-chain-001".to_string(),
         plan.created_unix,
         start_time,
         end_time,

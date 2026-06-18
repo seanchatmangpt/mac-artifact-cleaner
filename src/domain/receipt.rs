@@ -1,10 +1,15 @@
 //! Deletion receipt representation.
+//!
+//! `DeletionReceipt` holds the *operational facts* of an execution — paths,
+//! statuses, bytes freed, and the volume free-space samples that the physical
+//! reality law ([`DeletionReceipt::verify`]) discharges. The *provenance seal*
+//! (the BLAKE3 rolling chain and its structural verification) is owned by
+//! affidavit and produced at the
+//! [`crate::domain::affidavit_integration`] seam — Pentecost no longer
+//! hand-rolls its own receipt chain.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-pub use wasm4pm_compat::receipt::{
-    Digest, ReceiptChain, ReceiptEnvelope, ReceiptRefusal, ReceiptShape, ReplayHint,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletionExecutionRecord {
@@ -23,8 +28,6 @@ pub struct DeletionExecutionRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletionReceipt {
-    #[serde(skip)]
-    pub chain: Option<ReceiptChain>,
     pub execution_record: DeletionExecutionRecord,
 }
 
@@ -162,7 +165,6 @@ pub fn check_reclaim(
 
 impl DeletionReceipt {
     pub fn new(
-        chain_id: String,
         plan_created_unix: u64,
         execution_started_unix: u64,
         execution_completed_unix: u64,
@@ -180,22 +182,7 @@ impl DeletionReceipt {
             available_after,
         };
 
-        let record_json = serde_json::to_string(&execution_record).unwrap_or_default();
-        let digest_str = blake3::hash(record_json.as_bytes()).to_hex().to_string();
-
-        let link = ReceiptEnvelope::new(
-            "deletion-execution",
-            "osx-clnr-engine",
-            Digest::new(format!("blake3:{}", digest_str)),
-            ReplayHint::new(format!("osx-clnr://verify/{}", chain_id)),
-        );
-
-        let chain = ReceiptChain::try_new(chain_id, vec![link]).unwrap();
-
-        Self {
-            chain: Some(chain),
-            execution_record,
-        }
+        Self { execution_record }
     }
 
     /// Verify a receipt against an optional plan.
@@ -209,7 +196,7 @@ impl DeletionReceipt {
     /// ```
     /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
     /// let r = DeletionReceipt::new(
-    ///     "c".to_string(), 0, 1, 2,
+    ///     0, 1, 2,
     ///     vec![DeletionResult {
     ///         path: "/nonexistent/path/aaa".into(),
     ///         status: DeletionStatus::SkippedMissing,
@@ -228,7 +215,7 @@ impl DeletionReceipt {
     /// ```
     /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
     /// let r = DeletionReceipt::new(
-    ///     "c".to_string(), 0, 1, 2,
+    ///     0, 1, 2,
     ///     vec![DeletionResult {
     ///         path: "/nonexistent/path/bbb".into(),
     ///         status: DeletionStatus::SkippedMissing,

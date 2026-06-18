@@ -1,6 +1,6 @@
 //! Receipt CLI noun implementation.
 
-use crate::domain::affidavit;
+use crate::domain::affidavit_integration as affidavit;
 use crate::domain::plan::DeletionPlan;
 use crate::domain::receipt::DeletionReceipt;
 use clap::Subcommand;

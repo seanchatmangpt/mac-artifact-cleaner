@@ -160,7 +160,6 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 .map(|v| v.available);
 
             let receipt = DeletionReceipt::new(
-                "deletion-chain-001".to_string(),
                 plan.created_unix,
                 start_time,
                 end_time,
@@ -174,12 +173,13 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             // Emit a sealed affidavit core/v1 provenance receipt alongside the
             // deletion receipt and certify it. Increasing destructive power
             // (the deletion just performed) must come with increased receipts.
-            let affidavit_receipt = crate::domain::affidavit::build_deletion_affidavit(&receipt);
-            let verdict = crate::domain::affidavit::certify(&affidavit_receipt);
+            let affidavit_receipt =
+                crate::domain::affidavit_integration::build_deletion_affidavit(&receipt);
+            let verdict = crate::domain::affidavit_integration::certify(&affidavit_receipt);
             let affidavit_path = receipt_path.with_extension("affidavit.json");
-            let affidavit_json = String::from_utf8(crate::domain::affidavit::serialize_receipt(
-                &affidavit_receipt,
-            ))
+            let affidavit_json = String::from_utf8(
+                crate::domain::affidavit_integration::serialize_receipt(&affidavit_receipt),
+            )
             .unwrap_or_default();
             write_or_dump_on_full(&affidavit_path, &affidavit_json, "affidavit receipt")?;
 
