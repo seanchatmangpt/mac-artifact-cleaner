@@ -33,6 +33,7 @@ libc = "0.2"
 clap-noun-verb = { path = "../clap-noun-verb" }
 clap-noun-verb-macros = { path = "../clap-noun-verb/clap-noun-verb-macros" }
 linkme = "0.3"
+affidavit = { git = "https://github.com/seanchatmangpt/affidavit", features = ["core", "discovery"] }
 
 [dev-dependencies]
 tempfile = "3"
