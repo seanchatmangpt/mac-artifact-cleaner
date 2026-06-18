@@ -734,7 +734,6 @@ fn test_github_deletions_execution() {
 
     let end_time = 1;
     let receipt = DeletionReceipt::new(
-        "test-github-deletion".to_string(),
         plan.created_unix,
         start_time,
         end_time,

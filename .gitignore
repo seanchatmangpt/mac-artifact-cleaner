@@ -9,6 +9,9 @@ deletion-plan*.json
 deletion-plan*.jsonocel
 delete-receipt*.json
 delete-receipt*.jsonocel
+# Affidavit core/v1 provenance receipts (content-addressed, derived from deletions)
+*.affidavit.json
+deletion-affidavit*.json
 disk-audit*.json
 disk-audit*.jsonocel
 disk-report*.json

@@ -1,5 +1,6 @@
 //! Domain logic modules.
 
+pub mod affidavit_integration;
 pub mod artifact;
 pub mod audit;
 pub mod crypto;
