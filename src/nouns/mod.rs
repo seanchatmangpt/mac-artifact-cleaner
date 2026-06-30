@@ -4,6 +4,7 @@ pub mod artifact;
 pub mod audit;
 pub mod completion;
 pub mod delete;
+pub mod dev;
 pub mod doctor;
 pub mod emergency;
 pub mod exclusion;
@@ -44,6 +45,12 @@ pub enum Command {
     /// Interactive maintenance wizard (Audit -> Plan -> Delete -> Thin)
     #[command(alias = "clean")]
     Wizard,
+    /// Emergency local cleanup for the current directory
+    Dev {
+        /// Optional specific path to clean instead of current directory
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+    },
     /// Generate shell completions
     Completion {
         #[command(subcommand)]
@@ -166,6 +173,7 @@ pub fn handle_cli() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Wizard => wizard::handle(),
+        Command::Dev { path } => dev::handle(path),
         Command::Completion { action } => completion::handle(action),
         Command::Audit { action } => audit::handle(action),
         Command::Artifact { action } => artifact::handle(action),

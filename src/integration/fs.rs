@@ -151,9 +151,11 @@ pub fn estimate_size(path: &Path, stats: Arc<Stats>) -> u64 {
     if path.is_file() {
         return std::fs::metadata(path)
             .map(|m| {
-                stats.bytes_seen.fetch_add(m.len(), Ordering::Relaxed);
+                stats
+                    .bytes_seen
+                    .fetch_add(m.blocks() * 512, Ordering::Relaxed);
                 stats.files_seen.fetch_add(1, Ordering::Relaxed);
-                m.len()
+                m.blocks() * 512
             })
             .unwrap_or(0);
     }
@@ -178,8 +180,9 @@ pub fn estimate_size(path: &Path, stats: Arc<Stats>) -> u64 {
             Ok(entry) => {
                 if let Ok(meta) = entry.metadata() {
                     if meta.is_file() {
-                        size += meta.len();
-                        stats.bytes_seen.fetch_add(meta.len(), Ordering::Relaxed);
+                        let physical = meta.blocks() * 512;
+                        size += physical;
+                        stats.bytes_seen.fetch_add(physical, Ordering::Relaxed);
                         stats.files_seen.fetch_add(1, Ordering::Relaxed);
                     } else if meta.is_dir() {
                         stats.dirs_seen.fetch_add(1, Ordering::Relaxed);
@@ -213,10 +216,10 @@ fn is_recently_active(project_root: &Path, hours: u64) -> bool {
     let mut builder = WalkBuilder::new(project_root);
     builder
         .hidden(false)
-        .ignore(true)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
+        .ignore(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
         .max_depth(Some(4)); // Limit depth for speed
 
     for result in builder.build() {
@@ -336,12 +339,13 @@ pub fn scan_root(
 
             if let Ok(meta) = entry.metadata() {
                 if meta.is_file() {
+                    let physical = meta.blocks() * 512;
                     stats.files_seen.fetch_add(1, Ordering::Relaxed);
-                    stats.bytes_seen.fetch_add(meta.len(), Ordering::Relaxed);
+                    stats.bytes_seen.fetch_add(physical, Ordering::Relaxed);
                     if args_snapshot.tool_roots {
                         record_tool_root_file(
                             path,
-                            meta.len(),
+                            physical,
                             meta.mtime(),
                             &known_tool_defs,
                             &tool_accs,
@@ -505,7 +509,10 @@ pub fn find_cargo_target_dirs(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>
         .into_iter()
         .for_each(|_| {});
 
-    let dirs = Arc::try_unwrap(found).unwrap().into_inner().unwrap();
+    let dirs = {
+        let mut guard = found.lock().unwrap();
+        std::mem::take(&mut *guard)
+    };
 
     // Compute physical sizes in parallel across all found target dirs.
     let mut with_sizes: Vec<(PathBuf, u64)> = dirs

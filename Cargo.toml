@@ -7,6 +7,10 @@ edition = "2021"
 name = "oclnr"
 path = "src/main.rs"
 
+[[bin]]
+name = "oclnr-mcp"
+path = "src/mcp_main.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -38,6 +42,11 @@ linkme = "0.3"
 # `wasm-bindgen`. Core gives us chain assembly, the 7-stage verifier, and the
 # dual-court admission gate — everything Pentecost needs to seal deletions.
 affidavit = { git = "https://github.com/seanchatmangpt/affidavit", default-features = false, features = ["core"] }
+# MCP server dependencies
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -251,14 +251,8 @@ fn test_end_to_end_artifact_scan_build_delete() {
         .unwrap_or_default()
         .as_secs();
 
-    let receipt = DeletionReceipt::new(
-        plan.created_unix,
-        start_time,
-        end_time,
-        results,
-        None,
-        None,
-    );
+    let receipt =
+        DeletionReceipt::new(plan.created_unix, start_time, end_time, results, None, None);
     assert_eq!(receipt.execution_record.results.len(), 2);
     assert!(receipt
         .execution_record

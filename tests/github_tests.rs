@@ -733,14 +733,8 @@ fn test_github_deletions_execution() {
     }
 
     let end_time = 1;
-    let receipt = DeletionReceipt::new(
-        plan.created_unix,
-        start_time,
-        end_time,
-        results,
-        None,
-        None,
-    );
+    let receipt =
+        DeletionReceipt::new(plan.created_unix, start_time, end_time, results, None, None);
 
     assert_eq!(receipt.execution_record.results.len(), 8);
     for (i, r) in receipt.execution_record.results.iter().enumerate() {

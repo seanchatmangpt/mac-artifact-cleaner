@@ -151,6 +151,7 @@ pub fn github_scan(
 /// * `pr_days` - Number of days of inactivity to consider a pull request stale [default: 30]
 /// * `min_asset_size_mb` - Minimum size of release assets in MB to consider for cleanup [default: 0]
 /// * `output` - Output path for the deletion plan JSON file
+#[allow(clippy::too_many_arguments)]
 #[clap_noun_verb_macros::verb("plan", "github")]
 pub fn github_plan(
     repo_days: Option<i64>,

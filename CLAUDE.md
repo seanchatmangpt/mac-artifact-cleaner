@@ -1,111 +1,147 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Identity
 
-## Project Identity
+**Package:** `osx-clnr` | **Binary:** `oclnr` and `oclnr-mcp`  
+**Codename:** Pentecost  
+**Purpose:** macOS developer disk auditor and cleanup utility.  
+**Core invariant:** Never increase destructive power without increasing receipts. The scanner cannot delete; the deleter cannot scan.
 
-**Binary:** `oclnr` — package name is `pentecost` (`Cargo.toml` → `[[bin]] name = "oclnr"`)
-
-**Purpose:** macOS developer disk auditor and cleanup utility. Enforces the invariant: *never increase destructive power without simultaneously increasing receipts.* Deletion is always plan-bound — the scanner cannot delete; the deleter cannot scan.
-
-## Build Commands
-
-Use direct `cargo` commands (no `Makefile.toml`, no `cargo-make` here):
+## Build
 
 ```bash
-cargo build                          # build
-cargo test                           # all unit + integration tests
-cargo test <test_name>               # single test
-cargo test -- --nocapture            # tests with stdout
+cargo build
+cargo test                        # unit + integration
+cargo test <name> -- --nocapture
 cargo clippy --all-targets -- -D warnings
 cargo fmt -- --check
-cargo run -- <subcommand>            # run CLI
+cargo run --bin oclnr -- <noun> <verb>
+cargo run --bin oclnr-mcp         # MCP server (17 tools)
 
-# .cargo/config.toml aliases
-cargo dx                             # alias for `cargo test`
-cargo sanity                         # full DX suite (fmt + clippy + test + 4 doctor checks)
-cargo doctor-arch                    # alias for `cargo run -- doctor architecture`
-cargo doctor-sub                     # alias for `cargo run -- doctor substrate`
-cargo doctor-doc                     # alias for `cargo run -- doctor doctests`
-cargo doctor-priv                    # alias for `cargo run -- doctor privacy`
+# Aliases (.cargo/config.toml)
+cargo dx        # all tests
+cargo sanity    # fmt → clippy → test → 4 doctor checks
+cargo doctor-arch / doctor-sub / doctor-doc / doctor-priv
 ```
 
-The `scripts/sanity.sh` script runs the full 7-step pipeline: fmt check → clippy → test → `doctor architecture` → `doctor substrate` → `doctor doctests` → `doctor privacy`.
+`scripts/sanity.sh` runs the full 7-step pipeline.
+
+**Tests:** unit/doctests inline in `src/**/*.rs`; integration in `tests/`.
 
 ## Architecture
 
-Three strictly separated layers:
-
 ```
 src/
-  domain/      — Pure Rust: zero std::fs calls. Receives inert DTOs only.
-  integration/ — All std::fs, OS, tmutil, Docker calls live here.
-  nouns/       — CLI subcommand handlers; bridges integration ↔ domain.
+  domain/      — Pure Rust. Zero std::fs, std::process, or OS calls. Business logic only.
+  integration/ — All filesystem, OS, tmutil, Docker, GitHub I/O lives here.
+  nouns/       — CLI subcommand handlers. Bridges integration ↔ domain.
+  mcp/         — MCP server (oclnr-mcp): 17 tools exposing the full workflow over JSON-RPC.
 ```
 
-### Domain purity rule (hard constraint)
+**Workspace members:** `osx-clnr` (root), `cfab-surface` (visualization)  
+**Path deps:** `clap-noun-verb` (sibling) — noun-verb CLI dispatch framework
 
-`src/domain/**` must contain **zero** `std::fs`, `std::process`, or OS calls. Domain functions receive inert snapshot DTOs (`EntrySnapshot`, `DirSnapshot`) constructed by the integration layer. Violations are architectural defects.
+### Domain purity (hard constraint)
 
-### CLI structure (`src/nouns/mod.rs`)
+`src/domain/**` must have **zero** `std::fs`, `std::process`, or OS calls. Domain receives inert DTOs (`EntrySnapshot`, `DirSnapshot`) built by the integration layer. Violations are architectural defects.
 
-Each `Command` variant maps to a nouns submodule with its own `Action` enum and `handle()` function:
+### Domain modules
 
-| CLI noun | Key domain module |
+| Module | Role |
 |---|---|
-| `audit` | `domain::audit`, `domain::artifact` |
-| `plan` | `domain::plan` |
-| `delete` | `domain::delete` |
-| `receipt` | `domain::receipt` |
-| `tool-roots` | `domain::tool_roots` |
-| `ocel` | `domain::ocel` |
+| `artifact` | Project-type detection (Rust, Node, Docker, …) |
+| `audit` | Core scanning logic |
+| `plan` | Plan generation from audit results |
+| `delete` | Deletion logic (reads plan, produces results) |
+| `receipt` | Receipt validation and proof generation |
+| `ocel` | OCEL v2 builders and validators |
+| `affidavit_integration` | Receipt sealing via `affidavit` crate |
+| `fabric` | SurfaceGraph fabric |
+| `tool_roots` | Tool root detection |
+| `doctor` | Self-verification and diagnostics |
+| `policy`, `time`, `redaction`, `crypto`, `github`, `ocl` | Supporting domains |
+
+### Integration modules
+
+`fs`, `tmutil`, `doctor`, `github`, `docker`, `monitor`, `progress`
+
+### MCP server (`src/mcp/`)
+
+`oclnr-mcp` exposes 17 tools over JSON-RPC for Claude to drive the full workflow:  
+`audit_scan`, `audit_parse`, `plan_build`, `plan_inspect`, `plan_validate`, `plan_approve`,  
+`delete_dry_run`, `delete_execute`, `receipt_parse`, `receipt_verify`, `receipt_certify`,  
+`safety_audit`, `snapshot_audit`, `emergency_reclaim`, `plan_rollback`, `clear_artifacts`, `query_workflow_state`
+
+**When using Claude to clean disk: use MCP tools — not raw `cargo run` or shell commands.**
+
+### Disk cleanup protocol (mandatory)
+
+Always drive cleanup through the MCP server. Never use `rm -rf`, `find -delete`, or raw `cargo run` for deletion — those bypass the audit trail and leave no receipt.
+
+**Correct sequence:**
+1. `query_workflow_state` — check if a prior scan/plan exists
+2. `audit_scan` — scan filesystem, discover candidates
+3. `plan_build` — build deletion plan (supports `aggressive` and `deps` flags for `target/`, `node_modules`, caches)
+4. `plan_inspect` / `plan_validate` — review what will be deleted
+5. `delete_dry_run` — preview without deleting
+6. `delete_execute` — execute with `confirm: true`
+7. `receipt_verify` — verify claimed vs actual free-space delta
+8. `receipt_certify` — seal with cryptographic proof
+
+**Never do:**
+- `rm -rf ~/*/target` or any direct shell deletion
+- `find ~ -name target -exec rm -rf` 
+- `cargo clean` as a substitute for the MCP workflow
+- Skip straight to `delete_execute` without `plan_inspect` first
+
+### CLI noun → domain mapping
+
+| Noun | Domain |
+|---|---|
+| `audit run/summarize` | `artifact`, `audit` |
+| `plan build/inspect` | `plan` |
+| `delete execute` | `delete` |
+| `receipt verify` | `receipt`, `affidavit_integration` |
 | `snapshot` | `integration::tmutil` |
-| `emergency` | `domain::artifact`, `integration::fs` |
-| `doctor` | `domain::doctor`, `integration::doctor` |
-| `privacy` | `domain::redaction` |
-| `exclusion` | — |
+| `emergency` | `artifact`, `integration::fs` |
+| `doctor` | `doctor` |
+| `privacy` | `redaction` |
 
-### Execution pipeline (plan-bound by design)
+### Execution pipeline
 
 ```
-oclnr audit scan     →  disk-audit.json + disk-audit.jsonocel
-oclnr plan create    →  cleanup-plan.json  (human reviews this)
-oclnr delete run     →  reads plan only; scanner is disabled
-oclnr receipt verify →  deletion-receipt.jsonocel
+oclnr audit run          →  disk-audit.json + disk-audit.jsonocel
+oclnr plan build         →  cleanup-plan.json  (human reviews)
+oclnr delete execute     →  reads plan only; no fresh scan
+oclnr receipt verify     →  deletion-receipt.jsonocel
 ```
 
-### OCEL v2 (`src/domain/ocel.rs`)
+## Key Invariants
 
-Every operation emits an Object-Centric Event Log v2. `build_disk_audit_ocel`, `build_tool_roots_ocel`, `build_snapshot_audit_ocel`, `build_snapshot_thin_ocel`, `build_snapshot_delete_ocel`, etc. are the builders. All builders are pure functions — they take data, return `OcelLog`. `validate_ocel_log` checks referential integrity and type conformance. Delete events must carry relationships to `delete_receipt`, `deletion_plan`, `artifact_candidate`, and `filesystem_object` objects or validation fails.
+**Plan-bound deletion:** `delete execute` reads only from a saved `cleanup-plan.json`. No live filesystem scan during deletion.
 
-`build_snapshot_delete_ocel` (distinct from `build_snapshot_thin_ocel`) emits `snapshot_delete_requested` events — the event type must truthfully reflect the operation (a delete is not a thin).
+**Dry run default:** Audit and plan phases produce JSON evidence only. `delete execute` requires `--receipt` path; destructive ops require explicit confirmation.
 
-### Domain DTOs
+**Receipts seal everything:** After deletion, `affidavit_integration` wraps the receipt in a cryptographic chain (`affidavit` crate, `core` feature). `receipt verify` checks claimed vs actual free-space delta and validates OCEL referential integrity.
 
-- `EntrySnapshot` — single file/directory snapshot (path, name, extension, kind)
-- `DirSnapshot` — all immediate children of one directory
-- `Candidate` — a cleanup target (path + reason string)
-- `DeletionPlan` / `PlanItem` — the reviewed plan file
-- `DeletionReceipt` / `DeletionResult` — proof of what happened
+**OCEL delete event requirements:** Events must carry relationships to `deletion_plan`, `deletion_receipt`, `artifact_candidate`, and `filesystem_object`. Event type must be truthful: `snapshot_delete_requested` for deletes, `snapshot_thin_requested` for thins.
 
-`DirSnapshot` helpers (`has_file`, `has_dir`, `has_file_ext`, `dirs_with_suffix`, `dirs_with_prefix`) are the primary interface for project-type detection in `domain::artifact`.
+**Doctests are specification:** Domain functions carry doctests with positive + negative + refusal cases. Do not remove or weaken them.
 
-### Traversal model
+## Dependencies
 
-`integration::fs::scan_root` uses the `ignore` crate walker. Directories in `traversal_barrier_names()` (e.g., `node_modules`, `target`, `.next`) are recorded as candidates but **not walked**. `is_macos_os_dir` and `is_global_cache` guard against touching system or global tool cache paths.
+- **affidavit** (git) — Receipt sealing. Features: `["core"]` **only**. Never enable `discovery`/`conformance` — they pull `wasm4pm` which hard-pins `wasm-bindgen =0.2.100` and conflicts with chrono's transitive dep.
+- **wasm4pm-compat** — OCEL v2 types and validation
+- **ignore** — Filesystem traversal with barrier support
+- **clap-noun-verb** (path dep) — CLI framework
+- **libc** — `statvfs` for free-space sampling
+- **sled** — Persistent KV store
 
-## Doctests are specification
+## Output Files (never commit)
 
-Domain functions carry doctests with positive + negative + refusal cases. These are the functional specification, not just examples. Run them via `cargo test --doc` or `oclnr doctor doctests`. Do not remove or weaken them.
-
-## Output files (never commit)
-
-`.gitignore` protects: `disk-audit.json`, `*.jsonocel`, `cleanup-plan.json`, `deletion-receipt.jsonocel`. These contain absolute paths, project names, and timestamps from the local machine.
-
-## Key Dependencies
-
-- `libc = "0.2"` — used by `integration::fs::volume_space` for `statvfs` free-space sampling
+`disk-audit.json`, `*.jsonocel`, `cleanup-plan.json`, `deletion-receipt.jsonocel` — contain absolute paths and local machine state. Covered by `.gitignore`.
 
 ## Gall Checkpoints
 
-The system evolves through checkpoints G0–G9 (see `docs/GALL_CHECKPOINTS.md`). Current state: G0–G7 substantially complete. G8 (privacy gate) and G9 (doctor self-verification) are in-progress. Do not add new capabilities without adding corresponding receipts/evidence.
+G0–G7 complete. G8 (privacy gate) and G9 (doctor self-verification) in progress.  
+See `docs/GALL_CHECKPOINTS.md`. Do not add capabilities without corresponding receipts.

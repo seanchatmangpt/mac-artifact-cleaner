@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "oclnr": {
+      "command": "/Users/sac/osx-clnr/target/release/oclnr-mcp",
+      "env": {
+        "OCLNR_WORKSPACE": "/Users/sac"
+      }
+    }
+  }
+}

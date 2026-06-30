@@ -183,8 +183,6 @@ pub fn serialize_receipt(receipt: &Receipt) -> Vec<u8> {
 /// let sealed = build_deletion_affidavit(&receipt);
 /// assert!(admit(sealed).is_ok());  // both courts accept
 /// ```
-pub fn admit(
-    receipt: Receipt,
-) -> Result<AdmittedReceipt, affidavit::admission::AffidavitRefusal> {
+pub fn admit(receipt: Receipt) -> Result<AdmittedReceipt, affidavit::admission::AffidavitRefusal> {
     affidavit::admission::admit(receipt)
 }

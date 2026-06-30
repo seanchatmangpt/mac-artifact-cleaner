@@ -63,7 +63,8 @@ pub fn handle() -> anyhow::Result<()> {
     let proceed = Confirm::new()
         .with_prompt("Do you want to proceed with exclusions and deletion?")
         .default(true)
-        .interact()?;
+        .interact()
+        .unwrap_or(true);
 
     if !proceed {
         println!("{}", "Maintenance aborted by user.".red());
@@ -98,7 +99,8 @@ pub fn handle() -> anyhow::Result<()> {
     let thin_snapshots = Confirm::new()
         .with_prompt("Would you like to immediately thin local APFS snapshots to reclaim space?")
         .default(false)
-        .interact()?;
+        .interact()
+        .unwrap_or(false);
 
     if thin_snapshots {
         snapshot::handle(snapshot::SnapshotAction::Thin {
@@ -132,7 +134,8 @@ pub fn handle() -> anyhow::Result<()> {
     let cleanup_artifacts = Confirm::new()
         .with_prompt("Clean up temporary wizard artifact files (plan, script)?")
         .default(true)
-        .interact()?;
+        .interact()
+        .unwrap_or(true);
 
     if cleanup_artifacts {
         let _ = std::fs::remove_file(&plan_file);
