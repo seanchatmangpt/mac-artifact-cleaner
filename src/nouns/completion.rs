@@ -1,9 +1,11 @@
 //! Shell completion generation noun.
 
-use crate::nouns::Cli;
+use std::io;
+
 use clap::{CommandFactory, Subcommand};
 use clap_complete::{generate, Shell};
-use std::io;
+
+use crate::nouns::Cli;
 
 #[derive(Subcommand, Debug)]
 pub enum CompletionAction {

@@ -1,10 +1,11 @@
 //! Homebrew package manager CLI noun.
 
-use crate::integration::brew::{
-    brew_autoremove_dry_run, brew_cache_size, brew_cleanup_dry_run, is_brew_available,
-};
-use crate::integration::progress::human_bytes as format_bytes;
 use clap::Subcommand;
+
+use crate::integration::{
+    brew::{brew_autoremove_dry_run, brew_cache_size, brew_cleanup_dry_run, is_brew_available},
+    progress::human_bytes as format_bytes,
+};
 
 #[derive(Subcommand, Debug)]
 pub enum BrewAction {
@@ -119,10 +120,6 @@ mod tests {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/test".to_string());
         let full = format!("{}/Library/Caches/Homebrew", home);
         let friendly = friendly_cache_path(&full);
-        assert!(
-            friendly.starts_with('~'),
-            "expected ~-prefixed path, got {}",
-            friendly
-        );
+        assert!(friendly.starts_with('~'), "expected ~-prefixed path, got {}", friendly);
     }
 }

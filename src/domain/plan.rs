@@ -1,9 +1,10 @@
 //! Deletion plan representation and build logic.
 
-use crate::domain::artifact::Candidate;
-use crate::domain::tool_roots::ToolRootReport;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use crate::domain::{artifact::Candidate, tool_roots::ToolRootReport};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeletionPlan {
@@ -80,15 +81,7 @@ impl DeletionPlan {
             .unwrap_or_default()
             .as_secs();
 
-        Self {
-            version: 1,
-            created_unix,
-            roots,
-            deps,
-            aggressive,
-            items,
-            tool_roots,
-        }
+        Self { version: 1, created_unix, roots, deps, aggressive, items, tool_roots }
     }
 }
 
@@ -156,10 +149,7 @@ pub fn extract_exclusion_candidates(plan: &DeletionPlan) -> Vec<Candidate> {
         .items
         .iter()
         .filter(|item| matches!(item.kind, PlanItemKind::Dir))
-        .map(|item| Candidate {
-            path: item.path.clone(),
-            reason: item.reason.clone(),
-        })
+        .map(|item| Candidate { path: item.path.clone(), reason: item.reason.clone() })
         .collect();
 
     for tr in &plan.tool_roots {

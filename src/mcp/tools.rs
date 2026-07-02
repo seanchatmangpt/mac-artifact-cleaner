@@ -2,13 +2,13 @@
 //!
 //! All 19 MCP tools for the cleanup workflow.
 
+use std::{collections::HashMap, path::PathBuf};
+
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
-use std::collections::HashMap;
-use std::path::PathBuf;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -134,10 +134,8 @@ impl ApprovalMetadata {
         if expected == self.approval_signature {
             Ok(())
         } else {
-            Err(
-                "Approval signature verification failed: plan was modified after approval"
-                    .to_string(),
-            )
+            Err("Approval signature verification failed: plan was modified after approval"
+                .to_string())
         }
     }
 }

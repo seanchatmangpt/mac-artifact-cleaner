@@ -3,9 +3,9 @@
 //! This module acts as a bridge between osx-clnr's OCEL generation and Dr. van der Aalst's
 //! wasm4pm Process Mining engine, unlocking 25+ process intelligence use cases.
 
+use std::{path::PathBuf, process::Command};
+
 use clap::Subcommand;
-use std::path::PathBuf;
-use std::process::Command;
 
 #[derive(Subcommand, Debug)]
 pub enum WpmAction {

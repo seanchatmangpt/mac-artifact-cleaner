@@ -1,16 +1,20 @@
 //! Snapshot CLI noun implementation.
 
-use crate::domain::ocel::{
-    build_snapshot_audit_ocel, build_snapshot_delete_ocel, build_snapshot_thin_ocel,
-};
-use crate::domain::time::{parse_size_in_bytes, select_oldest_snapshots, SnapshotThinReceipt};
-use crate::integration::fs::volume_space;
-use crate::integration::progress::human_bytes;
-use crate::integration::tmutil::{
-    delete_local_snapshot, list_local_snapshots, thin_local_snapshots,
-};
-use clap::Subcommand;
 use std::path::{Path, PathBuf};
+
+use clap::Subcommand;
+
+use crate::{
+    domain::{
+        ocel::{build_snapshot_audit_ocel, build_snapshot_delete_ocel, build_snapshot_thin_ocel},
+        time::{parse_size_in_bytes, select_oldest_snapshots, SnapshotThinReceipt},
+    },
+    integration::{
+        fs::volume_space,
+        progress::human_bytes,
+        tmutil::{delete_local_snapshot, list_local_snapshots, thin_local_snapshots},
+    },
+};
 
 /// Prints the volume's available space, returning it for before/after deltas.
 fn report_space(mount: &str) -> Option<u64> {
@@ -94,19 +98,11 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
                 println!("Wrote snapshot audit OCEL v2 log to: {}", o_path.display());
             }
         }
-        SnapshotAction::Thin {
-            mount,
-            bytes,
-            receipt,
-            ocel,
-        } => {
+        SnapshotAction::Thin { mount, bytes, receipt, ocel } => {
             let parsed_bytes = parse_size_in_bytes(&bytes)
                 .map_err(|e| anyhow::anyhow!("Invalid size format: {}", e))?;
 
-            println!(
-                "Thinning local snapshots on {} to reclaim {} bytes...",
-                mount, parsed_bytes
-            );
+            println!("Thinning local snapshots on {} to reclaim {} bytes...", mount, parsed_bytes);
 
             let before = list_local_snapshots(&mount)?;
             let output = thin_local_snapshots(&mount, parsed_bytes, 1)?;
@@ -127,10 +123,7 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
                 after.clone(),
             );
 
-            println!(
-                "Thinned {} snapshots successfully.",
-                receipt_obj.snapshots_thinned.len()
-            );
+            println!("Thinned {} snapshots successfully.", receipt_obj.snapshots_thinned.len());
             for s in &receipt_obj.snapshots_thinned {
                 println!("  - {}", s);
             }
@@ -154,13 +147,7 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
                 println!("Wrote snapshot thin OCEL v2 log to: {}", o_path.display());
             }
         }
-        SnapshotAction::Delete {
-            mount,
-            which,
-            oldest_n,
-            receipt,
-            ocel,
-        } => {
+        SnapshotAction::Delete { mount, which, oldest_n, receipt, ocel } => {
             let before = list_local_snapshots(&mount)?;
 
             // Resolve `which` into a concrete list of date suffixes to delete.
@@ -208,10 +195,7 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
             let receipt_obj =
                 SnapshotThinReceipt::new(mount.clone(), 0, now, before.clone(), after.clone());
 
-            println!(
-                "Deleted {} snapshot(s) successfully.",
-                receipt_obj.snapshots_thinned.len()
-            );
+            println!("Deleted {} snapshot(s) successfully.", receipt_obj.snapshots_thinned.len());
 
             if let Some(r_path) = receipt {
                 let serialized = serde_json::to_string_pretty(&receipt_obj)?;

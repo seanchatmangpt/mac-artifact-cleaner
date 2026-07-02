@@ -44,4 +44,10 @@ tm-exclusion-receipt*.json
 # Local test sandboxes
 tmp/
 scratch/
-fixtures/private/*-plan.json\n*-receipt.json
+fixtures/private/
+*-plan.json
+*-receipt.json
+
+# cargo-cicd local state
+cicd.toml
+.cargo-cicd/

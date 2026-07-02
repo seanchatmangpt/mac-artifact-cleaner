@@ -1,8 +1,9 @@
 //! iOS device backup scanning integration.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IosBackup {
@@ -31,21 +32,14 @@ pub fn scan_ios_backups() -> Result<Vec<IosBackup>> {
         if !path.is_dir() {
             continue;
         }
-        let id = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
+        let id = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
         if id.is_empty() {
             continue;
         }
 
         let info_plist = path.join("Info.plist");
-        let (device_name, product_type, last_backup_date) = if info_plist.exists() {
-            parse_info_plist(&info_plist)
-        } else {
-            (None, None, None)
-        };
+        let (device_name, product_type, last_backup_date) =
+            if info_plist.exists() { parse_info_plist(&info_plist) } else { (None, None, None) };
 
         let size_bytes = du_path(&path);
 
@@ -117,9 +111,7 @@ fn extract_plist_date(content: &str, key: &str) -> Option<String> {
 
 /// Estimate directory size via `du -sk`.
 fn du_path(path: &std::path::Path) -> u64 {
-    let output = std::process::Command::new("du")
-        .args(["-sk", &path.to_string_lossy()])
-        .output();
+    let output = std::process::Command::new("du").args(["-sk", &path.to_string_lossy()]).output();
     if let Ok(out) = output {
         if let Ok(s) = String::from_utf8(out.stdout) {
             if let Some(kb) = s.split_whitespace().next() {

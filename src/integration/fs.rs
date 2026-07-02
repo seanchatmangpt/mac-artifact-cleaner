@@ -10,22 +10,31 @@
 //! Domain functions receive inert DTOs; this module builds those DTOs
 //! from live OS handles.
 
+use std::{
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+};
+
+use anyhow::Context;
 use dashmap::DashMap;
 use ignore::{WalkBuilder, WalkState};
-use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 
-use crate::domain::artifact::{
-    artifact_candidates_from_snapshot, cache_hit, detect_project_from_snapshot, is_global_cache,
-    is_macos_os_dir, is_traversal_barrier_name, ArgsSnapshot, CachedDirEntry, Candidate,
-    DirSnapshot, EntryKind, EntrySnapshot,
+use crate::{
+    domain::{
+        artifact::{
+            artifact_candidates_from_snapshot, cache_hit, detect_project_from_snapshot,
+            is_global_cache, is_macos_os_dir, is_traversal_barrier_name, ArgsSnapshot,
+            CachedDirEntry, Candidate, DirSnapshot, EntryKind, EntrySnapshot,
+        },
+        audit::Stats,
+        tool_roots::{ToolRootAcc, ToolRootDef},
+    },
+    integration::scan_cache::{child_names_hash, ScanCache},
 };
-use crate::domain::audit::Stats;
-use crate::domain::tool_roots::{ToolRootAcc, ToolRootDef};
-use crate::integration::scan_cache::{child_names_hash, ScanCache};
-use anyhow::Context;
 
 // ── DirSnapshot builder ────────────────────────────────────────────────────────
 
@@ -42,10 +51,7 @@ pub fn read_dir_snapshot(dir: &Path) -> DirSnapshot {
     for entry in entries.flatten() {
         let path = entry.path();
         let file_name = entry.file_name().to_string_lossy().to_string();
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase());
+        let extension = path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase());
         let kind = match entry.file_type() {
             Ok(ft) if ft.is_dir() => EntryKind::Dir,
             Ok(ft) if ft.is_file() => EntryKind::File,
@@ -80,11 +86,7 @@ pub fn write_or_dump_on_full(path: &Path, contents: &str, label: &str) -> anyhow
     match std::fs::write(path, contents) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::StorageFull => {
-            eprintln!(
-                "⚠️  Disk full — could not write {} to {}.",
-                label,
-                path.display()
-            );
+            eprintln!("⚠️  Disk full — could not write {} to {}.", label, path.display());
             eprintln!("    Dumping it below; save it elsewhere, then run `oclnr emergency --yes`.");
             println!("{}", contents);
             Ok(())
@@ -122,9 +124,9 @@ impl VolumeSpace {
 ///
 /// This is the integration layer's responsibility: it performs the OS call and
 /// returns an inert [`VolumeSpace`] DTO for the domain/noun layers to format.
+#[allow(unsafe_code)] // audited: libc::statvfs FFI for free-space sampling
 pub fn volume_space(path: &Path) -> anyhow::Result<VolumeSpace> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
 
     let c_path = CString::new(path.as_os_str().as_bytes())
         .with_context(|| format!("path contains NUL byte: {}", path.display()))?;
@@ -154,9 +156,7 @@ pub fn estimate_size(path: &Path, stats: Arc<Stats>) -> u64 {
     if path.is_file() {
         return std::fs::metadata(path)
             .map(|m| {
-                stats
-                    .bytes_seen
-                    .fetch_add(m.blocks() * 512, Ordering::Relaxed);
+                stats.bytes_seen.fetch_add(m.blocks() * 512, Ordering::Relaxed);
                 stats.files_seen.fetch_add(1, Ordering::Relaxed);
                 m.blocks() * 512
             })
@@ -199,11 +199,7 @@ pub fn estimate_size(path: &Path, stats: Arc<Stats>) -> u64 {
                     ignore::Error::Loop { child, .. } => child.clone(),
                     _ => PathBuf::new(),
                 };
-                stats
-                    .error_details
-                    .lock()
-                    .unwrap()
-                    .push((path, err.to_string()));
+                stats.error_details.lock().unwrap().push((path, err.to_string()));
             }
         }
     }
@@ -264,9 +260,7 @@ pub fn scan_root(
         return Ok(());
     }
 
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(8);
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
 
     let root_for_filter = root.to_path_buf();
     let stats_for_filter = stats.clone();
@@ -340,10 +334,7 @@ pub fn scan_root(
                         let mtime = meta.mtime();
                         if prev.mtime == mtime {
                             fold_cached_stats(&stats_for_filter, &candidates_for_filter, &prev);
-                            cache_hits_for_filter
-                                .lock()
-                                .unwrap()
-                                .push((path.to_path_buf(), prev));
+                            cache_hits_for_filter.lock().unwrap().push((path.to_path_buf(), prev));
                             return false;
                         }
                         // mtime changed — early-cutoff: check whether the
@@ -353,10 +344,7 @@ pub fn scan_root(
                         let hash = child_names_hash(&snap);
                         if cache_hit(&prev, mtime, hash) {
                             fold_cached_stats(&stats_for_filter, &candidates_for_filter, &prev);
-                            cache_hits_for_filter
-                                .lock()
-                                .unwrap()
-                                .push((path.to_path_buf(), prev));
+                            cache_hits_for_filter.lock().unwrap().push((path.to_path_buf(), prev));
                             return false;
                         }
                         // Real change — this directory will be visited
@@ -393,11 +381,7 @@ pub fn scan_root(
                         ignore::Error::Loop { child, .. } => child.clone(),
                         _ => PathBuf::new(),
                     };
-                    stats
-                        .error_details
-                        .lock()
-                        .unwrap()
-                        .push((path, err.to_string()));
+                    stats.error_details.lock().unwrap().push((path, err.to_string()));
                     return WalkState::Continue;
                 }
             };
@@ -451,9 +435,7 @@ pub fn scan_root(
                 let found =
                     artifact_candidates_from_snapshot(path, &project, &args_snapshot, &snap);
                 if !found.is_empty() {
-                    stats
-                        .candidates_seen
-                        .fetch_add(found.len(), Ordering::Relaxed);
+                    stats.candidates_seen.fetch_add(found.len(), Ordering::Relaxed);
 
                     for c in found {
                         if args_snapshot.ignore_recent_hours > 0 {
@@ -521,16 +503,10 @@ fn fold_cached_stats(
     candidates: &DashMap<PathBuf, Candidate>,
     prev: &CachedDirEntry,
 ) {
-    stats
-        .dirs_seen
-        .fetch_add(prev.dirs as usize, Ordering::Relaxed);
-    stats
-        .files_seen
-        .fetch_add(prev.files as usize, Ordering::Relaxed);
+    stats.dirs_seen.fetch_add(prev.dirs as usize, Ordering::Relaxed);
+    stats.files_seen.fetch_add(prev.files as usize, Ordering::Relaxed);
     stats.bytes_seen.fetch_add(prev.bytes, Ordering::Relaxed);
-    stats
-        .candidates_seen
-        .fetch_add(prev.candidates as usize, Ordering::Relaxed);
+    stats.candidates_seen.fetch_add(prev.candidates as usize, Ordering::Relaxed);
     for c in &prev.candidates_list {
         candidates.insert(c.path.clone(), c.clone());
     }
@@ -606,12 +582,7 @@ fn aggregate_subtrees(
             let Some(child) = agg_map.get(path) else {
                 continue;
             };
-            (
-                child.dirs,
-                child.files,
-                child.bytes,
-                child.candidates.clone(),
-            )
+            (child.dirs, child.files, child.bytes, child.candidates.clone())
         };
         if let Some(parent_agg) = agg_map.get_mut(parent) {
             parent_agg.dirs += c_dirs;
@@ -675,9 +646,7 @@ pub fn breakdown_sizes(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>> {
         buckets.insert(entry.path(), AtomicU64::new(0));
     }
 
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(8);
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
 
     let mut builder = WalkBuilder::new(root);
     builder
@@ -722,10 +691,8 @@ pub fn breakdown_sizes(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>> {
         })
     });
 
-    let mut results: Vec<(PathBuf, u64)> = buckets
-        .iter()
-        .map(|e| (e.key().clone(), e.value().load(Ordering::Relaxed)))
-        .collect();
+    let mut results: Vec<(PathBuf, u64)> =
+        buckets.iter().map(|e| (e.key().clone(), e.value().load(Ordering::Relaxed))).collect();
 
     results.sort_by(|a, b| b.1.cmp(&a.1));
     Ok(results)
@@ -820,8 +787,9 @@ pub fn find_large_files(
     min_bytes: u64,
     progress: impl Fn(u64, u64) + Send + Sync + 'static,
 ) -> anyhow::Result<Vec<(PathBuf, u64)>> {
-    use jwalk::{Parallelism, WalkDir};
     use std::os::unix::fs::MetadataExt as _;
+
+    use jwalk::{Parallelism, WalkDir};
 
     let root_dev = std::fs::metadata(root)
         .with_context(|| format!("Cannot stat root: {}", root.display()))?
@@ -887,10 +855,7 @@ pub fn find_large_files(
     let _ = stop_tx.send(());
 
     // Final progress tick.
-    progress(
-        files_scanned.load(Ordering::Relaxed),
-        large_found.load(Ordering::Relaxed),
-    );
+    progress(files_scanned.load(Ordering::Relaxed), large_found.load(Ordering::Relaxed));
 
     results.sort_unstable_by(|a, b| b.1.cmp(&a.1));
     Ok(results)
@@ -915,10 +880,7 @@ pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
 
     // Pass 1 — clear macOS immutable flags (nouchg = user immutable, noschg = sys immutable).
     // Ignore errors: chflags will fail on root-owned files; we surface that later.
-    let _ = std::process::Command::new("chflags")
-        .args(["-R", "nouchg,noschg"])
-        .arg(path)
-        .output();
+    let _ = std::process::Command::new("chflags").args(["-R", "nouchg,noschg"]).arg(path).output();
 
     // Pass 2 — make every entry user-writable so remove_dir_all can proceed.
     let mut builder = WalkBuilder::new(path);
@@ -958,10 +920,7 @@ pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
 /// **Callers must hold a validated `DeletionPlan` before invoking this.**
 pub fn delete_file(path: &Path) -> anyhow::Result<()> {
     if !path.is_file() {
-        anyhow::bail!(
-            "delete_file: expected a file but path is not a file: {}",
-            path.display()
-        );
+        anyhow::bail!("delete_file: expected a file but path is not a file: {}", path.display());
     }
     std::fs::remove_file(path)?;
     Ok(())

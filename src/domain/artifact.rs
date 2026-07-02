@@ -8,9 +8,12 @@
 //! The integration layer is responsible for reading the filesystem and
 //! constructing these snapshots before calling domain functions.
 
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
+
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
@@ -71,12 +74,7 @@ impl EntrySnapshot {
         extension: Option<String>,
         kind: EntryKind,
     ) -> Self {
-        Self {
-            path,
-            file_name,
-            extension,
-            kind,
-        }
+        Self { path, file_name, extension, kind }
     }
 
     /// Returns `true` if this entry is a directory.
@@ -144,9 +142,7 @@ impl DirSnapshot {
     /// assert!(!snap.has_file("package.json"));
     /// ```
     pub fn has_file(&self, name: &str) -> bool {
-        self.children
-            .iter()
-            .any(|e| e.is_file() && e.file_name == name)
+        self.children.iter().any(|e| e.is_file() && e.file_name == name)
     }
 
     /// Returns `true` if any child is a directory with the given name.
@@ -170,9 +166,7 @@ impl DirSnapshot {
     /// assert!(!snap.has_dir("src"));
     /// ```
     pub fn has_dir(&self, name: &str) -> bool {
-        self.children
-            .iter()
-            .any(|e| e.is_dir() && e.file_name == name)
+        self.children.iter().any(|e| e.is_dir() && e.file_name == name)
     }
 
     /// Returns `true` if any child file has the given extension.
@@ -224,9 +218,7 @@ impl DirSnapshot {
         &'a self,
         suffix: &'a str,
     ) -> impl Iterator<Item = &'a EntrySnapshot> {
-        self.children
-            .iter()
-            .filter(move |e| e.is_dir() && e.file_name.ends_with(suffix))
+        self.children.iter().filter(move |e| e.is_dir() && e.file_name.ends_with(suffix))
     }
 
     /// Returns names of all child directories whose names start with the given prefix.
@@ -252,9 +244,7 @@ impl DirSnapshot {
         &'a self,
         prefix: &'a str,
     ) -> impl Iterator<Item = &'a EntrySnapshot> {
-        self.children
-            .iter()
-            .filter(move |e| e.is_dir() && e.file_name.starts_with(prefix))
+        self.children.iter().filter(move |e| e.is_dir() && e.file_name.starts_with(prefix))
     }
 
     /// Returns names of all child files whose extension matches the given one.
@@ -280,11 +270,7 @@ impl DirSnapshot {
     /// ```
     pub fn files_with_ext<'a>(&'a self, ext: &'a str) -> impl Iterator<Item = &'a EntrySnapshot> {
         self.children.iter().filter(move |e| {
-            e.is_file()
-                && e.extension
-                    .as_ref()
-                    .map(|e_ext| e_ext == ext)
-                    .unwrap_or(false)
+            e.is_file() && e.extension.as_ref().map(|e_ext| e_ext == ext).unwrap_or(false)
         })
     }
 }
@@ -470,16 +456,8 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
 /// ```
 pub fn is_global_cache(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    let global_caches = [
-        "/.pnpm-store",
-        "/.rustup",
-        "/.asdf",
-        "/.pyenv",
-        "/.rbenv",
-        "/.mix",
-        "/.hex",
-        "/.osa",
-    ];
+    let global_caches =
+        ["/.pnpm-store", "/.rustup", "/.asdf", "/.pyenv", "/.rbenv", "/.mix", "/.hex", "/.osa"];
 
     global_caches.iter().any(|cache| s.contains(cache))
 }
@@ -511,10 +489,7 @@ pub fn global_cache_candidates(home: &Path) -> Vec<(std::path::PathBuf, String)>
     [
         ("Library/Caches", "macOS/app user cache"),
         ("Library/Developer/Xcode/DerivedData", "Xcode derived data"),
-        (
-            "Library/Developer/CoreSimulator/Caches",
-            "CoreSimulator cache",
-        ),
+        ("Library/Developer/CoreSimulator/Caches", "CoreSimulator cache"),
         (".cache", "generic user cache"),
         (".cargo/registry/cache", "cargo registry cache (.crate)"),
         (".cargo/registry/src", "cargo registry unpacked sources"),
@@ -987,22 +962,20 @@ pub fn artifact_candidates_from_snapshot(
                 add_dir(&mut out, root, "chats", "ai chat history", snap);
             }
 
-            "session_logs" => {
-                if snap.has_dir("tmp") {
-                    // This specifically targets massive session files seen in lsp-max and .gemini
-                    for e in snap.files_with_ext("jsonl") {
-                        out.push(Candidate {
-                            path: e.path.clone(),
-                            reason: "massive ai session logs".to_string(),
-                        });
-                    }
-                    // Also check for logs in tmp/
-                    let tmp_path = root.join("tmp");
+            "session_logs" if snap.has_dir("tmp") => {
+                // This specifically targets massive session files seen in lsp-max and .gemini
+                for e in snap.files_with_ext("jsonl") {
                     out.push(Candidate {
-                        path: tmp_path,
-                        reason: "temporary session logs".to_string(),
+                        path: e.path.clone(),
+                        reason: "massive ai session logs".to_string(),
                     });
                 }
+                // Also check for logs in tmp/
+                let tmp_path = root.join("tmp");
+                out.push(Candidate {
+                    path: tmp_path,
+                    reason: "temporary session logs".to_string(),
+                });
             }
 
             "dotnet" => {
@@ -1024,18 +997,12 @@ fn add_dir(out: &mut Vec<Candidate>, root: &Path, rel: &str, reason: &str, snap:
     // the snapshot and construct the full path without touching the filesystem.
     let first = rel.split('/').next().unwrap_or(rel);
     if snap.has_dir(first) {
-        out.push(Candidate {
-            path: root.join(rel),
-            reason: reason.to_string(),
-        });
+        out.push(Candidate { path: root.join(rel), reason: reason.to_string() });
     }
 }
 
 fn add_file(out: &mut Vec<Candidate>, root: &Path, rel: &str, reason: &str, snap: &DirSnapshot) {
     if snap.has_file(rel) {
-        out.push(Candidate {
-            path: root.join(rel),
-            reason: reason.to_string(),
-        });
+        out.push(Candidate { path: root.join(rel), reason: reason.to_string() });
     }
 }

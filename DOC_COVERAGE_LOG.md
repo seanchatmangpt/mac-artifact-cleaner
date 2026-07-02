@@ -85,11 +85,11 @@ None (no examples existed).
   thinned list     -> ["com.apple.TimeMachine.2026-05-26-135630.local", "com.apple.TimeMachine.2026-05-25-080000.local"]
   receipt          -> snapshots_thinned=[...]
   edge: n=0        -> []
-  edge: unparseable -> []
+  edge: unparsable -> []
   snapshot_pipeline: all assertions passed
   EXIT:0
   ```
-- **What the run demonstrated:** three APIs composing — selection, identification, receipt. Chronological sort order enforced (oldest-first). Edge cases (n=0, unparseable names) silently ignored as specified. Would fail if sort order inverted or `SnapshotThinReceipt::new` diffing logic broke.
+- **What the run demonstrated:** three APIs composing — selection, identification, receipt. Chronological sort order enforced (oldest-first). Edge cases (n=0, unparsable names) silently ignored as specified. Would fail if sort order inverted or `SnapshotThinReceipt::new` diffing logic broke.
 
 ---
 

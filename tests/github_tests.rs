@@ -1,9 +1,14 @@
-use osx_clnr::domain::github::GithubTarget;
-use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
-use osx_clnr::integration::github::MockCommandExecutor;
-use osx_clnr::nouns::github::{discover_candidates, handle, GithubAction};
 use std::path::PathBuf;
+
+use osx_clnr::{
+    domain::{
+        github::GithubTarget,
+        plan::{DeletionPlan, PlanItem, PlanItemKind},
+        receipt::{DeletionReceipt, DeletionResult, DeletionStatus},
+    },
+    integration::github::MockCommandExecutor,
+    nouns::github::{discover_candidates, handle, GithubAction},
+};
 
 #[test]
 fn test_github_target_parsing_and_roundtrip() {
@@ -12,10 +17,7 @@ fn test_github_target_parsing_and_roundtrip() {
     let target_repo = GithubTarget::parse(&p_repo).unwrap();
     assert_eq!(
         target_repo,
-        GithubTarget::Repo {
-            owner: "owner".to_string(),
-            repo: "my-repo".to_string()
-        }
+        GithubTarget::Repo { owner: "owner".to_string(), repo: "my-repo".to_string() }
     );
     assert_eq!(target_repo.to_path_buf(), p_repo);
 
@@ -77,11 +79,7 @@ fn test_github_target_parsing_and_roundtrip() {
     let target_issue = GithubTarget::parse(&p_issue).unwrap();
     assert_eq!(
         target_issue,
-        GithubTarget::Issue {
-            owner: "owner".to_string(),
-            repo: "my-repo".to_string(),
-            number: 42
-        }
+        GithubTarget::Issue { owner: "owner".to_string(), repo: "my-repo".to_string(), number: 42 }
     );
     assert_eq!(target_issue.to_path_buf(), p_issue);
 
@@ -90,11 +88,7 @@ fn test_github_target_parsing_and_roundtrip() {
     let target_pr = GithubTarget::parse(&p_pr).unwrap();
     assert_eq!(
         target_pr,
-        GithubTarget::Pr {
-            owner: "owner".to_string(),
-            repo: "my-repo".to_string(),
-            number: 101
-        }
+        GithubTarget::Pr { owner: "owner".to_string(), repo: "my-repo".to_string(), number: 101 }
     );
     assert_eq!(target_pr.to_path_buf(), p_pr);
 
@@ -240,10 +234,7 @@ fn test_github_discover_candidates() {
     ]"#;
     mock.add_response(
         "gh",
-        &[
-            "api",
-            "repos/my-org/active-repo/branches?per_page=100&page=1",
-        ],
+        &["api", "repos/my-org/active-repo/branches?per_page=100&page=1"],
         0,
         branch_list_json,
         "",
@@ -253,10 +244,7 @@ fn test_github_discover_candidates() {
         r#"{"status": "identical", "ahead_by": 0, "behind_by": 0, "total_commits": 0}"#;
     mock.add_response(
         "gh",
-        &[
-            "api",
-            "repos/my-org/active-repo/compare/main...feature/merged",
-        ],
+        &["api", "repos/my-org/active-repo/compare/main...feature/merged"],
         0,
         compare_merged_json,
         "",
@@ -266,10 +254,7 @@ fn test_github_discover_candidates() {
         r#"{"status": "ahead", "ahead_by": 2, "behind_by": 0, "total_commits": 2}"#;
     mock.add_response(
         "gh",
-        &[
-            "api",
-            "repos/my-org/active-repo/compare/main...feature/active",
-        ],
+        &["api", "repos/my-org/active-repo/compare/main...feature/active"],
         0,
         compare_active_json,
         "",
@@ -439,42 +424,24 @@ fn test_github_discover_candidates() {
 
     assert_eq!(candidates.len(), 9);
 
-    assert_eq!(
-        candidates[0].path,
-        PathBuf::from("github://repo/my-org/empty-repo")
-    );
+    assert_eq!(candidates[0].path, PathBuf::from("github://repo/my-org/empty-repo"));
     assert_eq!(candidates[0].kind, PlanItemKind::GithubRepo);
     assert_eq!(candidates[0].reason, "Empty repository");
 
-    assert_eq!(
-        candidates[1].path,
-        PathBuf::from("github://repo/my-org/stale-repo")
-    );
+    assert_eq!(candidates[1].path, PathBuf::from("github://repo/my-org/stale-repo"));
     assert_eq!(candidates[1].kind, PlanItemKind::GithubRepo);
-    assert_eq!(
-        candidates[1].reason,
-        "Stale repository (inactive for > 180 days)"
-    );
+    assert_eq!(candidates[1].reason, "Stale repository (inactive for > 180 days)");
 
-    assert_eq!(
-        candidates[2].path,
-        PathBuf::from("github://run/my-org/active-repo/111")
-    );
+    assert_eq!(candidates[2].path, PathBuf::from("github://run/my-org/active-repo/111"));
     assert_eq!(candidates[2].kind, PlanItemKind::GithubRun);
-    assert_eq!(
-        candidates[2].reason,
-        "Completed workflow run older than 30 days (run #1)"
-    );
+    assert_eq!(candidates[2].reason, "Completed workflow run older than 30 days (run #1)");
 
     assert_eq!(
         candidates[3].path,
         PathBuf::from("github://branch/my-org/active-repo/feature/merged")
     );
     assert_eq!(candidates[3].kind, PlanItemKind::GithubBranch);
-    assert_eq!(
-        candidates[3].reason,
-        "Branch fully merged into default branch (main)"
-    );
+    assert_eq!(candidates[3].reason, "Branch fully merged into default branch (main)");
 
     assert_eq!(
         candidates[4].path,
@@ -497,16 +464,10 @@ fn test_github_discover_candidates() {
     assert_eq!(candidates[6].kind, PlanItemKind::GithubCache);
     assert_eq!(candidates[6].bytes, 5000);
 
-    assert_eq!(
-        candidates[7].path,
-        PathBuf::from("github://issue/my-org/active-repo/12")
-    );
+    assert_eq!(candidates[7].path, PathBuf::from("github://issue/my-org/active-repo/12"));
     assert_eq!(candidates[7].kind, PlanItemKind::GithubIssue);
 
-    assert_eq!(
-        candidates[8].path,
-        PathBuf::from("github://pr/my-org/active-repo/24")
-    );
+    assert_eq!(candidates[8].path, PathBuf::from("github://pr/my-org/active-repo/24"));
     assert_eq!(candidates[8].kind, PlanItemKind::GithubPr);
 }
 
@@ -515,28 +476,11 @@ fn test_github_deletions_execution() {
     let mock = MockCommandExecutor::new();
 
     // Mock successful deletions
+    mock.add_response("gh", &["repo", "delete", "my-org/empty-repo", "--yes"], 0, "", "");
+    mock.add_response("gh", &["run", "delete", "111", "--repo", "my-org/active-repo"], 0, "", "");
     mock.add_response(
         "gh",
-        &["repo", "delete", "my-org/empty-repo", "--yes"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &["run", "delete", "111", "--repo", "my-org/active-repo"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &[
-            "api",
-            "-X",
-            "DELETE",
-            "repos/my-org/active-repo/git/refs/heads/feature/merged",
-        ],
+        &["api", "-X", "DELETE", "repos/my-org/active-repo/git/refs/heads/feature/merged"],
         0,
         "",
         "",
@@ -556,35 +500,12 @@ fn test_github_deletions_execution() {
         "",
         "",
     );
+    mock.add_response("gh", &["cache", "delete", "333", "--repo", "my-org/active-repo"], 0, "", "");
+    mock.add_response("gh", &["issue", "close", "12", "--repo", "my-org/active-repo"], 0, "", "");
+    mock.add_response("gh", &["pr", "close", "24", "--repo", "my-org/active-repo"], 0, "", "");
     mock.add_response(
         "gh",
-        &["cache", "delete", "333", "--repo", "my-org/active-repo"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &["issue", "close", "12", "--repo", "my-org/active-repo"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &["pr", "close", "24", "--repo", "my-org/active-repo"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &[
-            "api",
-            "-X",
-            "DELETE",
-            "repos/my-org/active-repo/releases/assets/555",
-        ],
+        &["api", "-X", "DELETE", "repos/my-org/active-repo/releases/assets/555"],
         0,
         "",
         "",
@@ -641,13 +562,7 @@ fn test_github_deletions_execution() {
         },
     ];
 
-    let plan = DeletionPlan::new(
-        vec![PathBuf::from("github://")],
-        false,
-        false,
-        items,
-        vec![],
-    );
+    let plan = DeletionPlan::new(vec![PathBuf::from("github://")], false, false, items, vec![]);
 
     let start_time = 0;
     let mut results = Vec::new();
@@ -658,43 +573,29 @@ fn test_github_deletions_execution() {
                 GithubTarget::Repo { owner, repo } => {
                     osx_clnr::integration::github::delete_repository(&mock, owner, repo)
                 }
-                GithubTarget::Branch {
-                    owner,
-                    repo,
-                    branch,
-                } => osx_clnr::integration::github::delete_branch(&mock, owner, repo, branch),
-                GithubTarget::Run {
-                    owner,
-                    repo,
-                    run_id,
-                } => osx_clnr::integration::github::delete_run(&mock, owner, repo, *run_id),
+                GithubTarget::Branch { owner, repo, branch } => {
+                    osx_clnr::integration::github::delete_branch(&mock, owner, repo, branch)
+                }
+                GithubTarget::Run { owner, repo, run_id } => {
+                    osx_clnr::integration::github::delete_run(&mock, owner, repo, *run_id)
+                }
                 GithubTarget::Release { owner, repo, tag } => {
                     osx_clnr::integration::github::delete_release(&mock, owner, repo, tag)
                 }
-                GithubTarget::Cache {
-                    owner,
-                    repo,
-                    cache_id,
-                    ..
-                } => osx_clnr::integration::github::delete_cache(&mock, owner, repo, *cache_id),
-                GithubTarget::Issue {
-                    owner,
-                    repo,
-                    number,
-                } => osx_clnr::integration::github::close_issue(&mock, owner, repo, *number),
-                GithubTarget::Pr {
-                    owner,
-                    repo,
-                    number,
-                } => osx_clnr::integration::github::close_pr(&mock, owner, repo, *number),
-                GithubTarget::ReleaseAsset {
-                    owner,
-                    repo,
-                    asset_id,
-                    ..
-                } => osx_clnr::integration::github::delete_release_asset(
-                    &mock, owner, repo, *asset_id,
-                ),
+                GithubTarget::Cache { owner, repo, cache_id, .. } => {
+                    osx_clnr::integration::github::delete_cache(&mock, owner, repo, *cache_id)
+                }
+                GithubTarget::Issue { owner, repo, number } => {
+                    osx_clnr::integration::github::close_issue(&mock, owner, repo, *number)
+                }
+                GithubTarget::Pr { owner, repo, number } => {
+                    osx_clnr::integration::github::close_pr(&mock, owner, repo, *number)
+                }
+                GithubTarget::ReleaseAsset { owner, repo, asset_id, .. } => {
+                    osx_clnr::integration::github::delete_release_asset(
+                        &mock, owner, repo, *asset_id,
+                    )
+                }
             };
             match delete_result {
                 Ok(()) => {
@@ -877,14 +778,8 @@ fn test_github_zero_thresholds() {
 
     let candidates = discover_candidates(&mock, 0, 0, 0, 0, 0, 0, 0).unwrap();
     assert_eq!(candidates.len(), 1);
-    assert_eq!(
-        candidates[0].path,
-        PathBuf::from("github://repo/my-org/active-repo")
-    );
-    assert_eq!(
-        candidates[0].reason,
-        "Stale repository (inactive for > 0 days)"
-    );
+    assert_eq!(candidates[0].path, PathBuf::from("github://repo/my-org/active-repo"));
+    assert_eq!(candidates[0].reason, "Stale repository (inactive for > 0 days)");
 }
 
 #[test]
@@ -956,10 +851,7 @@ fn test_github_custom_default_branch_heuristic_issue() {
     ]"#;
     mock.add_response(
         "gh",
-        &[
-            "api",
-            "repos/my-org/active-repo/branches?per_page=100&page=1",
-        ],
+        &["api", "repos/my-org/active-repo/branches?per_page=100&page=1"],
         0,
         branch_list_json,
         "",
@@ -969,10 +861,7 @@ fn test_github_custom_default_branch_heuristic_issue() {
         r#"{"status": "identical", "ahead_by": 0, "behind_by": 0, "total_commits": 0}"#;
     mock.add_response(
         "gh",
-        &[
-            "api",
-            "repos/my-org/active-repo/compare/develop...feature/merged",
-        ],
+        &["api", "repos/my-org/active-repo/compare/develop...feature/merged"],
         0,
         compare_develop_json,
         "",
@@ -1061,10 +950,7 @@ fn test_github_custom_default_branch_heuristic_issue() {
         candidates[0].path,
         PathBuf::from("github://branch/my-org/active-repo/feature/merged")
     );
-    assert_eq!(
-        candidates[0].reason,
-        "Branch fully merged into default branch (develop)"
-    );
+    assert_eq!(candidates[0].reason, "Branch fully merged into default branch (develop)");
 }
 
 #[test]
@@ -1080,13 +966,7 @@ fn test_github_confirmation_and_refused() {
         bytes: 0,
     }];
 
-    let plan = DeletionPlan::new(
-        vec![PathBuf::from("github://")],
-        false,
-        false,
-        items,
-        vec![],
-    );
+    let plan = DeletionPlan::new(vec![PathBuf::from("github://")], false, false, items, vec![]);
     let plan_json = serde_json::to_string_pretty(&plan).unwrap();
     std::fs::write(&plan_path, plan_json).unwrap();
 
@@ -1103,10 +983,7 @@ fn test_github_confirmation_and_refused() {
     let receipt_content = std::fs::read_to_string(&receipt_path).unwrap();
     let receipt: DeletionReceipt = serde_json::from_str(&receipt_content).unwrap();
     assert_eq!(receipt.execution_record.results.len(), 1);
-    assert_eq!(
-        receipt.execution_record.results[0].status,
-        DeletionStatus::Refused
-    );
+    assert_eq!(receipt.execution_record.results[0].status, DeletionStatus::Refused);
     assert_eq!(
         receipt.execution_record.results[0].error,
         Some("Deletion refused by user".to_string())
@@ -1136,13 +1013,11 @@ fn test_github_protection_markers() {
     assert!(is_issue_stale(&bug_issue, 30, "2026-06-14T12:00:00Z"));
 
     // Protected labels: keep, pinned, no-stale, critical (case insensitive)
-    for protected_name in &[
-        "keep", "pinned", "no-stale", "critical", "KeEp", "PINNED", "no-STALE", "CRITICAL",
-    ] {
+    for protected_name in
+        &["keep", "pinned", "no-stale", "critical", "KeEp", "PINNED", "no-STALE", "CRITICAL"]
+    {
         let mut protected_issue = base_issue.clone();
-        protected_issue.labels.push(GhLabel {
-            name: protected_name.to_string(),
-        });
+        protected_issue.labels.push(GhLabel { name: protected_name.to_string() });
         assert!(
             !is_issue_stale(&protected_issue, 30, "2026-06-14T12:00:00Z"),
             "Issue with label '{}' should not be stale",
@@ -1165,19 +1040,15 @@ fn test_github_protection_markers() {
 
     // Stale PR with irrelevant label
     let mut refactor_pr = base_pr.clone();
-    refactor_pr.labels.push(GhLabel {
-        name: "refactor".into(),
-    });
+    refactor_pr.labels.push(GhLabel { name: "refactor".into() });
     assert!(is_pr_stale(&refactor_pr, 30, "2026-06-14T12:00:00Z"));
 
     // Protected labels
-    for protected_name in &[
-        "keep", "pinned", "no-stale", "critical", "KeEp", "PINNED", "no-STALE", "CRITICAL",
-    ] {
+    for protected_name in
+        &["keep", "pinned", "no-stale", "critical", "KeEp", "PINNED", "no-STALE", "CRITICAL"]
+    {
         let mut protected_pr = base_pr.clone();
-        protected_pr.labels.push(GhLabel {
-            name: protected_name.to_string(),
-        });
+        protected_pr.labels.push(GhLabel { name: protected_name.to_string() });
         assert!(
             !is_pr_stale(&protected_pr, 30, "2026-06-14T12:00:00Z"),
             "PR with label '{}' should not be stale",
@@ -1191,28 +1062,11 @@ fn test_github_execute_delete_plan_helper_success() {
     use osx_clnr::nouns::github::execute_delete_plan_helper;
     let mock = MockCommandExecutor::new();
     // Register mock responses for all 8 target types
+    mock.add_response("gh", &["repo", "delete", "my-org/empty-repo", "--yes"], 0, "", "");
+    mock.add_response("gh", &["run", "delete", "111", "--repo", "my-org/active-repo"], 0, "", "");
     mock.add_response(
         "gh",
-        &["repo", "delete", "my-org/empty-repo", "--yes"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &["run", "delete", "111", "--repo", "my-org/active-repo"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &[
-            "api",
-            "-X",
-            "DELETE",
-            "repos/my-org/active-repo/git/refs/heads/feature/merged",
-        ],
+        &["api", "-X", "DELETE", "repos/my-org/active-repo/git/refs/heads/feature/merged"],
         0,
         "",
         "",
@@ -1232,35 +1086,12 @@ fn test_github_execute_delete_plan_helper_success() {
         "",
         "",
     );
+    mock.add_response("gh", &["cache", "delete", "333", "--repo", "my-org/active-repo"], 0, "", "");
+    mock.add_response("gh", &["issue", "close", "12", "--repo", "my-org/active-repo"], 0, "", "");
+    mock.add_response("gh", &["pr", "close", "24", "--repo", "my-org/active-repo"], 0, "", "");
     mock.add_response(
         "gh",
-        &["cache", "delete", "333", "--repo", "my-org/active-repo"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &["issue", "close", "12", "--repo", "my-org/active-repo"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &["pr", "close", "24", "--repo", "my-org/active-repo"],
-        0,
-        "",
-        "",
-    );
-    mock.add_response(
-        "gh",
-        &[
-            "api",
-            "-X",
-            "DELETE",
-            "repos/my-org/active-repo/releases/assets/555",
-        ],
+        &["api", "-X", "DELETE", "repos/my-org/active-repo/releases/assets/555"],
         0,
         "",
         "",
@@ -1317,13 +1148,7 @@ fn test_github_execute_delete_plan_helper_success() {
         },
     ];
 
-    let plan = DeletionPlan::new(
-        vec![PathBuf::from("github://")],
-        false,
-        false,
-        items,
-        vec![],
-    );
+    let plan = DeletionPlan::new(vec![PathBuf::from("github://")], false, false, items, vec![]);
 
     let plan_dir = tempfile::tempdir().unwrap();
     let receipt_path = plan_dir.path().join("receipt.json");
@@ -1359,12 +1184,7 @@ fn test_github_execute_delete_plan_helper_failures() {
     // Target 2: Branch deletion returns status 1, "not found" in stderr
     mock.add_response(
         "gh",
-        &[
-            "api",
-            "-X",
-            "DELETE",
-            "repos/my-org/active-repo/git/refs/heads/feature/missing",
-        ],
+        &["api", "-X", "DELETE", "repos/my-org/active-repo/git/refs/heads/feature/missing"],
         1,
         "",
         "branch not found",
@@ -1417,13 +1237,7 @@ fn test_github_execute_delete_plan_helper_failures() {
         },
     ];
 
-    let plan = DeletionPlan::new(
-        vec![PathBuf::from("github://")],
-        false,
-        false,
-        items,
-        vec![],
-    );
+    let plan = DeletionPlan::new(vec![PathBuf::from("github://")], false, false, items, vec![]);
 
     let plan_dir = tempfile::tempdir().unwrap();
     let receipt_path = plan_dir.path().join("receipt.json");
@@ -1438,50 +1252,35 @@ fn test_github_execute_delete_plan_helper_failures() {
     let receipt_content = std::fs::read_to_string(&receipt_path).unwrap();
     let receipt: DeletionReceipt = serde_json::from_str(&receipt_content).unwrap();
 
-    assert_eq!(
-        receipt.execution_record.results[0].status,
-        DeletionStatus::Failed
-    );
+    assert_eq!(receipt.execution_record.results[0].status, DeletionStatus::Failed);
     assert!(receipt.execution_record.results[0]
         .error
         .as_ref()
         .unwrap()
         .contains("internal server error"));
 
-    assert_eq!(
-        receipt.execution_record.results[1].status,
-        DeletionStatus::SkippedMissing
-    );
+    assert_eq!(receipt.execution_record.results[1].status, DeletionStatus::SkippedMissing);
     assert!(receipt.execution_record.results[1]
         .error
         .as_ref()
         .unwrap()
         .contains("branch not found"));
 
-    assert_eq!(
-        receipt.execution_record.results[2].status,
-        DeletionStatus::SkippedMissing
-    );
+    assert_eq!(receipt.execution_record.results[2].status, DeletionStatus::SkippedMissing);
     assert!(receipt.execution_record.results[2]
         .error
         .as_ref()
         .unwrap()
         .contains("HTTP 404: Not Found"));
 
-    assert_eq!(
-        receipt.execution_record.results[3].status,
-        DeletionStatus::SkippedMissing
-    );
+    assert_eq!(receipt.execution_record.results[3].status, DeletionStatus::SkippedMissing);
     assert!(receipt.execution_record.results[3]
         .error
         .as_ref()
         .unwrap()
         .contains("Non-GitHub item skipped"));
 
-    assert_eq!(
-        receipt.execution_record.results[4].status,
-        DeletionStatus::Failed
-    );
+    assert_eq!(receipt.execution_record.results[4].status, DeletionStatus::Failed);
     assert!(receipt.execution_record.results[4]
         .error
         .as_ref()
@@ -1567,7 +1366,5 @@ fn test_github_integration_failures() {
     );
 
     let err = osx_clnr::integration::github::list_repositories(&mock).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("gh command failed: authentication failed"));
+    assert!(err.to_string().contains("gh command failed: authentication failed"));
 }

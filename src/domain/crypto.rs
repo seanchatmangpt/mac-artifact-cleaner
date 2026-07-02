@@ -1,10 +1,13 @@
 //! Content-addressing helpers: BLAKE3 file hashing used to produce
 //! tamper-evident manifests for deletion receipts.
 
+use std::{
+    fs::File,
+    io::{Read, Result},
+    path::Path,
+};
+
 use blake3;
-use std::fs::File;
-use std::io::{Read, Result};
-use std::path::Path;
 
 /// Computes the BLAKE3 hex digest of a file's contents, streaming it in
 /// 64 KiB chunks so large files don't need to be loaded into memory at once.

@@ -1,9 +1,10 @@
 //! Object-Centric Event Log (OCEL v2) exporter.
 
-use crate::domain::tool_roots::ToolRootReport;
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 pub use wasm4pm_compat::ocel::*;
+
+use crate::domain::tool_roots::ToolRootReport;
 
 /// Builds an OCEL log structure for the collected tool roots.
 ///
@@ -26,11 +27,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
     objects.push(OCELObject {
         id: audit_obj_id.clone(),
         object_type: "disk_audit".to_string(),
-        attributes: vec![timed_attr(
-            "created_at",
-            &now,
-            serde_json::json!(now.to_rfc3339()),
-        )],
+        attributes: vec![timed_attr("created_at", &now, serde_json::json!(now.to_rfc3339()))],
         relationships: vec![],
     });
 
@@ -89,11 +86,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
                     &observed_time,
                     serde_json::json!(root.recommendation),
                 ),
-                timed_attr(
-                    "rationale",
-                    &observed_time,
-                    serde_json::json!(root.rationale),
-                ),
+                timed_attr("rationale", &observed_time, serde_json::json!(root.rationale)),
             ],
             relationships: vec![OCELRelationship {
                 object_id: audit_obj_id.clone(),
@@ -144,10 +137,7 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
                         object_id: audit_obj_id.clone(),
                         qualifier: "audit-run".to_string(),
                     },
-                    OCELRelationship {
-                        object_id,
-                        qualifier: "review-target".to_string(),
-                    },
+                    OCELRelationship { object_id, qualifier: "review-target".to_string() },
                 ],
             });
         }
@@ -246,10 +236,7 @@ fn value_to_ocel(val: serde_json::Value) -> OCELAttributeValue {
 }
 
 fn attr(name: &str, value: serde_json::Value) -> OCELEventAttribute {
-    OCELEventAttribute {
-        name: name.to_string(),
-        value: value_to_ocel(value),
-    }
+    OCELEventAttribute { name: name.to_string(), value: value_to_ocel(value) }
 }
 
 fn timed_attr(
@@ -257,18 +244,11 @@ fn timed_attr(
     time: &DateTime<FixedOffset>,
     value: serde_json::Value,
 ) -> OCELObjectAttribute {
-    OCELObjectAttribute {
-        name: name.to_string(),
-        time: *time,
-        value: value_to_ocel(value),
-    }
+    OCELObjectAttribute { name: name.to_string(), time: *time, value: value_to_ocel(value) }
 }
 
 fn attr_def(name: &str, value_type: &str) -> OCELTypeAttribute {
-    OCELTypeAttribute {
-        name: name.to_string(),
-        value_type: value_type.to_string(),
-    }
+    OCELTypeAttribute { name: name.to_string(), value_type: value_type.to_string() }
 }
 
 /// Builds an OCEL log structure for a full disk audit run.
@@ -312,12 +292,8 @@ pub fn build_disk_audit_ocel(
     let files_seen = stats.files_seen.load(std::sync::atomic::Ordering::Relaxed) as i64;
     let dirs_seen = stats.dirs_seen.load(std::sync::atomic::Ordering::Relaxed) as i64;
     let bytes_seen = stats.bytes_seen.load(std::sync::atomic::Ordering::Relaxed) as i64;
-    let projects_seen = stats
-        .projects_seen
-        .load(std::sync::atomic::Ordering::Relaxed) as i64;
-    let candidates_seen = stats
-        .candidates_seen
-        .load(std::sync::atomic::Ordering::Relaxed) as i64;
+    let projects_seen = stats.projects_seen.load(std::sync::atomic::Ordering::Relaxed) as i64;
+    let candidates_seen = stats.candidates_seen.load(std::sync::atomic::Ordering::Relaxed) as i64;
     let pruned_dirs = stats.pruned_dirs.load(std::sync::atomic::Ordering::Relaxed) as i64;
     let errors = stats.errors.load(std::sync::atomic::Ordering::Relaxed) as i64;
 
@@ -388,11 +364,7 @@ pub fn build_disk_audit_ocel(
         let path_str = c.path.display().to_string();
         let fs_obj_id = stable_object_id("fs-obj", &path_str);
         let cand_obj_id = stable_object_id("candidate", &path_str);
-        let kind = if c.path.is_file() {
-            "file"
-        } else {
-            "directory"
-        };
+        let kind = if c.path.is_file() { "file" } else { "directory" };
 
         objects.push(OCELObject {
             id: fs_obj_id.clone(),
@@ -602,11 +574,7 @@ pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OCEL {
         object_type: "snapshot_state".to_string(),
         attributes: vec![
             timed_attr("volume", &now, serde_json::json!(volume)),
-            timed_attr(
-                "snapshot_count",
-                &now,
-                serde_json::json!(snapshots.len() as i64),
-            ),
+            timed_attr("snapshot_count", &now, serde_json::json!(snapshots.len() as i64)),
             timed_attr("snapshots", &now, serde_json::json!(snapshots)),
         ],
         relationships: vec![],
@@ -629,10 +597,7 @@ pub fn build_snapshot_audit_ocel(volume: &str, snapshots: &[String]) -> OCEL {
     OCEL {
         event_types: vec![OCELType {
             name: "snapshot_state_observed".to_string(),
-            attributes: vec![
-                attr_def("volume", "string"),
-                attr_def("snapshot_count", "integer"),
-            ],
+            attributes: vec![attr_def("volume", "string"), attr_def("snapshot_count", "integer")],
         }],
         object_types: vec![OCELType {
             name: "snapshot_state".to_string(),
@@ -677,11 +642,7 @@ pub fn build_snapshot_thin_ocel(
         object_type: "snapshot_state".to_string(),
         attributes: vec![
             timed_attr("volume", &now, serde_json::json!(volume)),
-            timed_attr(
-                "snapshot_count",
-                &now,
-                serde_json::json!(after.len() as i64),
-            ),
+            timed_attr("snapshot_count", &now, serde_json::json!(after.len() as i64)),
             timed_attr("snapshots", &now, serde_json::json!(after)),
         ],
         relationships: vec![],
@@ -694,14 +655,8 @@ pub fn build_snapshot_thin_ocel(
         attributes: vec![
             attr("volume", serde_json::json!(volume)),
             attr("requested_bytes", serde_json::json!(requested_bytes as i64)),
-            attr(
-                "snapshots_before_count",
-                serde_json::json!(before.len() as i64),
-            ),
-            attr(
-                "snapshots_after_count",
-                serde_json::json!(after.len() as i64),
-            ),
+            attr("snapshots_before_count", serde_json::json!(before.len() as i64)),
+            attr("snapshots_after_count", serde_json::json!(after.len() as i64)),
             attr("thinned_count", serde_json::json!(thinned.len() as i64)),
         ],
         relationships: vec![OCELRelationship {
@@ -771,11 +726,7 @@ pub fn build_snapshot_delete_ocel(
         object_type: "snapshot_state".to_string(),
         attributes: vec![
             timed_attr("volume", &now, serde_json::json!(volume)),
-            timed_attr(
-                "snapshot_count",
-                &now,
-                serde_json::json!(after.len() as i64),
-            ),
+            timed_attr("snapshot_count", &now, serde_json::json!(after.len() as i64)),
             timed_attr("snapshots", &now, serde_json::json!(after)),
         ],
         relationships: vec![],
@@ -787,14 +738,8 @@ pub fn build_snapshot_delete_ocel(
         time: now,
         attributes: vec![
             attr("volume", serde_json::json!(volume)),
-            attr(
-                "snapshots_before_count",
-                serde_json::json!(before.len() as i64),
-            ),
-            attr(
-                "snapshots_after_count",
-                serde_json::json!(after.len() as i64),
-            ),
+            attr("snapshots_before_count", serde_json::json!(before.len() as i64)),
+            attr("snapshots_after_count", serde_json::json!(after.len() as i64)),
             attr("deleted_count", serde_json::json!(deleted.len() as i64)),
         ],
         relationships: vec![OCELRelationship {
@@ -850,11 +795,7 @@ pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> O
         object_type: "tm_exclusion_plan".to_string(),
         attributes: vec![
             timed_attr("script_path", &now, serde_json::json!(script_path)),
-            timed_attr(
-                "candidate_count",
-                &now,
-                serde_json::json!(candidate_count as i64),
-            ),
+            timed_attr("candidate_count", &now, serde_json::json!(candidate_count as i64)),
         ],
         relationships: vec![],
     });
@@ -920,10 +861,9 @@ fn val_matches_type(val: &OCELAttributeValue, type_str: &str) -> bool {
     match type_str {
         "string" => matches!(val, OCELAttributeValue::String(_)),
         "integer" => matches!(val, OCELAttributeValue::Integer(_)),
-        "float" | "number" => matches!(
-            val,
-            OCELAttributeValue::Float(_) | OCELAttributeValue::Integer(_)
-        ),
+        "float" | "number" => {
+            matches!(val, OCELAttributeValue::Float(_) | OCELAttributeValue::Integer(_))
+        }
         "boolean" => matches!(val, OCELAttributeValue::Boolean(_)),
         "array" => matches!(val, OCELAttributeValue::String(_)),
         _ => true,
@@ -951,9 +891,7 @@ fn val_matches_type(val: &OCELAttributeValue, type_str: &str) -> bool {
 /// assert!(report.is_err());
 /// ```
 use wasm4pm_compat::admission::{Admission, Admit, Refusal};
-use wasm4pm_compat::evidence::Evidence;
-use wasm4pm_compat::state::Raw;
-use wasm4pm_compat::witness::Ocel20;
+use wasm4pm_compat::{evidence::Evidence, state::Raw, witness::Ocel20};
 
 pub struct OcelLogAdjudicator;
 
@@ -970,16 +908,10 @@ impl Admit for OcelLogAdjudicator {
         let log = &raw.value;
         let mut errors = Vec::new();
 
-        let event_schema: std::collections::HashMap<&str, &OCELType> = log
-            .event_types
-            .iter()
-            .map(|t| (t.name.as_str(), t))
-            .collect();
-        let object_schema: std::collections::HashMap<&str, &OCELType> = log
-            .object_types
-            .iter()
-            .map(|t| (t.name.as_str(), t))
-            .collect();
+        let event_schema: std::collections::HashMap<&str, &OCELType> =
+            log.event_types.iter().map(|t| (t.name.as_str(), t)).collect();
+        let object_schema: std::collections::HashMap<&str, &OCELType> =
+            log.object_types.iter().map(|t| (t.name.as_str(), t)).collect();
 
         let mut object_map = std::collections::HashMap::new();
         for obj in &log.objects {

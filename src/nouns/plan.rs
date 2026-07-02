@@ -1,18 +1,23 @@
 //! Plan CLI noun implementation.
 
+use std::{os::unix::fs::MetadataExt, path::PathBuf, sync::Arc};
+
 use clap::Subcommand;
 use dashmap::DashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use crate::domain::artifact::{ArgsSnapshot, Candidate};
-use crate::domain::audit::Stats;
-use crate::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-use crate::domain::tool_roots::build_tool_root_defs;
-use crate::integration::fs::{physical_dir_size, scan_root, write_or_dump_on_full};
-use crate::integration::progress::ProgressReporter;
 use rayon::prelude::*;
-use std::os::unix::fs::MetadataExt;
+
+use crate::{
+    domain::{
+        artifact::{ArgsSnapshot, Candidate},
+        audit::Stats,
+        plan::{DeletionPlan, PlanItem, PlanItemKind},
+        tool_roots::build_tool_root_defs,
+    },
+    integration::{
+        fs::{physical_dir_size, scan_root, write_or_dump_on_full},
+        progress::ProgressReporter,
+    },
+};
 
 #[derive(Subcommand, Debug)]
 pub enum PlanAction {
@@ -49,8 +54,9 @@ pub enum PlanAction {
     },
 }
 
-use crate::integration::progress::human_bytes;
 use std::sync::atomic::Ordering;
+
+use crate::integration::progress::human_bytes;
 
 pub fn handle(action: PlanAction) -> anyhow::Result<()> {
     match action {
@@ -63,19 +69,10 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             include_global_caches,
             verbose,
         } => {
-            let roots = if root.is_empty() {
-                crate::nouns::default_scan_roots()?
-            } else {
-                root
-            };
+            let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
-            let args = ArgsSnapshot {
-                deps,
-                aggressive,
-                verbose,
-                tool_roots: false,
-                ignore_recent_hours,
-            };
+            let args =
+                ArgsSnapshot { deps, aggressive, verbose, tool_roots: false, ignore_recent_hours };
 
             let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
             let stats = Arc::new(Stats::default());
@@ -146,11 +143,8 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             let mut items: Vec<PlanItem> = candidate_vec
                 .par_iter()
                 .map(|c| {
-                    let kind = if c.path.is_file() {
-                        PlanItemKind::File
-                    } else {
-                        PlanItemKind::Dir
-                    };
+                    let kind =
+                        if c.path.is_file() { PlanItemKind::File } else { PlanItemKind::Dir };
                     let bytes = match kind {
                         PlanItemKind::File => std::fs::symlink_metadata(&c.path)
                             .map(|m| m.blocks() * 512)
@@ -166,12 +160,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                         | PlanItemKind::GithubReleaseAsset => 0,
                     };
 
-                    PlanItem {
-                        path: c.path.clone(),
-                        kind,
-                        reason: c.reason.clone(),
-                        bytes,
-                    }
+                    PlanItem { path: c.path.clone(), kind, reason: c.reason.clone(), bytes }
                 })
                 .collect();
 
@@ -192,11 +181,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             if top_n > 0 {
                 println!("   Top {} items by size:", top_n);
                 for item in plan.items.iter().take(top_n) {
-                    println!(
-                        "     {:>10}  {}",
-                        human_bytes(item.bytes),
-                        item.path.display()
-                    );
+                    println!("     {:>10}  {}", human_bytes(item.bytes), item.path.display());
                 }
             }
 
@@ -230,10 +215,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                     .unwrap_or_else(|| plan_data.created_unix.to_string())
             );
             println!("  Roots:       {:?}", plan_data.roots);
-            println!(
-                "  Flags:       deps={}, aggressive={}",
-                plan_data.deps, plan_data.aggressive
-            );
+            println!("  Flags:       deps={}, aggressive={}", plan_data.deps, plan_data.aggressive);
             println!("  Total Items: {}", plan_data.items.len());
             println!("==================================================");
             println!("\nScheduled Deletions:");

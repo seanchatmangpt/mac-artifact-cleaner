@@ -3,9 +3,10 @@
 //! Implements the Model Context Protocol (MCP) over JSON-RPC 2.0.
 //! Handles message parsing, serialization, and routing.
 
+use std::io::{self, BufRead, Write};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::io::{self, BufRead, Write};
 
 /// JSON-RPC 2.0 Request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,12 +19,7 @@ pub struct JsonRpcRequest {
 
 impl JsonRpcRequest {
     pub fn new(id: Value, method: String, params: Option<Value>) -> Self {
-        Self {
-            jsonrpc: "2.0".to_string(),
-            id,
-            method,
-            params,
-        }
+        Self { jsonrpc: "2.0".to_string(), id, method, params }
     }
 }
 
@@ -40,12 +36,7 @@ pub struct JsonRpcResponse {
 
 impl JsonRpcResponse {
     pub fn success(id: Value, result: Value) -> Self {
-        Self {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: Some(result),
-            error: None,
-        }
+        Self { jsonrpc: "2.0".to_string(), id, result: Some(result), error: None }
     }
 
     pub fn error(id: Value, code: i32, message: String, data: Option<Value>) -> Self {
@@ -53,11 +44,7 @@ impl JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id,
             result: None,
-            error: Some(JsonRpcError {
-                code,
-                message,
-                data,
-            }),
+            error: Some(JsonRpcError { code, message, data }),
         }
     }
 }
@@ -169,9 +156,7 @@ pub struct JsonRpcReader {
 
 impl JsonRpcReader {
     pub fn new() -> Self {
-        Self {
-            reader: io::BufReader::new(io::stdin()),
-        }
+        Self { reader: io::BufReader::new(io::stdin()) }
     }
 
     /// Read next JSON-RPC message from stdin (line-delimited)
@@ -200,9 +185,7 @@ pub struct JsonRpcWriter {
 
 impl JsonRpcWriter {
     pub fn new() -> Self {
-        Self {
-            writer: io::stdout(),
-        }
+        Self { writer: io::stdout() }
     }
 
     /// Write JSON-RPC message to stdout (line-delimited)
@@ -234,8 +217,9 @@ impl JsonRpcWriter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_jsonrpc_request_serialization() {

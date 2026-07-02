@@ -1,10 +1,12 @@
 //! Receipt CLI noun implementation.
 
-use crate::domain::affidavit_integration as affidavit;
-use crate::domain::plan::DeletionPlan;
-use crate::domain::receipt::DeletionReceipt;
-use clap::Subcommand;
 use std::path::PathBuf;
+
+use clap::Subcommand;
+
+use crate::domain::{
+    affidavit_integration as affidavit, plan::DeletionPlan, receipt::DeletionReceipt,
+};
 
 #[derive(Subcommand, Debug)]
 pub enum ReceiptAction {
@@ -90,10 +92,7 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
             println!("\n==================================================");
             println!("             DELETION RECEIPT SUMMARY             ");
             println!("==================================================");
-            println!(
-                "  Receipt Version:   {}",
-                receipt_data.execution_record.version
-            );
+            println!("  Receipt Version:   {}", receipt_data.execution_record.version);
             println!(
                 "  Plan Created:      {}",
                 chrono::DateTime::from_timestamp(
@@ -134,10 +133,7 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
                     .execution_completed_unix
                     .saturating_sub(receipt_data.execution_record.execution_started_unix)
             );
-            println!(
-                "  Total Items:       {}",
-                receipt_data.execution_record.results.len()
-            );
+            println!("  Total Items:       {}", receipt_data.execution_record.results.len());
 
             let mut deleted = 0;
             let mut skipped = 0;
@@ -169,14 +165,8 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
 
             println!("Certifying affidavit provenance for: {}", receipt.display());
             println!("  Chain hash (core/v1):  {}", affidavit_receipt.chain_hash);
-            println!(
-                "  Content address:       {}",
-                affidavit::content_address(&affidavit_receipt)
-            );
-            println!(
-                "  Events:                {}",
-                affidavit_receipt.events.len()
-            );
+            println!("  Content address:       {}", affidavit::content_address(&affidavit_receipt));
+            println!("  Events:                {}", affidavit_receipt.events.len());
             print_verdict(&verdict);
 
             if let Some(out_path) = out {
@@ -200,10 +190,7 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
 /// per-stage table plus the final ACCEPT/REJECT line.
 fn print_verdict(verdict: &affidavit::Verdict) {
     println!("\n==================================================");
-    println!(
-        "        AFFIDAVIT CERTIFICATION ({})        ",
-        verdict.profile.as_str()
-    );
+    println!("        AFFIDAVIT CERTIFICATION ({})        ", verdict.profile.as_str());
     println!("==================================================");
     for outcome in &verdict.outcomes {
         let mark = if outcome.passed { "✅" } else { "❌" };

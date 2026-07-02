@@ -3,8 +3,9 @@
 //! Exposes structures and algorithms for parsing APFS snapshots,
 //! querying Time Machine exclusions, and generating thinning receipts.
 
-use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
 
 /// Converts SystemTime to a Unix timestamp.
 ///
@@ -93,11 +94,7 @@ pub fn parse_snapshot_date(name: &str) -> Option<String> {
 /// ```
 pub fn identify_thinned_snapshots(before: &[String], after: &[String]) -> Vec<String> {
     let after_set: std::collections::HashSet<&String> = after.iter().collect();
-    before
-        .iter()
-        .filter(|s| !after_set.contains(s))
-        .cloned()
-        .collect()
+    before.iter().filter(|s| !after_set.contains(s)).cloned().collect()
 }
 
 /// Parses a human-readable size string (e.g. "10GB", "500MB") into raw bytes.
@@ -135,9 +132,7 @@ pub fn parse_size_in_bytes(s: &str) -> Result<u64, String> {
     let val_str = trimmed[..unit_idx].trim();
     let unit_str = trimmed[unit_idx..].trim();
 
-    let val: f64 = val_str
-        .parse()
-        .map_err(|e| format!("Invalid number: {}", e))?;
+    let val: f64 = val_str.parse().map_err(|e| format!("Invalid number: {}", e))?;
 
     // macOS Finder / disk utilities align to SI decimal units (1000 base)
     let multiplier = match unit_str {
@@ -212,14 +207,11 @@ pub fn human_bytes(bytes: u64) -> String {
 /// // Refusal case: n == 0 selects nothing
 /// assert!(select_oldest_snapshots(&snaps, 0).is_empty());
 ///
-/// // Refusal case: unparseable names are ignored
+/// // Refusal case: unparsable names are ignored
 /// assert!(select_oldest_snapshots(&["garbage".to_string()], 1).is_empty());
 /// ```
 pub fn select_oldest_snapshots(snapshots: &[String], n: usize) -> Vec<String> {
-    let mut dated: Vec<String> = snapshots
-        .iter()
-        .filter_map(|s| parse_snapshot_date(s))
-        .collect();
+    let mut dated: Vec<String> = snapshots.iter().filter_map(|s| parse_snapshot_date(s)).collect();
     // Date suffixes are zero-padded YYYY-MM-DD-HHMMSS, so lexical sort == chronological.
     dated.sort();
     dated.truncate(n);

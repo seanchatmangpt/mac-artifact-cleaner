@@ -15,10 +15,7 @@ use osx_clnr::domain::receipt::{check_reclaim, ReclaimCheck};
 fn main() {
     // ── case 1: claim below the 1 GB floor — not applicable ──────────────────
     let result = check_reclaim(500_000_000, Some(10_000_000_000), Some(10_500_000_000));
-    println!(
-        "not-applicable (500 MB claim):  {:?}",
-        matches!(result, ReclaimCheck::NotApplicable)
-    );
+    println!("not-applicable (500 MB claim):  {:?}", matches!(result, ReclaimCheck::NotApplicable));
     assert!(
         matches!(result, ReclaimCheck::NotApplicable),
         "claims below 1 GB floor must be NotApplicable"
@@ -63,10 +60,7 @@ fn main() {
 
     // ── case 4: back-compat — None/None (old receipts) skips the law ─────────
     let result = check_reclaim(5_000_000_000, None, None);
-    println!(
-        "back-compat (None/None):  {:?}",
-        matches!(result, ReclaimCheck::NotApplicable)
-    );
+    println!("back-compat (None/None):  {:?}", matches!(result, ReclaimCheck::NotApplicable));
     assert!(
         matches!(result, ReclaimCheck::NotApplicable),
         "old receipts without volume samples must not raise a false mismatch"

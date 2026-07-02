@@ -1,12 +1,15 @@
-use crate::domain::crypto::generate_manifest;
-use crate::domain::ocl::{OclArtifact, OclDatabase};
-use crate::domain::time::system_time_to_unix;
-use crate::integration::fs::volume_space;
-use crate::integration::notify::notify_disk_pressure;
+use std::{path::Path, sync::Arc, time::SystemTime};
+
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Result, Watcher};
-use std::path::Path;
-use std::sync::Arc;
-use std::time::SystemTime;
+
+use crate::{
+    domain::{
+        crypto::generate_manifest,
+        ocl::{OclArtifact, OclDatabase},
+        time::system_time_to_unix,
+    },
+    integration::{fs::volume_space, notify::notify_disk_pressure},
+};
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 
@@ -100,11 +103,7 @@ pub struct DiskPressureCheck {
 pub fn check_disk_pressure(mount: &Path, threshold_gb: f64) -> anyhow::Result<DiskPressureCheck> {
     let vs = volume_space(mount)?;
     let free_gb = vs.available as f64 / BYTES_PER_GB;
-    Ok(DiskPressureCheck {
-        free_gb,
-        threshold_gb,
-        under_pressure: free_gb < threshold_gb,
-    })
+    Ok(DiskPressureCheck { free_gb, threshold_gb, under_pressure: free_gb < threshold_gb })
 }
 
 /// Runs [`check_disk_pressure`] and, if the volume is under pressure, fires a

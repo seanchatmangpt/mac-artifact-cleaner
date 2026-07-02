@@ -8,9 +8,11 @@
 //! existing workspace-relative convention used for `disk-audit.jsonocel` /
 //! `cleanup-plan.json`.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 
@@ -64,9 +66,7 @@ impl ScanCache {
             let value = serde_json::to_vec(entry).context("serializing cached dir entry")?;
             batch.insert(path_key(path), value);
         }
-        self.db
-            .apply_batch(batch)
-            .context("applying scan cache batch")?;
+        self.db.apply_batch(batch).context("applying scan cache batch")?;
         Ok(())
     }
 }
@@ -79,11 +79,8 @@ fn path_key(path: &Path) -> Vec<u8> {
 /// already-built `DirSnapshot`: the sorted `(name, kind)` pairs are hashed with
 /// the standard library's `DefaultHasher` (no extra serialization dependency).
 pub fn child_names_hash(snap: &DirSnapshot) -> u64 {
-    let mut pairs: Vec<(&str, bool)> = snap
-        .children
-        .iter()
-        .map(|e| (e.file_name.as_str(), e.is_dir()))
-        .collect();
+    let mut pairs: Vec<(&str, bool)> =
+        snap.children.iter().map(|e| (e.file_name.as_str(), e.is_dir())).collect();
     pairs.sort_unstable();
 
     let mut hasher = DefaultHasher::new();
@@ -121,9 +118,7 @@ mod tests {
         let path = dir.path().join("some/project");
         let entry = sample_entry();
 
-        cache
-            .insert_batch(&[(path.clone(), entry.clone())])
-            .unwrap();
+        cache.insert_batch(&[(path.clone(), entry.clone())]).unwrap();
 
         let got = cache.get(&path).unwrap();
         assert_eq!(got, Some(entry));
@@ -157,10 +152,7 @@ mod tests {
         let path = dir.path().join("corrupt");
 
         // Write garbage bytes directly, bypassing the normal serde_json path.
-        cache
-            .db
-            .insert(path_key(&path), b"not valid json".to_vec())
-            .unwrap();
+        cache.db.insert(path_key(&path), b"not valid json".to_vec()).unwrap();
 
         let got = cache.get(&path);
         assert!(got.is_ok());

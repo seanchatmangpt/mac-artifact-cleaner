@@ -1,20 +1,24 @@
-use dashmap::DashMap;
-use std::fs::{self, File};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-use osx_clnr::domain::artifact::{
-    artifact_candidates_from_snapshot, detect_project_from_snapshot, ArgsSnapshot, Candidate,
+use std::{
+    fs::{self, File},
+    path::{Path, PathBuf},
+    sync::Arc,
 };
-use osx_clnr::domain::audit::Stats;
-use osx_clnr::domain::delete::{validate_plan_item, DeletionPlanAdjudicator, PlanSafetyWitness};
-use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-use osx_clnr::domain::receipt::{DeletionReceipt, DeletionStatus};
-use osx_clnr::integration::fs::scan_root;
-use osx_clnr::integration::fs::{delete_dir_all, delete_file, read_dir_snapshot};
-use wasm4pm_compat::admission::Admit;
-use wasm4pm_compat::evidence::Evidence;
-use wasm4pm_compat::state::Raw;
+
+use dashmap::DashMap;
+use osx_clnr::{
+    domain::{
+        artifact::{
+            artifact_candidates_from_snapshot, detect_project_from_snapshot, ArgsSnapshot,
+            Candidate,
+        },
+        audit::Stats,
+        delete::{validate_plan_item, DeletionPlanAdjudicator, PlanSafetyWitness},
+        plan::{DeletionPlan, PlanItem, PlanItemKind},
+        receipt::{DeletionReceipt, DeletionStatus},
+    },
+    integration::fs::{delete_dir_all, delete_file, read_dir_snapshot, scan_root},
+};
+use wasm4pm_compat::{admission::Admit, evidence::Evidence, state::Raw};
 
 #[test]
 fn test_project_detection_and_candidates() {
@@ -64,16 +68,10 @@ fn test_plan_bound_deletion_validation() {
     );
 
     // Should validate the target path successfully
-    assert!(validate_plan_item(
-        Path::new("/Users/user/dev/project/target"),
-        &plan
-    ));
+    assert!(validate_plan_item(Path::new("/Users/user/dev/project/target"), &plan));
 
     // Should reject random files not present in the plan
-    assert!(!validate_plan_item(
-        Path::new("/Users/user/dev/project/src/main.rs"),
-        &plan
-    ));
+    assert!(!validate_plan_item(Path::new("/Users/user/dev/project/src/main.rs"), &plan));
 
     // Should refuse system folders even if manually injected into the plan
     let mut bad_plan = plan.clone();
@@ -83,10 +81,8 @@ fn test_plan_bound_deletion_validation() {
         reason: "fake target".to_string(),
         bytes: 0,
     });
-    assert!(
-        DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(bad_plan))
-            .is_err()
-    );
+    assert!(DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(bad_plan))
+        .is_err());
 }
 
 #[test]
@@ -133,16 +129,8 @@ fn test_end_to_end_artifact_scan_build_delete() {
     let stats = Arc::new(Stats::default());
     let tool_accs = Arc::new(DashMap::new());
 
-    scan_root(
-        root,
-        &args,
-        candidates.clone(),
-        stats.clone(),
-        &[],
-        tool_accs.clone(),
-        None,
-    )
-    .unwrap();
+    scan_root(root, &args, candidates.clone(), stats.clone(), &[], tool_accs.clone(), None)
+        .unwrap();
 
     let mut cand_list: Vec<Candidate> = candidates.iter().map(|e| e.value().clone()).collect();
     cand_list.sort();
@@ -155,11 +143,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
     // 3. Build deletion plan
     let mut plan_items = Vec::new();
     for c in &cand_list {
-        let kind = if c.path.is_file() {
-            PlanItemKind::File
-        } else {
-            PlanItemKind::Dir
-        };
+        let kind = if c.path.is_file() { PlanItemKind::File } else { PlanItemKind::Dir };
         plan_items.push(PlanItem {
             path: c.path.clone(),
             kind,
@@ -169,10 +153,10 @@ fn test_end_to_end_artifact_scan_build_delete() {
     }
 
     let plan = DeletionPlan::new(vec![root.to_path_buf()], true, true, plan_items, vec![]);
-    assert!(
-        DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(plan.clone()))
-            .is_ok()
-    );
+    assert!(DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(
+        plan.clone()
+    ))
+    .is_ok());
 
     // 4. Execute deletion strictly matching domain deletion rules
     let start_time = std::time::SystemTime::now()
@@ -255,11 +239,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
     let receipt =
         DeletionReceipt::new(plan.created_unix, start_time, end_time, results, None, None);
     assert_eq!(receipt.execution_record.results.len(), 2);
-    assert!(receipt
-        .execution_record
-        .results
-        .iter()
-        .all(|r| r.status == DeletionStatus::Deleted));
+    assert!(receipt.execution_record.results.iter().all(|r| r.status == DeletionStatus::Deleted));
 
     // Verify files were actually deleted from filesystem
     assert!(!rust_target.exists());
@@ -320,14 +300,8 @@ fn test_exclusions_plan_writing() {
     fs::create_dir(&mock_dir).unwrap();
 
     let candidates = vec![
-        Candidate {
-            path: mock_dir.clone(),
-            reason: "Mock npm cache".to_string(),
-        },
-        Candidate {
-            path: tmp.path().join("nonexistent-dir"),
-            reason: "Nonexistent".to_string(),
-        },
+        Candidate { path: mock_dir.clone(), reason: "Mock npm cache".to_string() },
+        Candidate { path: tmp.path().join("nonexistent-dir"), reason: "Nonexistent".to_string() },
     ];
 
     write_tm_exclusions_script(&script_path, &candidates).unwrap();
@@ -363,13 +337,8 @@ fn test_tool_root_recommendation_logic() {
     };
 
     // Stale and very large npm cache -> cleanup_candidate
-    let (rec_npm, _) = recommend_tool_root(
-        &npm_def,
-        50 * 1024 * 1024 * 1024,
-        Some(100),
-        Some(100),
-        Some(100),
-    );
+    let (rec_npm, _) =
+        recommend_tool_root(&npm_def, 50 * 1024 * 1024 * 1024, Some(100), Some(100), Some(100));
     assert_eq!(rec_npm, "cleanup_candidate");
 
     // Fresh and small npm cache -> low_priority
@@ -377,31 +346,24 @@ fn test_tool_root_recommendation_logic() {
     assert_eq!(rec_npm_fresh, "low_priority");
 
     // Stale docker container state -> review_with_tool
-    let (rec_doc, _) = recommend_tool_root(
-        &docker_def,
-        15 * 1024 * 1024 * 1024,
-        Some(90),
-        Some(90),
-        Some(90),
-    );
+    let (rec_doc, _) =
+        recommend_tool_root(&docker_def, 15 * 1024 * 1024 * 1024, Some(90), Some(90), Some(90));
     assert_eq!(rec_doc, "review_with_tool");
 
     // Kubernetes config -> always keep
-    let (rec_kube, _) = recommend_tool_root(
-        &kube_def,
-        50 * 1024 * 1024 * 1024,
-        Some(100),
-        Some(100),
-        Some(100),
-    );
+    let (rec_kube, _) =
+        recommend_tool_root(&kube_def, 50 * 1024 * 1024 * 1024, Some(100), Some(100), Some(100));
     assert_eq!(rec_kube, "keep");
 }
 
 #[test]
 fn test_receipt_verification_and_plan_correlation() {
-    use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-    use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
     use std::fs;
+
+    use osx_clnr::domain::{
+        plan::{DeletionPlan, PlanItem, PlanItemKind},
+        receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType},
+    };
 
     let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
     let file_to_delete = tmp.path().join("should_be_deleted.txt");
@@ -475,10 +437,7 @@ fn test_receipt_verification_and_plan_correlation() {
     );
     let report3 = mismatched_receipt.verify(Some(&plan));
     assert!(!report3.is_consistent);
-    assert!(report3
-        .issues
-        .iter()
-        .any(|i| i.issue_type == IssueType::ExtraReceiptItem));
+    assert!(report3.issues.iter().any(|i| i.issue_type == IssueType::ExtraReceiptItem));
 }
 
 #[test]
@@ -544,10 +503,7 @@ fn test_no_false_positive_within_tolerance() {
         "within-tolerance delta must stay consistent, got issues: {:?}",
         report.issues
     );
-    assert!(!report
-        .issues
-        .iter()
-        .any(|i| i.issue_type == IssueType::BytesFreedMismatch));
+    assert!(!report.issues.iter().any(|i| i.issue_type == IssueType::BytesFreedMismatch));
 }
 
 #[test]
@@ -580,18 +536,17 @@ fn test_back_compat_none_samples_no_mismatch() {
         report.issues
     );
     assert!(
-        !report
-            .issues
-            .iter()
-            .any(|i| i.issue_type == IssueType::BytesFreedMismatch),
+        !report.issues.iter().any(|i| i.issue_type == IssueType::BytesFreedMismatch),
         "None samples must NOT raise BytesFreedMismatch (back-compat)"
     );
 }
 
 #[test]
 fn test_bytes_freed_mismatch_plan_bound_deleted_results() {
-    use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-    use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType};
+    use osx_clnr::domain::{
+        plan::{DeletionPlan, PlanItem, PlanItemKind},
+        receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType},
+    };
 
     // Plan-bound refusal: two Deleted results summing to 3 GB (> 2 GB), but the
     // volume free-space delta is zero (available_before == available_after).
@@ -661,8 +616,7 @@ fn test_ocel_validation_and_summarization() {
     use osx_clnr::domain::ocel::{
         build_tool_roots_ocel, summarize_ocel_log, OCELRelationship, OcelLogAdjudicator,
     };
-    use wasm4pm_compat::admission::Admit;
-    use wasm4pm_compat::evidence::Evidence;
+    use wasm4pm_compat::{admission::Admit, evidence::Evidence};
 
     // 1. Valid empty log
     let log = build_tool_roots_ocel(&[]);
@@ -678,10 +632,7 @@ fn test_ocel_validation_and_summarization() {
     invalid_log.events[0].event_type = "non_existent_event_type".to_string();
     let report2 = OcelLogAdjudicator::admit(Evidence::raw(invalid_log));
     assert!(report2.is_err());
-    assert!(report2
-        .unwrap_err()
-        .reason
-        .contains("is not defined in eventTypes schema"));
+    assert!(report2.unwrap_err().reason.contains("is not defined in eventTypes schema"));
 
     // 3. Referential integrity violation - dangling object reference
     let mut invalid_log2 = log.clone();
@@ -691,10 +642,7 @@ fn test_ocel_validation_and_summarization() {
     });
     let report3 = OcelLogAdjudicator::admit(Evidence::raw(invalid_log2));
     assert!(report3.is_err());
-    assert!(report3
-        .unwrap_err()
-        .reason
-        .contains("pointing to non-existent object"));
+    assert!(report3.unwrap_err().reason.contains("pointing to non-existent object"));
 }
 
 #[test]
@@ -703,8 +651,7 @@ fn test_snapshot_and_exclusion_ocel_generation() {
         build_exclusion_plan_ocel, build_snapshot_audit_ocel, build_snapshot_thin_ocel,
         OcelLogAdjudicator,
     };
-    use wasm4pm_compat::admission::Admit;
-    use wasm4pm_compat::evidence::Evidence;
+    use wasm4pm_compat::{admission::Admit, evidence::Evidence};
 
     // Test snapshot audit OCEL
     let audit_log = build_snapshot_audit_ocel(
@@ -712,16 +659,10 @@ fn test_snapshot_and_exclusion_ocel_generation() {
         &["com.apple.TimeMachine.2026-05-26.local".to_string()],
     );
     println!("Object Types in Test: {:?}", audit_log.object_types);
-    println!(
-        "AUDIT_LOG_JSON: {}",
-        serde_json::to_string_pretty(&audit_log).unwrap()
-    );
+    println!("AUDIT_LOG_JSON: {}", serde_json::to_string_pretty(&audit_log).unwrap());
     let audit_report = OcelLogAdjudicator::admit(Evidence::raw(audit_log.clone()));
     if audit_report.is_err() {
-        println!(
-            "OCEL Validation Errors: {:?}",
-            audit_report.as_ref().err().unwrap().reason
-        );
+        println!("OCEL Validation Errors: {:?}", audit_report.as_ref().err().unwrap().reason);
     }
     assert!(audit_report.is_ok());
     assert_eq!(audit_log.objects[0].object_type, "snapshot_state");
@@ -745,17 +686,18 @@ fn test_snapshot_and_exclusion_ocel_generation() {
     let exclusion_report = OcelLogAdjudicator::admit(Evidence::raw(exclusion_log.clone()));
     assert!(exclusion_report.is_ok());
     assert_eq!(exclusion_log.objects[0].object_type, "tm_exclusion_plan");
-    assert_eq!(
-        exclusion_log.events[0].event_type,
-        "tm_exclusion_plan_written"
-    );
+    assert_eq!(exclusion_log.events[0].event_type, "tm_exclusion_plan_written");
 }
 
 #[test]
 fn test_exclusion_planning_and_application() {
-    use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-    use osx_clnr::domain::tool_roots::ToolRootReport;
-    use osx_clnr::nouns::exclusion::{handle, ExclusionAction};
+    use osx_clnr::{
+        domain::{
+            plan::{DeletionPlan, PlanItem, PlanItemKind},
+            tool_roots::ToolRootReport,
+        },
+        nouns::exclusion::{handle, ExclusionAction},
+    };
 
     let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
     let plan_path = tmp.path().join("deletion-plan.json");
@@ -794,22 +736,12 @@ fn test_exclusion_planning_and_application() {
         rationale: "mock cache".to_string(),
     }];
 
-    let plan = DeletionPlan::new(
-        vec![tmp.path().to_path_buf()],
-        false,
-        false,
-        items,
-        tool_roots,
-    );
+    let plan = DeletionPlan::new(vec![tmp.path().to_path_buf()], false, false, items, tool_roots);
     let plan_json = serde_json::to_string(&plan).unwrap();
     fs::write(&plan_path, plan_json).unwrap();
 
     // Run the exclusion plan action
-    let action = ExclusionAction::Plan {
-        from: plan_path,
-        output: script_path.clone(),
-        ocel: None,
-    };
+    let action = ExclusionAction::Plan { from: plan_path, output: script_path.clone(), ocel: None };
     handle(action).unwrap();
 
     assert!(script_path.exists());
@@ -833,9 +765,7 @@ fn test_privacy_subcommands() {
     .unwrap();
 
     // Test redact subcommand
-    let redact_action = PrivacyAction::Redact {
-        file: file_to_redact.clone(),
-    };
+    let redact_action = PrivacyAction::Redact { file: file_to_redact.clone() };
     handle(redact_action).unwrap();
 
     let redacted_content = fs::read_to_string(&file_to_redact).unwrap();
@@ -870,23 +800,11 @@ fn test_traversal_barriers() {
     let tool_defs = vec![];
     let tool_accs = Arc::new(DashMap::new());
 
-    scan_root(
-        root,
-        &args,
-        candidates,
-        stats.clone(),
-        &tool_defs,
-        tool_accs,
-        None,
-    )
-    .unwrap();
+    scan_root(root, &args, candidates, stats.clone(), &tool_defs, tool_accs, None).unwrap();
 
     // Traversal should stop at node_modules and NOT enter nested-pkg/dist
     let pruned = stats.pruned_dirs.load(std::sync::atomic::Ordering::Relaxed);
-    assert!(
-        pruned >= 1,
-        "Expected traversal barrier to prune node_modules"
-    );
+    assert!(pruned >= 1, "Expected traversal barrier to prune node_modules");
 }
 
 #[test]
@@ -900,10 +818,7 @@ fn test_verify_unsupported_version() {
 
     let report = receipt.verify(None);
     assert!(!report.is_consistent);
-    assert!(report
-        .issues
-        .iter()
-        .any(|i| i.issue_type == IssueType::UnsupportedVersion));
+    assert!(report.issues.iter().any(|i| i.issue_type == IssueType::UnsupportedVersion));
 }
 
 #[test]
@@ -915,16 +830,15 @@ fn test_verify_invalid_timestamps() {
 
     let report = receipt.verify(None);
     assert!(!report.is_consistent);
-    assert!(report
-        .issues
-        .iter()
-        .any(|i| i.issue_type == IssueType::InvalidTimestamps));
+    assert!(report.issues.iter().any(|i| i.issue_type == IssueType::InvalidTimestamps));
 }
 
 #[test]
 fn test_verify_missing_plan_item() {
-    use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-    use osx_clnr::domain::receipt::{DeletionReceipt, IssueType};
+    use osx_clnr::domain::{
+        plan::{DeletionPlan, PlanItem, PlanItemKind},
+        receipt::{DeletionReceipt, IssueType},
+    };
 
     // Plan schedules a path that the receipt's results never mention -> the plan
     // item is missing from execution evidence.
@@ -944,10 +858,7 @@ fn test_verify_missing_plan_item() {
 
     let report = receipt.verify(Some(&plan));
     assert!(!report.is_consistent);
-    assert!(report
-        .issues
-        .iter()
-        .any(|i| i.issue_type == IssueType::MissingPlanItem));
+    assert!(report.issues.iter().any(|i| i.issue_type == IssueType::MissingPlanItem));
 }
 
 #[test]
@@ -964,21 +875,12 @@ fn test_check_reclaim_shared_law() {
     // the emergency path warns on and verify() flags as BytesFreedMismatch).
     assert_eq!(
         check_reclaim(3_000_000_000, Some(7_000_000_000), Some(7_000_000_000)),
-        ReclaimCheck::Shortfall {
-            claimed: 3_000_000_000,
-            measured: 0
-        }
+        ReclaimCheck::Shortfall { claimed: 3_000_000_000, measured: 0 }
     );
 
     // NotApplicable: below the 1 GB witness floor, and missing samples (back-compat).
-    assert_eq!(
-        check_reclaim(500_000_000, Some(0), Some(0)),
-        ReclaimCheck::NotApplicable
-    );
-    assert_eq!(
-        check_reclaim(5_000_000_000, None, None),
-        ReclaimCheck::NotApplicable
-    );
+    assert_eq!(check_reclaim(500_000_000, Some(0), Some(0)), ReclaimCheck::NotApplicable);
+    assert_eq!(check_reclaim(5_000_000_000, None, None), ReclaimCheck::NotApplicable);
 }
 
 #[test]
@@ -989,9 +891,10 @@ fn test_size_string_roundtrip_convention_resolved() {
     // are inverses on the SAME base, so the round-trip is lossless at unit
     // boundaries. This test now witnesses CONVERGENCE; if either side ever drifts
     // back to binary/1024, the round-trip breaks here and forces a conscious fix.
-    use osx_clnr::domain::time::parse_size_in_bytes;
-    use osx_clnr::domain::tool_roots::human_bytes as hb_domain;
-    use osx_clnr::integration::progress::human_bytes as hb_integration;
+    use osx_clnr::{
+        domain::{time::parse_size_in_bytes, tool_roots::human_bytes as hb_domain},
+        integration::progress::human_bytes as hb_integration,
+    };
 
     assert_eq!(parse_size_in_bytes("1GB"), Ok(1_000_000_000));
 
@@ -1013,8 +916,7 @@ fn test_snapshot_delete_ocel_is_truthfully_typed() {
     use osx_clnr::domain::ocel::{
         build_snapshot_delete_ocel, build_snapshot_thin_ocel, OcelLogAdjudicator,
     };
-    use wasm4pm_compat::admission::Admit;
-    use wasm4pm_compat::evidence::Evidence;
+    use wasm4pm_compat::{admission::Admit, evidence::Evidence};
 
     let before = vec!["snap-a".to_string(), "snap-b".to_string()];
     let after = vec!["snap-b".to_string()];
@@ -1028,17 +930,11 @@ fn test_snapshot_delete_ocel_is_truthfully_typed() {
     // Truthfully typed — a delete, not a thin.
     assert_eq!(delete_log.events[0].event_type, "snapshot_delete_requested");
     assert_eq!(delete_log.objects[0].object_type, "snapshot_state");
-    assert!(delete_log.events[0]
-        .attributes
-        .iter()
-        .any(|a| a.name == "deleted_count"));
+    assert!(delete_log.events[0].attributes.iter().any(|a| a.name == "deleted_count"));
 
     // The two operations are now distinguishable in the log.
     let thin_log = build_snapshot_thin_ocel("/", 500_000_000, &before, &after, &deleted);
-    assert_ne!(
-        delete_log.events[0].event_type,
-        thin_log.events[0].event_type
-    );
+    assert_ne!(delete_log.events[0].event_type, thin_log.events[0].event_type);
 }
 
 /// Concurrency regression test for `scan_root` over multiple roots.
@@ -1063,10 +959,7 @@ fn test_concurrent_root_scans_match_sequential_baseline() {
         // Old mtimes so `ignore_recent_hours` filtering doesn't drop the candidate.
         let _ = std::process::Command::new("sh")
             .arg("-c")
-            .arg(format!(
-                "find '{}' -exec touch -t 202001010000 {{}} +",
-                proj.display()
-            ))
+            .arg(format!("find '{}' -exec touch -t 202001010000 {{}} +", proj.display()))
             .status();
 
         tmp
@@ -1128,28 +1021,16 @@ fn test_concurrent_root_scans_match_sequential_baseline() {
 
     assert_eq!(seq_cands, conc_cands);
     assert_eq!(
-        seq_stats
-            .files_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
-        conc_stats
-            .files_seen
-            .load(std::sync::atomic::Ordering::Relaxed)
+        seq_stats.files_seen.load(std::sync::atomic::Ordering::Relaxed),
+        conc_stats.files_seen.load(std::sync::atomic::Ordering::Relaxed)
     );
     assert_eq!(
-        seq_stats
-            .dirs_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
-        conc_stats
-            .dirs_seen
-            .load(std::sync::atomic::Ordering::Relaxed)
+        seq_stats.dirs_seen.load(std::sync::atomic::Ordering::Relaxed),
+        conc_stats.dirs_seen.load(std::sync::atomic::Ordering::Relaxed)
     );
     assert_eq!(
-        seq_stats
-            .candidates_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
-        conc_stats
-            .candidates_seen
-            .load(std::sync::atomic::Ordering::Relaxed)
+        seq_stats.candidates_seen.load(std::sync::atomic::Ordering::Relaxed),
+        conc_stats.candidates_seen.load(std::sync::atomic::Ordering::Relaxed)
     );
 }
 
@@ -1203,10 +1084,7 @@ fn test_repeat_scan_with_cache_matches_first_scan() {
     // directory to hit the cache).
     let _ = std::process::Command::new("sh")
         .arg("-c")
-        .arg(format!(
-            "find '{}' -exec touch -t 202001010000 {{}} +",
-            root.display()
-        ))
+        .arg(format!("find '{}' -exec touch -t 202001010000 {{}} +", root.display()))
         .status();
 
     let args = ArgsSnapshot {
@@ -1258,45 +1136,26 @@ fn test_repeat_scan_with_cache_matches_first_scan() {
         second_candidates.iter().map(|e| e.key().clone()).collect();
     second_cands.sort();
 
-    assert_eq!(
-        first_cands, second_cands,
-        "cache-hit repeat scan must not drop or add candidates"
-    );
+    assert_eq!(first_cands, second_cands, "cache-hit repeat scan must not drop or add candidates");
 
     assert_eq!(
-        first_stats
-            .files_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
-        second_stats
-            .files_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
+        first_stats.files_seen.load(std::sync::atomic::Ordering::Relaxed),
+        second_stats.files_seen.load(std::sync::atomic::Ordering::Relaxed),
         "cache-hit repeat scan must not undercount files_seen"
     );
     assert_eq!(
-        first_stats
-            .bytes_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
-        second_stats
-            .bytes_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
+        first_stats.bytes_seen.load(std::sync::atomic::Ordering::Relaxed),
+        second_stats.bytes_seen.load(std::sync::atomic::Ordering::Relaxed),
         "cache-hit repeat scan must not undercount bytes_seen"
     );
     assert_eq!(
-        first_stats
-            .dirs_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
-        second_stats
-            .dirs_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
+        first_stats.dirs_seen.load(std::sync::atomic::Ordering::Relaxed),
+        second_stats.dirs_seen.load(std::sync::atomic::Ordering::Relaxed),
         "cache-hit repeat scan must not undercount dirs_seen"
     );
     assert_eq!(
-        first_stats
-            .candidates_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
-        second_stats
-            .candidates_seen
-            .load(std::sync::atomic::Ordering::Relaxed),
+        first_stats.candidates_seen.load(std::sync::atomic::Ordering::Relaxed),
+        second_stats.candidates_seen.load(std::sync::atomic::Ordering::Relaxed),
         "cache-hit repeat scan must not undercount candidates_seen"
     );
 }

@@ -1,18 +1,24 @@
 //! Artifact CLI noun implementation.
 
+use std::{
+    path::PathBuf,
+    sync::{atomic::Ordering, Arc},
+};
+
 use clap::Subcommand;
 use dashmap::DashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 
-use crate::domain::artifact::{ArgsSnapshot, Candidate};
-use crate::domain::audit::Stats;
-use crate::domain::tool_roots::build_tool_root_defs;
-use crate::integration::fs::scan_root;
-use crate::integration::progress::ProgressReporter;
-
-use crate::integration::progress::human_bytes;
-use std::sync::atomic::Ordering;
+use crate::{
+    domain::{
+        artifact::{ArgsSnapshot, Candidate},
+        audit::Stats,
+        tool_roots::build_tool_root_defs,
+    },
+    integration::{
+        fs::scan_root,
+        progress::{human_bytes, ProgressReporter},
+    },
+};
 
 #[derive(Subcommand, Debug)]
 pub enum ArtifactAction {
@@ -38,26 +44,11 @@ pub enum ArtifactAction {
 
 pub fn handle(action: ArtifactAction) -> anyhow::Result<()> {
     match action {
-        ArtifactAction::Scan {
-            root,
-            deps,
-            aggressive,
-            ignore_recent_hours,
-            verbose,
-        } => {
-            let roots = if root.is_empty() {
-                crate::nouns::default_scan_roots()?
-            } else {
-                root
-            };
+        ArtifactAction::Scan { root, deps, aggressive, ignore_recent_hours, verbose } => {
+            let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
-            let args = ArgsSnapshot {
-                deps,
-                aggressive,
-                verbose,
-                tool_roots: false,
-                ignore_recent_hours,
-            };
+            let args =
+                ArgsSnapshot { deps, aggressive, verbose, tool_roots: false, ignore_recent_hours };
 
             let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
             let stats = Arc::new(Stats::default());

@@ -1,7 +1,15 @@
 [package]
 name = "cfab-surface"
-version = "0.1.0"
+version = "26.7.0"
 edition = "2021"
+rust-version = "1.83"
+license = "MIT OR Apache-2.0"
+description = "SurfaceGraph fabric visualization for osx-clnr."
+repository = "https://github.com/seanchatmangpt/mac-artifact-cleaner"
+publish = false
+
+[lints]
+workspace = true
 
 [dependencies]
 petgraph = { version = "0.6", features = ["serde-1"] }

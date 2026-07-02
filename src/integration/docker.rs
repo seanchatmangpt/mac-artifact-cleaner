@@ -76,9 +76,8 @@ fn run_df() -> Result<Vec<DfLine>> {
         anyhow::bail!("Docker not available");
     }
 
-    let output = std::process::Command::new("docker")
-        .args(["system", "df", "--format", "json"])
-        .output()?;
+    let output =
+        std::process::Command::new("docker").args(["system", "df", "--format", "json"]).output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

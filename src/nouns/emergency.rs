@@ -13,15 +13,20 @@
 //!   * then sweeps a *curated allowlist* of regenerable caches discovered with
 //!     cheap `stat`s rather than a full scan.
 
-use crate::domain::artifact::{global_cache_candidates, is_macos_os_dir};
-use crate::domain::receipt::{check_reclaim, ReclaimCheck};
-use crate::domain::time::select_oldest_snapshots;
-use crate::integration::fs::{delete_dir_all, physical_dir_size, volume_space};
-use crate::integration::progress::human_bytes;
-use crate::integration::tmutil::{
-    delete_local_snapshot, list_local_snapshots, thin_local_snapshots,
-};
 use std::path::{Path, PathBuf};
+
+use crate::{
+    domain::{
+        artifact::{global_cache_candidates, is_macos_os_dir},
+        receipt::{check_reclaim, ReclaimCheck},
+        time::select_oldest_snapshots,
+    },
+    integration::{
+        fs::{delete_dir_all, physical_dir_size, volume_space},
+        progress::human_bytes,
+        tmutil::{delete_local_snapshot, list_local_snapshots, thin_local_snapshots},
+    },
+};
 
 /// Prints free space and returns available bytes (for before/after deltas).
 fn report_space(mount: &str) -> Option<u64> {
@@ -46,14 +51,7 @@ fn report_space(mount: &str) -> Option<u64> {
 pub fn handle(mount: String, yes: bool, receipt: Option<PathBuf>) -> anyhow::Result<()> {
     println!("==================================================");
     println!("            EMERGENCY DISK RECLAIM                ");
-    println!(
-        "  Mode: {}",
-        if yes {
-            "EXECUTE (--yes)"
-        } else {
-            "DRY-RUN (pass --yes to reclaim)"
-        }
-    );
+    println!("  Mode: {}", if yes { "EXECUTE (--yes)" } else { "DRY-RUN (pass --yes to reclaim)" });
     println!("==================================================");
 
     println!("Starting free space:");
@@ -82,10 +80,7 @@ pub fn handle(mount: String, yes: bool, receipt: Option<PathBuf>) -> anyhow::Res
         println!("    After snapshot reclaim:");
         report_space(&mount);
     } else if !snaps.is_empty() {
-        println!(
-            "    (dry-run) would thin + delete {} snapshot(s)",
-            snaps.len()
-        );
+        println!("    (dry-run) would thin + delete {} snapshot(s)", snaps.len());
     }
 
     // ── Step 2: curated cache sweep ─────────────────────────────────────────
@@ -112,28 +107,17 @@ pub fn handle(mount: String, yes: bool, receipt: Option<PathBuf>) -> anyhow::Res
             }
         } else {
             swept_bytes += size;
-            println!(
-                "    would clear {:>10}  {}",
-                human_bytes(size),
-                path.display()
-            );
+            println!("    would clear {:>10}  {}", human_bytes(size), path.display());
         }
     }
-    println!(
-        "    {} {}",
-        if yes { "Cleared" } else { "Reclaimable" },
-        human_bytes(swept_bytes)
-    );
+    println!("    {} {}", if yes { "Cleared" } else { "Reclaimable" }, human_bytes(swept_bytes));
 
     // ── Summary ─────────────────────────────────────────────────────────────
     println!("\n==================================================");
     println!("Ending free space:");
     let end_avail = report_space(&mount);
     if let (Some(start), Some(end)) = (start_avail, end_avail) {
-        println!(
-            "Total reclaimed this run: {}",
-            human_bytes(end.saturating_sub(start))
-        );
+        println!("Total reclaimed this run: {}", human_bytes(end.saturating_sub(start)));
     }
     if !yes {
         println!("\nThis was a DRY-RUN. Re-run with --yes to reclaim the space above.");
@@ -178,10 +162,7 @@ pub fn handle(mount: String, yes: bool, receipt: Option<PathBuf>) -> anyhow::Res
             .and_then(|s| std::fs::write(&r_path, s).map_err(anyhow::Error::from))
         {
             Ok(()) => println!("Wrote emergency receipt to: {}", r_path.display()),
-            Err(e) => eprintln!(
-                "warning: could not write receipt (disk still tight?): {}",
-                e
-            ),
+            Err(e) => eprintln!("warning: could not write receipt (disk still tight?): {}", e),
         }
     }
 

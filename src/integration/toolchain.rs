@@ -1,8 +1,9 @@
 //! Rust toolchain and language package manager analysis.
 
+use std::process::Command;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RustToolchain {
@@ -35,9 +36,7 @@ pub fn rustup_available() -> bool {
 
 /// Lists installed Rust toolchains and the size of ~/.rustup.
 pub fn list_rust_toolchains() -> Result<ToolchainScanResult> {
-    let output = Command::new("rustup")
-        .args(["toolchain", "list"])
-        .output()?;
+    let output = Command::new("rustup").args(["toolchain", "list"]).output()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let toolchains: Vec<RustToolchain> = stdout
@@ -52,10 +51,7 @@ pub fn list_rust_toolchains() -> Result<ToolchainScanResult> {
 
     let rustup_home_bytes = rustup_home_size();
 
-    Ok(ToolchainScanResult {
-        toolchains,
-        rustup_home_bytes,
-    })
+    Ok(ToolchainScanResult { toolchains, rustup_home_bytes })
 }
 
 fn rustup_home_size() -> u64 {
@@ -73,10 +69,7 @@ fn rustup_home_size() -> u64 {
         return 0;
     }
 
-    let output = Command::new("du")
-        .args(["-sk", path.to_str().unwrap_or("")])
-        .output()
-        .ok();
+    let output = Command::new("du").args(["-sk", path.to_str().unwrap_or("")]).output().ok();
 
     if let Some(out) = output {
         let text = String::from_utf8_lossy(&out.stdout);
@@ -96,9 +89,7 @@ pub fn npm_available() -> bool {
 
 /// Lists globally installed npm packages.
 pub fn list_npm_global_packages() -> Result<Vec<NpmGlobalPackage>> {
-    let output = Command::new("npm")
-        .args(["list", "-g", "--depth", "0", "--json"])
-        .output()?;
+    let output = Command::new("npm").args(["list", "-g", "--depth", "0", "--json"]).output()?;
 
     if !output.status.success() && output.stdout.is_empty() {
         return Ok(vec![]);
@@ -118,15 +109,9 @@ pub fn list_npm_global_packages() -> Result<Vec<NpmGlobalPackage>> {
     let packages = deps
         .iter()
         .map(|(name, info)| {
-            let version = info
-                .get("version")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string();
-            NpmGlobalPackage {
-                name: name.clone(),
-                version,
-            }
+            let version =
+                info.get("version").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+            NpmGlobalPackage { name: name.clone(), version }
         })
         .collect();
 
@@ -144,11 +129,7 @@ pub fn list_pip_packages() -> Result<Vec<PipPackage>> {
     let output = Command::new("pip3")
         .args(["list", "--format", "json"])
         .output()
-        .or_else(|_| {
-            Command::new("pip")
-                .args(["list", "--format", "json"])
-                .output()
-        });
+        .or_else(|_| Command::new("pip").args(["list", "--format", "json"]).output());
 
     let output = match output {
         Ok(o) => o,

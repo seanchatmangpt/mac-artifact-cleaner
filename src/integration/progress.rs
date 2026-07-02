@@ -1,12 +1,18 @@
 //! Progress indication spinner and progress bar.
 
-use crate::domain::audit::Stats;
+use std::{
+    io::IsTerminal,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
+};
+
 use indicatif::{ProgressBar, ProgressStyle};
-use std::io::IsTerminal;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+
+use crate::domain::audit::Stats;
 
 pub struct ProgressReporter {
     stop: Arc<AtomicBool>,
@@ -88,11 +94,7 @@ impl ProgressReporter {
             }
         });
 
-        Self {
-            stop,
-            join: Some(join),
-            pb,
-        }
+        Self { stop, join: Some(join), pb }
     }
 
     pub fn finish(mut self, message: &str) {
@@ -168,10 +170,8 @@ pub fn parse_human_size(s: &str) -> u64 {
     for (i, token) in tokens.iter().enumerate() {
         // Split the token itself at the number/suffix boundary, so a token
         // like "2.1GB" becomes ("2.1", "GB").
-        let split_pos = token
-            .rfind(|c: char| c.is_ascii_digit() || c == '.')
-            .map(|p| p + 1)
-            .unwrap_or(0);
+        let split_pos =
+            token.rfind(|c: char| c.is_ascii_digit() || c == '.').map(|p| p + 1).unwrap_or(0);
         let (num_part, suffix) = token.split_at(split_pos);
 
         let Ok(value) = num_part.parse::<f64>() else {

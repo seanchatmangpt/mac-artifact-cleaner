@@ -4,6 +4,8 @@
 
 Unlike traditional cleaners that blindly execute `rm -rf` from a live scan, `osx-clnr` enforces a strict, multi-phase execution pipeline: never increase destructive power without simultaneously increasing receipts.
 
+**First praxis project.** osx-clnr is the reference implementation of the [praxis](https://github.com/seanchatmangpt/praxis) house standard: CalVer (`26.7.0`), dual `MIT OR Apache-2.0` license, workspace lints, rustfmt/deny/typos, pinned toolchain, canonical `justfile`, macOS CI, `osxclnr.toml` policy admitted via [star-toml](https://crates.io/crates/star-toml) `TrustedLoader`, and a `cicd.toml` for cargo-cicd.
+
 ## The Old Computing Gap
 
 Since the beginning of practical computing, machines have separated syntax from consequence.

@@ -16,11 +16,14 @@
 //! assert!(handle(action).is_err());
 //! ```
 
-use crate::domain::doctor::diagnose_privacy;
-use crate::domain::redaction::redact_content;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use clap::Subcommand;
-use std::fs;
-use std::path::{Path, PathBuf};
+
+use crate::domain::{doctor::diagnose_privacy, redaction::redact_content};
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum PrivacyAction {

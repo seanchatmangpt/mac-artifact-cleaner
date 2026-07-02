@@ -1,7 +1,8 @@
 //! Xcode simulator and DerivedData noun.
 
-use crate::integration::progress::human_bytes as format_bytes;
 use clap::Subcommand;
+
+use crate::integration::progress::human_bytes as format_bytes;
 
 #[derive(Subcommand, Debug)]
 pub enum XcodeAction {
@@ -31,11 +32,8 @@ fn handle_simulators() -> anyhow::Result<()> {
     println!("Simulator Runtimes:");
     println!("{:-<60}", "");
     for rt in &result.runtimes {
-        let avail = if rt.is_available {
-            "available"
-        } else {
-            "UNAVAILABLE - candidate for deletion"
-        };
+        let avail =
+            if rt.is_available { "available" } else { "UNAVAILABLE - candidate for deletion" };
         let size = format_bytes(rt.size_bytes);
         println!("  {} ({}) — {} [{}]", rt.name, rt.version, size, avail);
         if let Some(p) = &rt.path {
@@ -57,10 +55,7 @@ fn handle_derived_data() -> anyhow::Result<()> {
         .join("Library/Developer/Xcode/DerivedData");
 
     if !derived_data.exists() {
-        println!(
-            "DerivedData directory not found: {}",
-            derived_data.display()
-        );
+        println!("DerivedData directory not found: {}", derived_data.display());
         return Ok(());
     }
 

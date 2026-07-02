@@ -2,10 +2,14 @@
 //!
 //! Spawns oclnr as a subprocess and handles output parsing.
 
-use super::error::{ErrorCode, ErrorResponse};
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+};
+
 use serde_json::Value;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+
+use super::error::{ErrorCode, ErrorResponse};
 
 /// Result of subprocess execution
 #[derive(Debug, Clone)]
@@ -91,16 +95,14 @@ impl OclnrRunner {
             cmd.arg("--aggressive");
         }
         if ignore_recent_hours > 0 {
-            cmd.arg("--ignore-recent-hours")
-                .arg(ignore_recent_hours.to_string());
+            cmd.arg("--ignore-recent-hours").arg(ignore_recent_hours.to_string());
         }
         if tool_roots {
             cmd.arg("--tool-roots");
         }
 
         // Write OCEL output to disk-audit.jsonocel
-        cmd.arg("--ocel-output")
-            .arg(workspace.join("disk-audit.jsonocel"));
+        cmd.arg("--ocel-output").arg(workspace.join("disk-audit.jsonocel"));
 
         self.run_command(cmd, "oclnr audit run")
     }
@@ -232,9 +234,8 @@ impl OclnrRunner {
     #[allow(clippy::result_large_err)]
     fn run_command(&self, cmd: Command, name: &str) -> Result<SubprocessResult, ErrorResponse> {
         let mut cmd = cmd;
-        let output = cmd
-            .output()
-            .map_err(|e| ErrorResponse::subprocess_failed(name, &e.to_string()))?;
+        let output =
+            cmd.output().map_err(|e| ErrorResponse::subprocess_failed(name, &e.to_string()))?;
 
         Ok(SubprocessResult {
             status: output.status.code().unwrap_or(-1),
@@ -289,21 +290,15 @@ mod tests {
 
     #[test]
     fn test_subprocess_result_success() {
-        let result = SubprocessResult {
-            status: 0,
-            stdout: "success".to_string(),
-            stderr: String::new(),
-        };
+        let result =
+            SubprocessResult { status: 0, stdout: "success".to_string(), stderr: String::new() };
         assert!(result.success());
     }
 
     #[test]
     fn test_subprocess_result_failure() {
-        let result = SubprocessResult {
-            status: 1,
-            stdout: String::new(),
-            stderr: "error".to_string(),
-        };
+        let result =
+            SubprocessResult { status: 1, stdout: String::new(), stderr: "error".to_string() };
         assert!(!result.success());
     }
 

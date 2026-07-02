@@ -26,18 +26,16 @@ pub mod wpm;
 pub mod wpm_use_cases;
 pub mod xcode;
 
-use crate::domain::policy::OclnrPolicy;
+use std::{path::PathBuf, sync::OnceLock};
+
 use clap::{Parser, Subcommand};
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+
+use crate::domain::policy::OclnrPolicy;
 
 pub static POLICY: OnceLock<OclnrPolicy> = OnceLock::new();
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "oclnr",
-    about = "Pentecost: macOS developer disk auditor and cleanup utility"
-)]
+#[command(name = "oclnr", about = "Pentecost: macOS developer disk auditor and cleanup utility")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -212,20 +210,11 @@ pub fn default_scan_roots() -> anyhow::Result<Vec<PathBuf>> {
 pub fn handle_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let policy = if let Some(path) = cli.policy {
-        OclnrPolicy::load_from_file(&path)?
-    } else {
-        let default_path = Path::new("osxclnr.toml");
-        if default_path.exists() {
-            OclnrPolicy::load_from_file(default_path)?
-        } else {
-            OclnrPolicy::default()
-        }
-    };
+    // Policy is admitted through star-toml (Raw → Validated → Admitted);
+    // loading and all filesystem access live in the integration layer.
+    let policy = crate::integration::config::load_policy(cli.policy.as_deref())?;
 
-    POLICY
-        .set(policy)
-        .map_err(|_| anyhow::anyhow!("Failed to set global policy"))?;
+    POLICY.set(policy).map_err(|_| anyhow::anyhow!("Failed to set global policy"))?;
 
     match cli.command {
         Command::Wizard => wizard::handle(),
@@ -238,11 +227,7 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::Receipt { action } => receipt::handle(action),
         Command::Doctor { action } => doctor::handle(action),
         Command::Snapshot { action } => snapshot::handle(action),
-        Command::Emergency {
-            mount,
-            yes,
-            receipt,
-        } => emergency::handle(mount, yes, receipt),
+        Command::Emergency { mount, yes, receipt } => emergency::handle(mount, yes, receipt),
         Command::Exclusion { action } => exclusion::handle(action),
         Command::ToolRoots { action } => tool_roots::handle(action),
         Command::Ocel { action } => ocel::handle(action),
@@ -255,11 +240,8 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::Xcode { action } => xcode::handle(action),
         Command::Backup { action } => backup::handle(action),
         Command::Tools { action } => tools::handle(action),
-        Command::Monitor {
-            threshold_gb,
-            mount,
-            watch,
-            interval_secs,
-        } => monitor::handle(threshold_gb, mount, watch, interval_secs),
+        Command::Monitor { threshold_gb, mount, watch, interval_secs } => {
+            monitor::handle(threshold_gb, mount, watch, interval_secs)
+        }
     }
 }

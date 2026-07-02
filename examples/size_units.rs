@@ -26,10 +26,7 @@ fn main() {
     // ── integer → human ───────────────────────────────────────────────────────
     let formatted_gb = human_bytes(1_000_000_000);
     println!("format 1 GB   -> {:?}", formatted_gb);
-    assert_eq!(
-        formatted_gb, "1.00 GB",
-        "SI convention: 1_000_000_000 -> \"1.00 GB\""
-    );
+    assert_eq!(formatted_gb, "1.00 GB", "SI convention: 1_000_000_000 -> \"1.00 GB\"");
 
     let formatted_mb = human_bytes(500_000_000);
     println!("format 500 MB -> {:?}", formatted_mb);
@@ -41,10 +38,7 @@ fn main() {
     assert_eq!(rt, "1.00 GB", "round-trip must be lossless");
 
     // ── refusal: invalid input is rejected ────────────────────────────────────
-    assert!(
-        parse_size_in_bytes("notasize").is_err(),
-        "invalid input must error"
-    );
+    assert!(parse_size_in_bytes("notasize").is_err(), "invalid input must error");
     assert!(parse_size_in_bytes("").is_err(), "empty string must error");
 
     println!("size_units: all assertions passed");

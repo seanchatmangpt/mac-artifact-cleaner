@@ -2,8 +2,7 @@
 //! Integration layer for the doctor command.
 //! All filesystem reads and process spawner commands live here.
 
-use std::path::Path;
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 /// Checks the existence of key files and directories in the workspace.
 pub fn read_workspace_architecture(
@@ -19,13 +18,7 @@ pub fn read_workspace_architecture(
         main_dirs_exist.push((dir.to_string(), exists));
     }
 
-    let expected_nouns = [
-        "artifact.rs",
-        "delete.rs",
-        "plan.rs",
-        "receipt.rs",
-        "doctor.rs",
-    ];
+    let expected_nouns = ["artifact.rs", "delete.rs", "plan.rs", "receipt.rs", "doctor.rs"];
     let mut nouns_files_exist = Vec::new();
     let nouns_dir = workspace_root.join("src/nouns");
     for noun in &expected_nouns {
@@ -33,12 +26,7 @@ pub fn read_workspace_architecture(
         nouns_files_exist.push((noun.to_string(), exists));
     }
 
-    (
-        agents_md_exists,
-        cargo_toml_exists,
-        main_dirs_exist,
-        nouns_files_exist,
-    )
+    (agents_md_exists, cargo_toml_exists, main_dirs_exist, nouns_files_exist)
 }
 
 /// Checks the substrate environment.
@@ -71,11 +59,8 @@ pub fn read_doctest_files(workspace_root: &Path) -> Vec<(String, String)> {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
-                    let file_name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
+                    let file_name =
+                        path.file_name().unwrap_or_default().to_string_lossy().to_string();
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         out.push((file_name, content));
                     }
@@ -92,11 +77,8 @@ pub fn read_privacy_files(
 ) -> (bool, Option<String>, Vec<String>, Vec<(String, String)>) {
     let gitignore_path = workspace_root.join(".gitignore");
     let gitignore_exists = gitignore_path.exists();
-    let gitignore_content = if gitignore_exists {
-        std::fs::read_to_string(&gitignore_path).ok()
-    } else {
-        None
-    };
+    let gitignore_content =
+        if gitignore_exists { std::fs::read_to_string(&gitignore_path).ok() } else { None };
 
     let mut found_sensitive_files = Vec::new();
     let mut files_to_scan = Vec::new();
@@ -122,11 +104,7 @@ pub fn read_privacy_files(
                     }
                     traverse(&path, sensitive_files, files_to_scan);
                 } else if path.is_file() {
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
+                    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
 
                     if name.starts_with("cleanup-plan")
                         && (name.ends_with(".json") || name.ends_with(".jsonocel"))
@@ -161,16 +139,7 @@ pub fn read_privacy_files(
         }
     }
 
-    traverse(
-        workspace_root,
-        &mut found_sensitive_files,
-        &mut files_to_scan,
-    );
+    traverse(workspace_root, &mut found_sensitive_files, &mut files_to_scan);
 
-    (
-        gitignore_exists,
-        gitignore_content,
-        found_sensitive_files,
-        files_to_scan,
-    )
+    (gitignore_exists, gitignore_content, found_sensitive_files, files_to_scan)
 }

@@ -1,2 +1,6 @@
+# Pinned toolchain per praxis house standard: never a bare floating channel.
+# osx-clnr tracks the house pinned nightly (matches /Users/sac/praxis).
 [toolchain]
-channel = "nightly"
+channel = "nightly-2026-04-15"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

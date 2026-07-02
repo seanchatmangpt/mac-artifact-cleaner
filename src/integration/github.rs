@@ -3,11 +3,11 @@
 //! Exposes functions to execute `gh` CLI commands and parse their outputs,
 //! abstracting standard system process execution behind a `CommandExecutor` trait.
 
+use std::{io, process::Output};
+
 use crate::domain::github::{
     GhBranchListRef, GhCache, GhCompareResponse, GhIssue, GhPr, GhRelease, GhRepo, GhRun,
 };
-use std::io;
-use std::process::Output;
 
 /// Abstract executor for external shell commands.
 pub trait CommandExecutor: Send + Sync {
@@ -94,10 +94,7 @@ pub fn list_branches(
     let mut all = Vec::new();
     let mut page = 1;
     loop {
-        let api_path = format!(
-            "repos/{}/{}/branches?per_page=100&page={}",
-            owner, repo, page
-        );
+        let api_path = format!("repos/{}/{}/branches?per_page=100&page={}", owner, repo, page);
         let page_items: Vec<GhBranchListRef> = run_gh_parsed(executor, &["api", &api_path])?;
         let len = page_items.len();
         all.extend(page_items);
@@ -117,10 +114,7 @@ pub fn compare_branch(
     default_branch: &str,
     branch: &str,
 ) -> anyhow::Result<GhCompareResponse> {
-    let api_path = format!(
-        "repos/{}/{}/compare/{}...{}",
-        owner, repo, default_branch, branch
-    );
+    let api_path = format!("repos/{}/{}/compare/{}...{}", owner, repo, default_branch, branch);
     run_gh_parsed(executor, &["api", &api_path])
 }
 
@@ -245,10 +239,7 @@ pub fn delete_run(
     run_id: u64,
 ) -> anyhow::Result<()> {
     let repo_arg = format!("{}/{}", owner, repo);
-    run_gh_status(
-        executor,
-        &["run", "delete", &run_id.to_string(), "--repo", &repo_arg],
-    )
+    run_gh_status(executor, &["run", "delete", &run_id.to_string(), "--repo", &repo_arg])
 }
 
 /// Deletes a release and optionally its tag from a repository.
@@ -261,15 +252,7 @@ pub fn delete_release(
     let repo_arg = format!("{}/{}", owner, repo);
     run_gh_status(
         executor,
-        &[
-            "release",
-            "delete",
-            tag,
-            "--repo",
-            &repo_arg,
-            "--yes",
-            "--cleanup-tag",
-        ],
+        &["release", "delete", tag, "--repo", &repo_arg, "--yes", "--cleanup-tag"],
     )
 }
 
@@ -281,16 +264,7 @@ pub fn delete_cache(
     cache_id: u64,
 ) -> anyhow::Result<()> {
     let repo_arg = format!("{}/{}", owner, repo);
-    run_gh_status(
-        executor,
-        &[
-            "cache",
-            "delete",
-            &cache_id.to_string(),
-            "--repo",
-            &repo_arg,
-        ],
-    )
+    run_gh_status(executor, &["cache", "delete", &cache_id.to_string(), "--repo", &repo_arg])
 }
 
 /// Closes an issue in a repository.
@@ -301,10 +275,7 @@ pub fn close_issue(
     number: u64,
 ) -> anyhow::Result<()> {
     let repo_arg = format!("{}/{}", owner, repo);
-    run_gh_status(
-        executor,
-        &["issue", "close", &number.to_string(), "--repo", &repo_arg],
-    )
+    run_gh_status(executor, &["issue", "close", &number.to_string(), "--repo", &repo_arg])
 }
 
 /// Closes a pull request in a repository.
@@ -315,10 +286,7 @@ pub fn close_pr(
     number: u64,
 ) -> anyhow::Result<()> {
     let repo_arg = format!("{}/{}", owner, repo);
-    run_gh_status(
-        executor,
-        &["pr", "close", &number.to_string(), "--repo", &repo_arg],
-    )
+    run_gh_status(executor, &["pr", "close", &number.to_string(), "--repo", &repo_arg])
 }
 
 /// Deletes a release asset.
@@ -374,11 +342,10 @@ impl MockCommandExecutor {
 impl CommandExecutor for MockCommandExecutor {
     fn execute(&self, program: &str, args: &[&str]) -> io::Result<Output> {
         let args_vec: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        self.calls.lock().unwrap().push(
-            std::iter::once(program.to_string())
-                .chain(args_vec)
-                .collect(),
-        );
+        self.calls
+            .lock()
+            .unwrap()
+            .push(std::iter::once(program.to_string()).chain(args_vec).collect());
 
         let key = format!("{} {}", program, args.join(" "));
         if let Some((status, stdout, stderr)) = self.responses.lock().unwrap().get(&key) {
@@ -392,6 +359,7 @@ impl CommandExecutor for MockCommandExecutor {
                 })
             }
             #[cfg(not(unix))]
+            #[allow(unsafe_code)]
             {
                 // Basic mock implementation for non-unix testing environments
                 Ok(Output {

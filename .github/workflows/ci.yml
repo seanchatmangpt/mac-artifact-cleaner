@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+# osx-clnr is a macOS tool (statvfs, tmutil, launchd) and depends on the
+# sibling repo seanchatmangpt/clap-noun-verb via a `../clap-noun-verb` path
+# dep, so every job checks out both repos side by side and runs on macOS.
+jobs:
+  fmt:
+    name: fmt
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: osx-clnr
+      - uses: actions/checkout@v4
+        with:
+          repository: seanchatmangpt/clap-noun-verb
+          path: clap-noun-verb
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-04-15
+          components: rustfmt
+      - run: cargo fmt --all --check
+        working-directory: osx-clnr
+
+  clippy:
+    name: clippy
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: osx-clnr
+      - uses: actions/checkout@v4
+        with:
+          repository: seanchatmangpt/clap-noun-verb
+          path: clap-noun-verb
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-04-15
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: osx-clnr
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: osx-clnr
+
+  test:
+    name: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: osx-clnr
+      - uses: actions/checkout@v4
+        with:
+          repository: seanchatmangpt/clap-noun-verb
+          path: clap-noun-verb
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-04-15
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: osx-clnr
+      - run: cargo test --workspace
+        working-directory: osx-clnr
+
+  deny:
+    name: deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: osx-clnr
+      - uses: actions/checkout@v4
+        with:
+          repository: seanchatmangpt/clap-noun-verb
+          path: clap-noun-verb
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: osx-clnr/Cargo.toml
+
+  typos:
+    name: typos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crate-ci/typos@v1

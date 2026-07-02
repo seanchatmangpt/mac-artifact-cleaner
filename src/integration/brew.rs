@@ -1,8 +1,9 @@
 //! Homebrew package manager integration layer.
 
+use std::process::Command;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrewCleanupPreview {
@@ -31,11 +32,7 @@ pub struct BrewCacheSize {
 
 /// Returns true if `brew` is available on PATH.
 pub fn is_brew_available() -> bool {
-    Command::new("which")
-        .arg("brew")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    Command::new("which").arg("brew").output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 /// Runs `brew cleanup --dry-run` and parses the output into a [`BrewCleanupPreview`].
@@ -44,9 +41,7 @@ pub fn is_brew_available() -> bool {
 /// A summary line of the form "This operation would free X bytes of disk space."
 /// is parsed for [`BrewCleanupPreview::reclaimable_bytes`].
 pub fn brew_cleanup_dry_run() -> Result<BrewCleanupPreview> {
-    let output = Command::new("brew")
-        .args(["cleanup", "--dry-run"])
-        .output()?;
+    let output = Command::new("brew").args(["cleanup", "--dry-run"]).output()?;
 
     // brew writes dry-run output to stderr; merge both streams (we ran with 2>&1 equivalent)
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -60,10 +55,7 @@ pub fn brew_cleanup_dry_run() -> Result<BrewCleanupPreview> {
         let trimmed = line.trim();
 
         if let Some(rest) = trimmed.strip_prefix("Would remove: ") {
-            cache_files.push(BrewCacheEntry {
-                path: rest.trim().to_string(),
-                bytes: 0,
-            });
+            cache_files.push(BrewCacheEntry { path: rest.trim().to_string(), bytes: 0 });
             continue;
         }
 
@@ -84,9 +76,7 @@ pub fn brew_cleanup_dry_run() -> Result<BrewCleanupPreview> {
 
 /// Runs `brew autoremove --dry-run` and returns the list of orphaned formulae.
 pub fn brew_autoremove_dry_run() -> Result<BrewAutoremovePreview> {
-    let output = Command::new("brew")
-        .args(["autoremove", "--dry-run"])
-        .output()?;
+    let output = Command::new("brew").args(["autoremove", "--dry-run"]).output()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -108,10 +98,7 @@ pub fn brew_cache_size() -> Result<BrewCacheSize> {
     let cache_path = format!("{}/Library/Caches/Homebrew", home);
 
     if !std::path::Path::new(&cache_path).exists() {
-        return Ok(BrewCacheSize {
-            path: "~/Library/Caches/Homebrew".to_string(),
-            bytes: 0,
-        });
+        return Ok(BrewCacheSize { path: "~/Library/Caches/Homebrew".to_string(), bytes: 0 });
     }
 
     // `du -sk` reports kilobytes; multiply by 1024 to get bytes.
@@ -125,10 +112,7 @@ pub fn brew_cache_size() -> Result<BrewCacheSize> {
         .unwrap_or(0)
         .saturating_mul(1024);
 
-    Ok(BrewCacheSize {
-        path: cache_path,
-        bytes,
-    })
+    Ok(BrewCacheSize { path: cache_path, bytes })
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +120,7 @@ pub fn brew_cache_size() -> Result<BrewCacheSize> {
 // ---------------------------------------------------------------------------
 
 /// Parse a brew summary line like "This operation would free 2.30 GB of disk space."
-/// Returns the value in bytes (u64), or 0 if unparseable.
+/// Returns the value in bytes (u64), or 0 if unparsable.
 ///
 /// This is a thin alias over the single shared implementation in
 /// [`crate::integration::progress::parse_human_size`].
@@ -182,10 +166,7 @@ This operation would free 1.50 GB of disk space.
         for line in fake_output.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("Would remove: ") {
-                cache_files.push(BrewCacheEntry {
-                    path: rest.trim().to_string(),
-                    bytes: 0,
-                });
+                cache_files.push(BrewCacheEntry { path: rest.trim().to_string(), bytes: 0 });
             } else if trimmed.contains("would free") && trimmed.contains("disk space") {
                 reclaimable_bytes = parse_free_bytes(trimmed);
             }

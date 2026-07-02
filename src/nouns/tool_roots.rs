@@ -1,16 +1,19 @@
 //! Tool Roots CLI noun implementation.
 
+use std::{path::PathBuf, sync::Arc};
+
 use clap::Subcommand;
 use dashmap::DashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 
-use crate::domain::artifact::{ArgsSnapshot, Candidate};
-use crate::domain::audit::Stats;
-use crate::domain::ocel::build_tool_roots_ocel;
-use crate::domain::tool_roots::{build_tool_root_defs, build_tool_root_report, ToolRootAcc};
-use crate::integration::fs::scan_root;
-use crate::integration::progress::ProgressReporter;
+use crate::{
+    domain::{
+        artifact::{ArgsSnapshot, Candidate},
+        audit::Stats,
+        ocel::build_tool_roots_ocel,
+        tool_roots::{build_tool_root_defs, build_tool_root_report, ToolRootAcc},
+    },
+    integration::{fs::scan_root, progress::ProgressReporter},
+};
 
 #[derive(Subcommand, Debug)]
 pub enum ToolRootsAction {
@@ -33,17 +36,11 @@ pub enum ToolRootsAction {
 
 pub fn handle(action: ToolRootsAction) -> anyhow::Result<()> {
     match action {
-        ToolRootsAction::Audit {
-            min_mb,
-            ocel_output,
-        } => {
+        ToolRootsAction::Audit { min_mb, ocel_output } => {
             let reports = run_tool_roots_scan(min_mb)?;
             println!("Tool Root Audit Results (>= {} MB):", min_mb);
             for r in &reports {
-                println!(
-                    "{} - {} (files: {}, dirs: {})",
-                    r.path, r.human, r.files, r.dirs
-                );
+                println!("{} - {} (files: {}, dirs: {})", r.path, r.human, r.files, r.dirs);
                 println!("  Category: {}", r.category);
                 println!("  Recommendation: {}", r.recommendation);
                 println!("  Rationale: {}", r.rationale);
@@ -105,10 +102,7 @@ fn print_premium_tool_roots_summary(
     );
 
     if !reports.is_empty() {
-        println!(
-            "\n\x1b[1m\x1b[34m [2] TOOL ROOTS BREAKDOWN (>= {} MB)\x1b[0m",
-            min_mb
-        );
+        println!("\n\x1b[1m\x1b[34m [2] TOOL ROOTS BREAKDOWN (>= {} MB)\x1b[0m", min_mb);
         println!("  ┌──────────────────────────────────────────────┬──────────────┬──────────────────────┐");
         println!("  │ Cache Path                                   │ Size         │ Recommendation       │");
         println!("  ├──────────────────────────────────────────────┼──────────────┼──────────────────────┤");
@@ -131,10 +125,7 @@ fn print_premium_tool_roots_summary(
             let padding_len = 20 - r.recommendation.len();
             let padding = " ".repeat(padding_len);
 
-            println!(
-                "  │ {:<44} │ {:<12} │ {}{} │",
-                path_truncated, r.human, rec_disp, padding
-            );
+            println!("  │ {:<44} │ {:<12} │ {}{} │", path_truncated, r.human, rec_disp, padding);
         }
         if reports.len() > 10 {
             println!(

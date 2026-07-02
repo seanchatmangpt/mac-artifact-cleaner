@@ -3,9 +3,10 @@
 //! Maintains the state of the cleanup workflow (UNSTARTED → CLEANUP_COMPLETE)
 //! with validation of legal state transitions.
 
+use std::path::PathBuf;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Workflow states (12-state machine)
@@ -164,11 +165,9 @@ impl WorkflowContext {
             (_, WorkflowState::DeleteFailed) => Ok(()),
             (_, WorkflowState::CleanupFailed) => Ok(()),
 
-            (current, next) => Err(format!(
-                "Cannot transition from {} to {}",
-                current.as_str(),
-                next.as_str()
-            )),
+            (current, next) => {
+                Err(format!("Cannot transition from {} to {}", current.as_str(), next.as_str()))
+            }
         }
     }
 

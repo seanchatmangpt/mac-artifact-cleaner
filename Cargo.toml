@@ -1,8 +1,22 @@
 [package]
 name = "osx-clnr"
-version = "0.1.0"
+version = "26.7.0"
 edition = "2021"
+# House standard is 1.82; osx-clnr uses io::ErrorKind::StorageFull (stable 1.83).
+rust-version = "1.83"
+license = "MIT OR Apache-2.0"
+description = "Receipted macOS developer disk auditor and cleanup utility: audit, plan, delete, verify — with cryptographic receipts."
+repository = "https://github.com/seanchatmangpt/mac-artifact-cleaner"
+homepage = "https://github.com/seanchatmangpt/mac-artifact-cleaner"
+readme = "README.md"
+keywords = ["macos", "disk", "cleanup", "receipts", "praxis"]
+categories = ["command-line-utilities", "filesystem", "development-tools"]
+# Path deps on the sibling clap-noun-verb repo preclude crates.io publishing.
+publish = false
 default-run = "oclnr"
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "oclnr"
@@ -48,6 +62,7 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
+star-toml = "26.6.30"
 
 [dev-dependencies]
 tempfile = "3"
@@ -56,3 +71,14 @@ tempfile = "3"
 members = [
     "cfab-surface",
 ]
+
+[workspace.lints.rust]
+# House standard uses `forbid`; osx-clnr carries two audited unsafe blocks
+# (libc::statvfs free-space sampling), so `deny` with targeted allows.
+unsafe_code = "deny"
+unexpected_cfgs = "warn"
+
+[workspace.lints.clippy]
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"

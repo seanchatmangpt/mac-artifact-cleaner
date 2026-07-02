@@ -13,17 +13,10 @@ fn test_construct_all_surface_types() {
     let doc_url = Url::parse("doc:///path/to/doc.md").unwrap();
 
     let s_local = Surface::new("local_node".to_string(), local_url, "Local Dir".to_string());
-    let s_github = Surface::new(
-        "github_node".to_string(),
-        github_url,
-        "GitHub Repo".to_string(),
-    );
+    let s_github = Surface::new("github_node".to_string(), github_url, "GitHub Repo".to_string());
     let s_plan = Surface::new("plan_node".to_string(), plan_url, "Plan File".to_string());
-    let s_receipt = Surface::new(
-        "receipt_node".to_string(),
-        receipt_url,
-        "Receipt File".to_string(),
-    );
+    let s_receipt =
+        Surface::new("receipt_node".to_string(), receipt_url, "Receipt File".to_string());
     let s_doc = Surface::new("doc_node".to_string(), doc_url, "Doc File".to_string());
 
     fabric.add_surface(s_local).unwrap();
@@ -43,20 +36,14 @@ fn test_invalid_relationship_rejection() {
     let receipt_url = Url::parse("receipt:///path/to/receipt.json").unwrap();
 
     let s_plan = Surface::new("plan_node".to_string(), plan_url, "Plan File".to_string());
-    let s_receipt = Surface::new(
-        "receipt_node".to_string(),
-        receipt_url,
-        "Receipt File".to_string(),
-    );
+    let s_receipt =
+        Surface::new("receipt_node".to_string(), receipt_url, "Receipt File".to_string());
 
     fabric.add_surface(s_plan).unwrap();
     fabric.add_surface(s_receipt).unwrap();
 
-    let result = fabric.connect(
-        "receipt_node",
-        "plan_node",
-        Relation::new(RelationKind::Dependency, 1.0),
-    );
+    let result =
+        fabric.connect("receipt_node", "plan_node", Relation::new(RelationKind::Dependency, 1.0));
 
     assert!(
         result.is_err(),
@@ -72,32 +59,18 @@ fn test_cycle_detection() {
     let github_url = Url::parse("github://owner/repo").unwrap();
 
     let s_local = Surface::new("local_node".to_string(), local_url, "Local Dir".to_string());
-    let s_github = Surface::new(
-        "github_node".to_string(),
-        github_url,
-        "GitHub Repo".to_string(),
-    );
+    let s_github = Surface::new("github_node".to_string(), github_url, "GitHub Repo".to_string());
 
     fabric.add_surface(s_local).unwrap();
     fabric.add_surface(s_github).unwrap();
 
     fabric
-        .connect(
-            "local_node",
-            "github_node",
-            Relation::new(RelationKind::Dependency, 1.0),
-        )
+        .connect("local_node", "github_node", Relation::new(RelationKind::Dependency, 1.0))
         .unwrap();
-    let result = fabric.connect(
-        "github_node",
-        "local_node",
-        Relation::new(RelationKind::Dependency, 1.0),
-    );
+    let result =
+        fabric.connect("github_node", "local_node", Relation::new(RelationKind::Dependency, 1.0));
 
-    assert!(matches!(
-        result,
-        Err(cfab_surface::FabricError::CycleDetected)
-    ));
+    assert!(matches!(result, Err(cfab_surface::FabricError::CycleDetected)));
 }
 
 #[test]
@@ -118,9 +91,7 @@ fn test_overwrite_kind_fails_validation() {
     fabric.add_surface(s1).unwrap();
     fabric.add_surface(s2).unwrap();
 
-    fabric
-        .connect("s1", "s2", Relation::new(RelationKind::Dependency, 1.0))
-        .unwrap();
+    fabric.connect("s1", "s2", Relation::new(RelationKind::Dependency, 1.0)).unwrap();
 
     let s2_new = Surface::new(
         "s2".to_string(),
@@ -151,40 +122,20 @@ fn test_edge_kind_invalidation_on_update() {
     let plan_url = Url::parse("plan:///path/to/plan.json").unwrap();
     let receipt_url = Url::parse("receipt:///path/to/receipt.json").unwrap();
 
-    let s_plan = Surface::new(
-        "node_1".to_string(),
-        plan_url.clone(),
-        "Plan File".to_string(),
-    );
-    let s_receipt = Surface::new(
-        "node_2".to_string(),
-        receipt_url.clone(),
-        "Receipt File".to_string(),
-    );
+    let s_plan = Surface::new("node_1".to_string(), plan_url.clone(), "Plan File".to_string());
+    let s_receipt =
+        Surface::new("node_2".to_string(), receipt_url.clone(), "Receipt File".to_string());
 
     fabric.add_surface(s_plan).unwrap();
     fabric.add_surface(s_receipt).unwrap();
 
-    fabric
-        .connect(
-            "node_1",
-            "node_2",
-            Relation::new(RelationKind::Dependency, 1.0),
-        )
-        .unwrap();
+    fabric.connect("node_1", "node_2", Relation::new(RelationKind::Dependency, 1.0)).unwrap();
 
-    let s_receipt_new = Surface::new(
-        "node_1".to_string(),
-        receipt_url.clone(),
-        "Receipt File".to_string(),
-    );
+    let s_receipt_new =
+        Surface::new("node_1".to_string(), receipt_url.clone(), "Receipt File".to_string());
     fabric.add_surface(s_receipt_new).unwrap();
 
-    let s_plan_new = Surface::new(
-        "node_2".to_string(),
-        plan_url.clone(),
-        "Plan File".to_string(),
-    );
+    let s_plan_new = Surface::new("node_2".to_string(), plan_url.clone(), "Plan File".to_string());
     let result = fabric.add_surface(s_plan_new);
 
     assert!(result.is_err());
@@ -210,28 +161,14 @@ fn test_duplicate_edge_detection() {
     let receipt_url = Url::parse("receipt:///path/to/receipt.json").unwrap();
 
     let s_plan = Surface::new("node_1".to_string(), plan_url, "Plan File".to_string());
-    let s_receipt = Surface::new(
-        "node_2".to_string(),
-        receipt_url,
-        "Receipt File".to_string(),
-    );
+    let s_receipt = Surface::new("node_2".to_string(), receipt_url, "Receipt File".to_string());
 
     fabric.add_surface(s_plan).unwrap();
     fabric.add_surface(s_receipt).unwrap();
 
-    fabric
-        .connect(
-            "node_1",
-            "node_2",
-            Relation::new(RelationKind::Dependency, 1.0),
-        )
-        .unwrap();
+    fabric.connect("node_1", "node_2", Relation::new(RelationKind::Dependency, 1.0)).unwrap();
 
-    let result = fabric.connect(
-        "node_1",
-        "node_2",
-        Relation::new(RelationKind::Dependency, 1.0),
-    );
+    let result = fabric.connect("node_1", "node_2", Relation::new(RelationKind::Dependency, 1.0));
 
     assert!(result.is_err());
     if let Err(cfab_surface::FabricError::InvalidConnection { from, to, reason }) = result {
@@ -259,10 +196,7 @@ fn test_observe_state_percent_encoding() {
     let _ = std::fs::remove_file(&temp_file_path);
 
     assert!(state.exists, "Failed to locate file with space in path");
-    assert_eq!(
-        state.metadata.get("path").unwrap(),
-        &temp_file_path.to_string_lossy().to_string()
-    );
+    assert_eq!(state.metadata.get("path").unwrap(), &temp_file_path.to_string_lossy().to_string());
 }
 
 #[test]
@@ -278,10 +212,7 @@ fn test_nan_weight_validation() {
     fabric.add_surface(s_plan).unwrap();
     fabric.add_surface(s_receipt).unwrap();
 
-    let relation = Relation {
-        kind: RelationKind::Dependency,
-        weight: f64::NAN,
-    };
+    let relation = Relation { kind: RelationKind::Dependency, weight: f64::NAN };
     let result = fabric.connect("node_1", "node_2", relation);
     assert!(result.is_err());
     if let Err(cfab_surface::FabricError::InvalidConnection { from, to, reason }) = result {
@@ -292,10 +223,7 @@ fn test_nan_weight_validation() {
         panic!("Expected InvalidConnection error");
     }
 
-    let relation_inf = Relation {
-        kind: RelationKind::Dependency,
-        weight: f64::INFINITY,
-    };
+    let relation_inf = Relation { kind: RelationKind::Dependency, weight: f64::INFINITY };
     let result_inf = fabric.connect("node_1", "node_2", relation_inf);
     assert!(result_inf.is_err());
 }

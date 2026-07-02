@@ -8,8 +8,9 @@
 //! [`crate::domain::affidavit_integration`] seam — Pentecost no longer
 //! hand-rolls its own receipt chain.
 
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletionExecutionRecord {
@@ -154,10 +155,7 @@ pub fn check_reclaim(
     }
     let measured = after as i128 - before as i128;
     if (measured as f64) < (claimed_bytes as f64) * RECLAIM_TOLERANCE {
-        ReclaimCheck::Shortfall {
-            claimed: claimed_bytes,
-            measured,
-        }
+        ReclaimCheck::Shortfall { claimed: claimed_bytes, measured }
     } else {
         ReclaimCheck::Witnessed
     }
@@ -261,10 +259,7 @@ impl DeletionReceipt {
             issues.push(VerificationIssue {
                 path: PathBuf::new(),
                 issue_type: IssueType::UnsupportedVersion,
-                message: format!(
-                    "Unsupported receipt version: {}",
-                    self.execution_record.version
-                ),
+                message: format!("Unsupported receipt version: {}", self.execution_record.version),
             });
         }
 
@@ -303,12 +298,7 @@ impl DeletionReceipt {
 
         if let Some(p) = plan {
             for item in &p.items {
-                if !self
-                    .execution_record
-                    .results
-                    .iter()
-                    .any(|r| r.path == item.path)
-                {
+                if !self.execution_record.results.iter().any(|r| r.path == item.path) {
                     issues.push(VerificationIssue {
                         path: item.path.clone(),
                         issue_type: IssueType::MissingPlanItem,
@@ -335,12 +325,8 @@ impl DeletionReceipt {
         // copied from `item.bytes` at execution time — so it proved nothing about
         // the real volume; this compares claimed total reclaim against the
         // measured free-space delta instead.
-        let bytes_freed_total: u64 = self
-            .execution_record
-            .results
-            .iter()
-            .map(|r| r.bytes_freed)
-            .sum();
+        let bytes_freed_total: u64 =
+            self.execution_record.results.iter().map(|r| r.bytes_freed).sum();
         if let ReclaimCheck::Shortfall { claimed, measured } = check_reclaim(
             bytes_freed_total,
             self.execution_record.available_before,
@@ -360,9 +346,6 @@ impl DeletionReceipt {
         }
 
         let is_consistent = issues.is_empty();
-        VerificationReport {
-            is_consistent,
-            issues,
-        }
+        VerificationReport { is_consistent, issues }
     }
 }

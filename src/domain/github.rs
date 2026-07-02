@@ -13,9 +13,10 @@
 //! assert_eq!(target, GithubTarget::Repo { owner: "owner".into(), repo: "repo".into() });
 //! ```
 
+use std::path::{Path, PathBuf};
+
 use chrono::{DateTime, Duration};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 
 /// A branch reference wrapper returned in defaultBranchRef.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,47 +104,14 @@ pub struct GhRelease {
 /// A parsed GitHub URI target, referencing a Repository, Branch, Workflow Run, Release, Cache, Issue, PR, or Release Asset.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GithubTarget {
-    Repo {
-        owner: String,
-        repo: String,
-    },
-    Branch {
-        owner: String,
-        repo: String,
-        branch: String,
-    },
-    Run {
-        owner: String,
-        repo: String,
-        run_id: u64,
-    },
-    Release {
-        owner: String,
-        repo: String,
-        tag: String,
-    },
-    Cache {
-        owner: String,
-        repo: String,
-        cache_id: u64,
-        key: String,
-    },
-    Issue {
-        owner: String,
-        repo: String,
-        number: u64,
-    },
-    Pr {
-        owner: String,
-        repo: String,
-        number: u64,
-    },
-    ReleaseAsset {
-        owner: String,
-        repo: String,
-        asset_id: u64,
-        asset_name: String,
-    },
+    Repo { owner: String, repo: String },
+    Branch { owner: String, repo: String, branch: String },
+    Run { owner: String, repo: String, run_id: u64 },
+    Release { owner: String, repo: String, tag: String },
+    Cache { owner: String, repo: String, cache_id: u64, key: String },
+    Issue { owner: String, repo: String, number: u64 },
+    Pr { owner: String, repo: String, number: u64 },
+    ReleaseAsset { owner: String, repo: String, asset_id: u64, asset_name: String },
 }
 
 impl GithubTarget {
@@ -245,11 +213,7 @@ impl GithubTarget {
             "branch" => {
                 let branch = parts[3..].join("/");
                 if !branch.is_empty() && is_valid_git_ref_format(&branch) {
-                    Some(GithubTarget::Branch {
-                        owner,
-                        repo,
-                        branch,
-                    })
+                    Some(GithubTarget::Branch { owner, repo, branch })
                 } else {
                     None
                 }
@@ -257,11 +221,7 @@ impl GithubTarget {
             "run" => {
                 if parts.len() == 4 {
                     let run_id = parts[3].parse::<u64>().ok()?;
-                    Some(GithubTarget::Run {
-                        owner,
-                        repo,
-                        run_id,
-                    })
+                    Some(GithubTarget::Run { owner, repo, run_id })
                 } else {
                     None
                 }
@@ -279,12 +239,7 @@ impl GithubTarget {
                     let cache_id = parts[3].parse::<u64>().ok()?;
                     let key = parts[4..].join("/");
                     if !key.is_empty() {
-                        Some(GithubTarget::Cache {
-                            owner,
-                            repo,
-                            cache_id,
-                            key,
-                        })
+                        Some(GithubTarget::Cache { owner, repo, cache_id, key })
                     } else {
                         None
                     }
@@ -295,11 +250,7 @@ impl GithubTarget {
             "issue" => {
                 if parts.len() == 4 {
                     let number = parts[3].parse::<u64>().ok()?;
-                    Some(GithubTarget::Issue {
-                        owner,
-                        repo,
-                        number,
-                    })
+                    Some(GithubTarget::Issue { owner, repo, number })
                 } else {
                     None
                 }
@@ -307,11 +258,7 @@ impl GithubTarget {
             "pr" => {
                 if parts.len() == 4 {
                     let number = parts[3].parse::<u64>().ok()?;
-                    Some(GithubTarget::Pr {
-                        owner,
-                        repo,
-                        number,
-                    })
+                    Some(GithubTarget::Pr { owner, repo, number })
                 } else {
                     None
                 }
@@ -321,12 +268,7 @@ impl GithubTarget {
                     let asset_id = parts[3].parse::<u64>().ok()?;
                     let asset_name = parts[4..].join("/");
                     if !asset_name.is_empty() {
-                        Some(GithubTarget::ReleaseAsset {
-                            owner,
-                            repo,
-                            asset_id,
-                            asset_name,
-                        })
+                        Some(GithubTarget::ReleaseAsset { owner, repo, asset_id, asset_name })
                     } else {
                         None
                     }
@@ -354,55 +296,26 @@ impl GithubTarget {
             GithubTarget::Repo { owner, repo } => {
                 format!("github://repo/{}/{}", owner, repo)
             }
-            GithubTarget::Branch {
-                owner,
-                repo,
-                branch,
-            } => {
+            GithubTarget::Branch { owner, repo, branch } => {
                 format!("github://branch/{}/{}/{}", owner, repo, branch)
             }
-            GithubTarget::Run {
-                owner,
-                repo,
-                run_id,
-            } => {
+            GithubTarget::Run { owner, repo, run_id } => {
                 format!("github://run/{}/{}/{}", owner, repo, run_id)
             }
             GithubTarget::Release { owner, repo, tag } => {
                 format!("github://release/{}/{}/{}", owner, repo, tag)
             }
-            GithubTarget::Cache {
-                owner,
-                repo,
-                cache_id,
-                key,
-            } => {
+            GithubTarget::Cache { owner, repo, cache_id, key } => {
                 format!("github://cache/{}/{}/{}/{}", owner, repo, cache_id, key)
             }
-            GithubTarget::Issue {
-                owner,
-                repo,
-                number,
-            } => {
+            GithubTarget::Issue { owner, repo, number } => {
                 format!("github://issue/{}/{}/{}", owner, repo, number)
             }
-            GithubTarget::Pr {
-                owner,
-                repo,
-                number,
-            } => {
+            GithubTarget::Pr { owner, repo, number } => {
                 format!("github://pr/{}/{}/{}", owner, repo, number)
             }
-            GithubTarget::ReleaseAsset {
-                owner,
-                repo,
-                asset_id,
-                asset_name,
-            } => {
-                format!(
-                    "github://release-asset/{}/{}/{}/{}",
-                    owner, repo, asset_id, asset_name
-                )
+            GithubTarget::ReleaseAsset { owner, repo, asset_id, asset_name } => {
+                format!("github://release-asset/{}/{}/{}/{}", owner, repo, asset_id, asset_name)
             }
         };
         PathBuf::from(path_str)
@@ -805,8 +718,9 @@ pub fn is_pr_stale(pr: &GhPr, threshold_days: i64, current_time_iso: &str) -> bo
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
+
+    use super::*;
 
     #[test]
     fn test_harden_github_target_parse() {
@@ -852,14 +766,10 @@ mod tests {
         assert!(
             GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature:")).is_none()
         );
-        assert!(
-            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature[abc]"))
-                .is_none()
-        );
-        assert!(
-            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature.lock"))
-                .is_none()
-        );
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature[abc]"))
+            .is_none());
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature.lock"))
+            .is_none());
         assert!(
             GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature/..")).is_none()
         );
@@ -869,24 +779,16 @@ mod tests {
         assert!(
             GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/.feature")).is_none()
         );
-        assert!(
-            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature/.ref"))
-                .is_none()
-        );
-        assert!(
-            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature\\ref"))
-                .is_none()
-        );
-        assert!(
-            GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature@{ref}"))
-                .is_none()
-        );
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature/.ref"))
+            .is_none());
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature\\ref"))
+            .is_none());
+        assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/feature@{ref}"))
+            .is_none());
         assert!(GithubTarget::parse(Path::new("github://branch/my-owner/my-repo/@")).is_none());
 
         // Release targets with invalid ref formats
-        assert!(
-            GithubTarget::parse(Path::new("github://release/my-owner/my-repo/.v1.0")).is_none()
-        );
+        assert!(GithubTarget::parse(Path::new("github://release/my-owner/my-repo/.v1.0")).is_none());
         assert!(
             GithubTarget::parse(Path::new("github://release/my-owner/my-repo/v1.0.lock")).is_none()
         );

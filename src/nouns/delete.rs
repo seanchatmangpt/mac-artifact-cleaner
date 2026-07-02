@@ -3,19 +3,25 @@
 //! **Noun layer rule**: This module parses, routes, and formats output only.
 //! All destructive filesystem operations are delegated to `integration::fs`.
 
-use crate::domain::crypto::generate_manifest;
-use crate::domain::delete::{DeletionPlanAdjudicator, PlanSafetyWitness};
-use crate::domain::plan::{DeletionPlan, PlanItemKind};
-use crate::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
-use crate::integration::fs::{delete_dir_all, delete_file, volume_space, write_or_dump_on_full};
-use crate::integration::progress::human_bytes;
+use std::path::PathBuf;
+
 use clap::Subcommand;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use std::path::PathBuf;
-use wasm4pm_compat::admission::Admit;
-use wasm4pm_compat::evidence::Evidence;
-use wasm4pm_compat::state::Raw;
+use wasm4pm_compat::{admission::Admit, evidence::Evidence, state::Raw};
+
+use crate::{
+    domain::{
+        crypto::generate_manifest,
+        delete::{DeletionPlanAdjudicator, PlanSafetyWitness},
+        plan::{DeletionPlan, PlanItemKind},
+        receipt::{DeletionReceipt, DeletionResult, DeletionStatus},
+    },
+    integration::{
+        fs::{delete_dir_all, delete_file, volume_space, write_or_dump_on_full},
+        progress::human_bytes,
+    },
+};
 
 #[derive(Subcommand, Debug)]
 pub enum DeleteAction {
@@ -32,10 +38,7 @@ pub enum DeleteAction {
 
 pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
     match action {
-        DeleteAction::Execute {
-            plan: plan_path,
-            receipt: receipt_path,
-        } => {
+        DeleteAction::Execute { plan: plan_path, receipt: receipt_path } => {
             let content = std::fs::read_to_string(&plan_path)?;
             let plan: DeletionPlan = serde_json::from_str(&content)?;
 
@@ -155,9 +158,8 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
 
             // Sample free space once after execution; reuse for both the receipt
             // REALITY law and the printed delta below.
-            let available_after: Option<u64> = volume_space(std::path::Path::new("/"))
-                .ok()
-                .map(|v| v.available);
+            let available_after: Option<u64> =
+                volume_space(std::path::Path::new("/")).ok().map(|v| v.available);
 
             let receipt = DeletionReceipt::new(
                 plan.created_unix,
@@ -213,10 +215,7 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             println!("  Deleted:     {}", deleted_count);
             println!("  Skipped:     {}", skipped_count);
             println!("  Failed:      {}", failed_count);
-            println!(
-                "  Freed:       {} (planned)",
-                human_bytes(bytes_freed_total)
-            );
+            println!("  Freed:       {} (planned)", human_bytes(bytes_freed_total));
             println!("  Elapsed:     {} seconds", end_time - start_time);
             if let (Some(before), Some(after)) =
                 (space_before.map(|v| v.available), available_after)
@@ -241,11 +240,7 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 "Affidavit receipt written to: {} (core/v1 chain {}, certify: {})",
                 affidavit_path.display(),
                 affidavit_receipt.chain_hash,
-                if verdict.accepted {
-                    "✅ ACCEPTED"
-                } else {
-                    "❌ REJECTED"
-                }
+                if verdict.accepted { "✅ ACCEPTED" } else { "❌ REJECTED" }
             );
         }
     }

@@ -9,9 +9,7 @@ pub fn send_notification(title: &str, body: &str) -> Result<()> {
         body.replace('"', "'"),
         title.replace('"', "'")
     );
-    let status = std::process::Command::new("osascript")
-        .args(["-e", &script])
-        .status()?;
+    let status = std::process::Command::new("osascript").args(["-e", &script]).status()?;
     if !status.success() {
         anyhow::bail!("osascript notification failed");
     }
@@ -20,10 +18,7 @@ pub fn send_notification(title: &str, body: &str) -> Result<()> {
 
 /// Send a disk pressure notification.
 pub fn notify_disk_pressure(free_gb: f64, threshold_gb: f64) -> Result<()> {
-    let body = format!(
-        "Free space {:.1} GB is below threshold {:.1} GB",
-        free_gb, threshold_gb
-    );
+    let body = format!("Free space {:.1} GB is below threshold {:.1} GB", free_gb, threshold_gb);
     send_notification("osx-clnr: Disk Pressure", &body)
 }
 

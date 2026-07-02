@@ -1,8 +1,8 @@
 //! Time Machine (`tmutil`) integration layer.
 
+use std::{fs, path::Path};
+
 use crate::domain::artifact::Candidate;
-use std::fs;
-use std::path::Path;
 
 /// Writes a bash script that applies `tmutil addexclusion` to all directories.
 pub fn write_tm_exclusions_script(
@@ -16,10 +16,7 @@ pub fn write_tm_exclusions_script(
     writeln!(file, "echo \"Applying Time Machine exclusions...\"")?;
 
     for c in candidates {
-        if fs::symlink_metadata(&c.path)
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-        {
+        if fs::symlink_metadata(&c.path).map(|m| m.is_dir()).unwrap_or(false) {
             writeln!(file, "tmutil addexclusion \"{}\"", c.path.display())?;
         }
     }
@@ -33,9 +30,7 @@ pub fn apply_exclusions_script(script_path: &Path) -> anyhow::Result<()> {
     if !script_path.exists() {
         anyhow::bail!("Exclusion script does not exist: {}", script_path.display());
     }
-    let status = std::process::Command::new("bash")
-        .arg(script_path)
-        .status()?;
+    let status = std::process::Command::new("bash").arg(script_path).status()?;
     if !status.success() {
         anyhow::bail!("Exclusion script execution failed with status: {}", status);
     }
@@ -44,10 +39,8 @@ pub fn apply_exclusions_script(script_path: &Path) -> anyhow::Result<()> {
 
 /// Lists all local APFS snapshots on the target mount point using `tmutil`.
 pub fn list_local_snapshots(mount_point: &str) -> anyhow::Result<Vec<String>> {
-    let output = std::process::Command::new("tmutil")
-        .arg("listlocalsnapshots")
-        .arg(mount_point)
-        .output()?;
+    let output =
+        std::process::Command::new("tmutil").arg("listlocalsnapshots").arg(mount_point).output()?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("tmutil listlocalsnapshots failed: {}", err);
@@ -93,11 +86,7 @@ pub fn delete_local_snapshot(name_or_date: &str) -> anyhow::Result<String> {
         .output()?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!(
-            "tmutil deletelocalsnapshots {} failed: {}",
-            name_or_date,
-            err
-        );
+        anyhow::bail!("tmutil deletelocalsnapshots {} failed: {}", name_or_date, err);
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }

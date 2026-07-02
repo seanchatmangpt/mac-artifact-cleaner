@@ -1,0 +1,39 @@
+# typos configuration — https://github.com/crate-ci/typos
+# Run locally with `typos` or `just typos`; enforced in CI.
+
+[files]
+extend-exclude = [
+    "Cargo.lock",
+    "target/",
+    ".git/",
+    "fixtures/",
+    "**/generated/",
+    "*.ttl",
+    "*.svg",
+    "*.lock",
+    "*.bbl",
+    "*.blg",
+    "*.aux",
+    "*.out",
+    "*.log",
+]
+
+[default]
+# Ignore content-address / hash-looking hex strings (blake3, sha256, git shas).
+extend-ignore-re = ["\\b[0-9a-f]{32,}\\b"]
+
+[default.extend-words]
+# Intentional project nouns that look like typos.
+ocel = "ocel"
+otel = "otel"
+pqc = "pqc"
+calver = "calver"
+clnrm = "clnrm"
+affi = "affi"
+linkme = "linkme"
+# Wil M.P. van der Aalst — proper name in thesis citations.
+Wil = "Wil"
+
+# osx-clnr additions
+[default.extend-identifiers]
+kMDItemWhereFroms = "kMDItemWhereFroms"

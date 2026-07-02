@@ -10,7 +10,7 @@
 //!   thinned list     -> the two older snapshots removed
 //!   receipt          -> snapshots_thinned matches thinned list
 //!   edge: n=0        -> selects nothing (refusal case)
-//!   edge: unparseable names are silently ignored
+//!   edge: unparsable names are silently ignored
 
 use osx_clnr::domain::time::{
     identify_thinned_snapshots, select_oldest_snapshots, SnapshotThinReceipt,
@@ -57,15 +57,8 @@ fn main() {
         all_snapshots.clone(),
         remaining.clone(),
     );
-    println!(
-        "receipt          -> snapshots_thinned={:?}",
-        receipt.snapshots_thinned
-    );
-    assert_eq!(
-        receipt.snapshots_thinned.len(),
-        2,
-        "receipt must record the two thinned snapshots"
-    );
+    println!("receipt          -> snapshots_thinned={:?}", receipt.snapshots_thinned);
+    assert_eq!(receipt.snapshots_thinned.len(), 2, "receipt must record the two thinned snapshots");
     assert_eq!(receipt.volume, "/");
     assert_eq!(receipt.snapshots_before.len(), 4);
     assert_eq!(receipt.snapshots_after.len(), 2);
@@ -75,11 +68,11 @@ fn main() {
     println!("edge: n=0        -> {:?}", none_selected);
     assert!(none_selected.is_empty(), "n=0 must select nothing");
 
-    // ── edge: unparseable names are ignored ───────────────────────────────────
+    // ── edge: unparsable names are ignored ───────────────────────────────────
     let garbage = vec!["not-a-snapshot".to_string(), "also-garbage".to_string()];
     let none = select_oldest_snapshots(&garbage, 5);
-    println!("edge: unparseable -> {:?}", none);
-    assert!(none.is_empty(), "unparseable names must be ignored");
+    println!("edge: unparsable -> {:?}", none);
+    assert!(none.is_empty(), "unparsable names must be ignored");
 
     println!("snapshot_pipeline: all assertions passed");
 }

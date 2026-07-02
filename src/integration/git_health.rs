@@ -1,9 +1,12 @@
 //! Git repository health scanning.
 
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitRepoHealth {
@@ -47,12 +50,7 @@ fn inspect_repo(repo_path: &Path) -> Result<GitRepoHealth> {
 
 fn count_objects(repo_path: &Path) -> (u64, u64) {
     let output = Command::new("git")
-        .args([
-            "-C",
-            repo_path.to_str().unwrap_or(""),
-            "count-objects",
-            "-vH",
-        ])
+        .args(["-C", repo_path.to_str().unwrap_or(""), "count-objects", "-vH"])
         .output();
 
     let Ok(out) = output else {
@@ -85,13 +83,7 @@ fn parse_human_size(s: &str) -> u64 {
 
 fn list_worktrees(repo_path: &Path) -> (Vec<String>, Vec<String>) {
     let output = Command::new("git")
-        .args([
-            "-C",
-            repo_path.to_str().unwrap_or(""),
-            "worktree",
-            "list",
-            "--porcelain",
-        ])
+        .args(["-C", repo_path.to_str().unwrap_or(""), "worktree", "list", "--porcelain"])
         .output();
 
     let Ok(out) = output else {
@@ -130,10 +122,7 @@ fn find_git_repos(dir: &Path, depth: u8, repos: &mut Vec<PathBuf>) {
             let path = entry.path();
             if path.is_dir() && !path.is_symlink() {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if !matches!(
-                    name,
-                    "node_modules" | "target" | ".venv" | "__pycache__" | ".cargo"
-                ) {
+                if !matches!(name, "node_modules" | "target" | ".venv" | "__pycache__" | ".cargo") {
                     find_git_repos(&path, depth - 1, repos);
                 }
             }

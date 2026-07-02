@@ -1,8 +1,9 @@
 //! Xcode and CoreSimulator integration layer.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulatorRuntime {
@@ -80,18 +81,12 @@ pub fn list_simulator_runtimes() -> Result<SimulatorScanResult> {
         });
     }
 
-    Ok(SimulatorScanResult {
-        runtimes,
-        total_bytes,
-        unavailable_bytes,
-    })
+    Ok(SimulatorScanResult { runtimes, total_bytes, unavailable_bytes })
 }
 
 /// Estimate directory (or file) size via `du -sk`.
 pub fn du_path(path: &std::path::Path) -> u64 {
-    let output = std::process::Command::new("du")
-        .args(["-sk", &path.to_string_lossy()])
-        .output();
+    let output = std::process::Command::new("du").args(["-sk", &path.to_string_lossy()]).output();
     if let Ok(out) = output {
         if let Ok(s) = String::from_utf8(out.stdout) {
             if let Some(kb) = s.split_whitespace().next() {

@@ -1,12 +1,13 @@
 //! oclnr-mcp binary — stdio JSON-RPC MCP server for osx-clnr.
 
+use std::path::PathBuf;
+
 use osx_clnr::mcp::{
     protocol::{JsonRpcMessage, JsonRpcReader, JsonRpcResponse, JsonRpcWriter},
     server::OsxClnrMcpServer,
     ErrorCode, ErrorResponse,
 };
 use serde_json::Value;
-use std::path::PathBuf;
 
 fn main() -> anyhow::Result<()> {
     let workspace = std::env::var("OCLNR_WORKSPACE")
@@ -56,10 +57,9 @@ fn handle_message(server: &mut OsxClnrMcpServer, msg: JsonRpcMessage) -> Option<
             let tool_params = params.get("arguments").cloned();
             server.call_tool(&name, tool_params)
         }
-        other => Err(ErrorResponse::new(
-            ErrorCode::MethodNotFound,
-            format!("Unknown method: {other}"),
-        )),
+        other => {
+            Err(ErrorResponse::new(ErrorCode::MethodNotFound, format!("Unknown method: {other}")))
+        }
     };
 
     let resp = match result {

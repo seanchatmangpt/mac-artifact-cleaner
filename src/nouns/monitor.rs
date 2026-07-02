@@ -10,9 +10,12 @@
 //! The actual `statvfs(2)` call and notification delivery live in
 //! `integration::monitor`.
 
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
 use crate::integration::monitor::{check_and_notify, DiskPressureCheck};
-use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 fn report(check: DiskPressureCheck, mount: &str) {
     if check.under_pressure {

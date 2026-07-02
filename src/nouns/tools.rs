@@ -2,11 +2,13 @@
 
 use clap::Subcommand;
 
-use crate::integration::git_health::scan_git_repos;
-use crate::integration::progress::human_bytes as format_bytes;
-use crate::integration::toolchain::{
-    list_npm_global_packages, list_pip_packages, list_rust_toolchains, npm_available,
-    pip_available, rustup_available,
+use crate::integration::{
+    git_health::scan_git_repos,
+    progress::human_bytes as format_bytes,
+    toolchain::{
+        list_npm_global_packages, list_pip_packages, list_rust_toolchains, npm_available,
+        pip_available, rustup_available,
+    },
 };
 
 #[derive(Subcommand, Debug)]
@@ -90,9 +92,7 @@ fn handle_pip() -> anyhow::Result<()> {
 }
 
 fn handle_git(path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
-    let root = path
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let root = path.or_else(dirs::home_dir).unwrap_or_else(|| std::path::PathBuf::from("."));
 
     println!("Scanning git repositories under: {}", root.display());
     println!();
@@ -111,10 +111,7 @@ fn handle_git(path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
         println!("    pack size:     {}", format_bytes(repo.pack_size_bytes));
         println!("    loose objects: {}", repo.loose_objects);
         if !repo.dangling_worktrees.is_empty() {
-            println!(
-                "    dangling worktrees ({}):",
-                repo.dangling_worktrees.len()
-            );
+            println!("    dangling worktrees ({}):", repo.dangling_worktrees.len());
             for wt in &repo.dangling_worktrees {
                 println!("      {wt}  [missing]");
             }

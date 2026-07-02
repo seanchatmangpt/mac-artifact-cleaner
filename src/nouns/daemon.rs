@@ -2,9 +2,10 @@
 //!
 //! Generates and manages a launchd LaunchAgent plist for background disk monitoring.
 
+use std::path::PathBuf;
+
 use clap::Subcommand;
 use dialoguer::Confirm;
-use std::path::PathBuf;
 
 #[derive(Subcommand, Debug)]
 pub enum DaemonAction {
@@ -78,11 +79,7 @@ fn generate_plist(threshold_gb: f64, interval_secs: u64) -> String {
 
 pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
     match action {
-        DaemonAction::Install {
-            threshold_gb,
-            interval_secs,
-            yes,
-        } => {
+        DaemonAction::Install { threshold_gb, interval_secs, yes } => {
             let plist = plist_path();
             let dir = plist.parent().unwrap();
             std::fs::create_dir_all(dir)?;
@@ -140,10 +137,7 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 std::fs::remove_file(&plist)?;
                 println!("Uninstalled {}", PLIST_LABEL);
             } else {
-                println!(
-                    "Daemon not installed (plist not found: {})",
-                    plist.display()
-                );
+                println!("Daemon not installed (plist not found: {})", plist.display());
             }
             Ok(())
         }
@@ -154,9 +148,8 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 return Ok(());
             }
             println!("Plist: {} (exists)", plist.display());
-            let output = std::process::Command::new("launchctl")
-                .args(["list", PLIST_LABEL])
-                .output()?;
+            let output =
+                std::process::Command::new("launchctl").args(["list", PLIST_LABEL]).output()?;
             if output.status.success() {
                 println!("Status: running");
                 println!("{}", String::from_utf8_lossy(&output.stdout));

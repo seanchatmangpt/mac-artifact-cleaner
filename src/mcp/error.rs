@@ -2,9 +2,10 @@
 //!
 //! Comprehensive error types with contextual recovery paths.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
 
 /// MCP error codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,28 +118,22 @@ impl ErrorResponse {
     // Specific error constructors
 
     pub fn file_not_found(path: &std::path::Path, operation: &str) -> Self {
-        Self::new(
-            ErrorCode::FileNotFound,
-            format!("Expected file not found: {}", path.display()),
-        )
-        .with_path(path.to_path_buf())
-        .with_suggestions(vec![
-            format!("Check that {} was created by {}", path.display(), operation),
-            "Re-run the operation to regenerate the file".to_string(),
-            format!("Check file permissions on {}", path.display()),
-        ])
+        Self::new(ErrorCode::FileNotFound, format!("Expected file not found: {}", path.display()))
+            .with_path(path.to_path_buf())
+            .with_suggestions(vec![
+                format!("Check that {} was created by {}", path.display(), operation),
+                "Re-run the operation to regenerate the file".to_string(),
+                format!("Check file permissions on {}", path.display()),
+            ])
     }
 
     pub fn plan_not_approved() -> Self {
-        Self::new(
-            ErrorCode::PlanNotApproved,
-            "Cannot delete without an approved plan".to_string(),
-        )
-        .with_suggestions(vec![
-            "Call plan_validate() to check plan safety".to_string(),
-            "Call plan_approve() with confirm=true to approve".to_string(),
-            "Review plan with plan_inspect() before approving".to_string(),
-        ])
+        Self::new(ErrorCode::PlanNotApproved, "Cannot delete without an approved plan".to_string())
+            .with_suggestions(vec![
+                "Call plan_validate() to check plan safety".to_string(),
+                "Call plan_approve() with confirm=true to approve".to_string(),
+                "Review plan with plan_inspect() before approving".to_string(),
+            ])
     }
 
     pub fn approval_signature_invalid() -> Self {
@@ -168,10 +163,7 @@ impl ErrorResponse {
     pub fn confirmation_required(operation: &str) -> Self {
         Self::new(
             ErrorCode::ConfirmationRequired,
-            format!(
-                "Must set confirm=true to {} (irreversible action)",
-                operation
-            ),
+            format!("Must set confirm=true to {} (irreversible action)", operation),
         )
         .with_suggestions(vec![
             format!("Review the operation carefully before confirming"),
@@ -204,27 +196,21 @@ impl ErrorResponse {
     }
 
     pub fn subprocess_failed(cmd: &str, stderr: &str) -> Self {
-        Self::new(
-            ErrorCode::SubprocessFailed,
-            format!("Subprocess '{}' failed", cmd),
-        )
-        .with_context(serde_json::json!({"stderr": stderr}))
-        .with_suggestions(vec![
-            "Check oclnr binary is installed and in PATH".to_string(),
-            "Review subprocess stderr output for details".to_string(),
-            "Run 'oclnr doctor' to diagnose system issues".to_string(),
-        ])
+        Self::new(ErrorCode::SubprocessFailed, format!("Subprocess '{}' failed", cmd))
+            .with_context(serde_json::json!({"stderr": stderr}))
+            .with_suggestions(vec![
+                "Check oclnr binary is installed and in PATH".to_string(),
+                "Review subprocess stderr output for details".to_string(),
+                "Run 'oclnr doctor' to diagnose system issues".to_string(),
+            ])
     }
 
     pub fn json_parse_error(message: &str) -> Self {
-        Self::new(
-            ErrorCode::JsonParseError,
-            format!("Failed to parse JSON: {}", message),
-        )
-        .with_suggestions(vec![
-            "Check that evidence files are valid JSON/JSONOCEL".to_string(),
-            "Re-run the operation to regenerate evidence".to_string(),
-        ])
+        Self::new(ErrorCode::JsonParseError, format!("Failed to parse JSON: {}", message))
+            .with_suggestions(vec![
+                "Check that evidence files are valid JSON/JSONOCEL".to_string(),
+                "Re-run the operation to regenerate evidence".to_string(),
+            ])
     }
 
     pub fn path_security_violation(path: &std::path::Path, reason: &str) -> Self {
@@ -267,10 +253,7 @@ mod tests {
     #[test]
     fn test_error_code_messages() {
         assert_eq!(ErrorCode::ParseError.message(), "Parse error");
-        assert_eq!(
-            ErrorCode::AuditNotComplete.message(),
-            "Audit has not been completed"
-        );
+        assert_eq!(ErrorCode::AuditNotComplete.message(), "Audit has not been completed");
     }
 
     #[test]

@@ -1,11 +1,11 @@
 //! OCEL v2 CLI noun implementation.
 
-use crate::domain::ocel::{summarize_ocel_log, OcelLogAdjudicator};
-use clap::Subcommand;
 use std::path::PathBuf;
-use wasm4pm_compat::admission::Admit;
-use wasm4pm_compat::evidence::Evidence;
-use wasm4pm_compat::ocel::OCEL;
+
+use clap::Subcommand;
+use wasm4pm_compat::{admission::Admit, evidence::Evidence, ocel::OCEL};
+
+use crate::domain::ocel::{summarize_ocel_log, OcelLogAdjudicator};
 
 #[derive(Subcommand, Debug)]
 pub enum OcelAction {

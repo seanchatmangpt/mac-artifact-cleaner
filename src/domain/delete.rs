@@ -1,8 +1,8 @@
 //! Plan-bound deletion rules and validation.
 
-use crate::domain::artifact::is_macos_os_dir;
-use crate::domain::plan::DeletionPlan;
 use std::path::Path;
+
+use crate::domain::{artifact::is_macos_os_dir, plan::DeletionPlan};
 
 /// Validates whether a single plan item path is present in the plan and passes safety checks.
 ///
@@ -103,8 +103,7 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 /// assert!(DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(bad_version_plan)).is_err());
 /// ```
 use wasm4pm_compat::admission::{Admission, Admit, Refusal};
-use wasm4pm_compat::evidence::Evidence;
-use wasm4pm_compat::state::Raw;
+use wasm4pm_compat::{evidence::Evidence, state::Raw};
 
 /// The witness for verifying a deletion plan against macOS safety rules and scope constraints.
 pub struct PlanSafetyWitness;

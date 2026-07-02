@@ -1,24 +1,29 @@
 //! Audit CLI noun implementation.
 
+use std::{
+    path::PathBuf,
+    sync::{atomic::Ordering, Arc},
+};
+
 use clap::Subcommand;
 use dashmap::DashMap;
-use std::path::PathBuf;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
-use crate::domain::artifact::{ArgsSnapshot, Candidate};
-use crate::domain::audit::Stats;
-use crate::domain::ocel::build_disk_audit_ocel;
-use crate::domain::tool_roots::{
-    build_tool_root_defs, build_tool_root_report, ToolRootAcc, ToolRootReport,
+use crate::{
+    domain::{
+        artifact::{ArgsSnapshot, Candidate},
+        audit::Stats,
+        ocel::build_disk_audit_ocel,
+        tool_roots::{build_tool_root_defs, build_tool_root_report, ToolRootAcc, ToolRootReport},
+    },
+    integration::{
+        fs::{
+            breakdown_sizes, find_cargo_target_dirs, find_large_files, force_remove_dir_all,
+            scan_root, volume_space,
+        },
+        progress::{human_bytes, ProgressReporter},
+        scan_cache::ScanCache,
+    },
 };
-use crate::integration::fs::{
-    breakdown_sizes, find_cargo_target_dirs, find_large_files, force_remove_dir_all, scan_root,
-    volume_space,
-};
-use crate::integration::progress::human_bytes;
-use crate::integration::progress::ProgressReporter;
-use crate::integration::scan_cache::ScanCache;
 
 #[derive(Subcommand, Debug)]
 pub enum AuditAction {
@@ -116,48 +121,23 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             verbose,
             ocel_output,
         } => {
-            let roots = if root.is_empty() {
-                crate::nouns::default_scan_roots()?
-            } else {
-                root
-            };
+            let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
-            let (stats, candidates, tool_reports) = run_audit_scan(
-                &roots,
-                deps,
-                aggressive,
-                ignore_recent_hours,
-                tool_roots,
-                verbose,
-            )?;
+            let (stats, candidates, tool_reports) =
+                run_audit_scan(&roots, deps, aggressive, ignore_recent_hours, tool_roots, verbose)?;
 
             println!("\n==================================================");
             println!("               DISK AUDIT RUN                     ");
             println!("==================================================");
-            println!(
-                "  Files analyzed:      {}",
-                stats.files_seen.load(Ordering::Relaxed)
-            );
-            println!(
-                "  Directories walked:  {}",
-                stats.dirs_seen.load(Ordering::Relaxed)
-            );
+            println!("  Files analyzed:      {}", stats.files_seen.load(Ordering::Relaxed));
+            println!("  Directories walked:  {}", stats.dirs_seen.load(Ordering::Relaxed));
             println!(
                 "  Total size scanned:  {}",
                 human_bytes(stats.bytes_seen.load(Ordering::Relaxed))
             );
-            println!(
-                "  Projects detected:   {}",
-                stats.projects_seen.load(Ordering::Relaxed)
-            );
-            println!(
-                "  Skipped paths:       {}",
-                stats.pruned_dirs.load(Ordering::Relaxed)
-            );
-            println!(
-                "  Errors encountered:  {}",
-                stats.errors.load(Ordering::Relaxed)
-            );
+            println!("  Projects detected:   {}", stats.projects_seen.load(Ordering::Relaxed));
+            println!("  Skipped paths:       {}", stats.pruned_dirs.load(Ordering::Relaxed));
+            println!("  Errors encountered:  {}", stats.errors.load(Ordering::Relaxed));
             println!("==================================================");
 
             println!("\nFound {} Deletion Candidates:", candidates.len());
@@ -194,10 +174,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 None => dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
             };
 
-            eprintln!(
-                "Scanning {} for Rust target/ directories…",
-                search_root.display()
-            );
+            eprintln!("Scanning {} for Rust target/ directories…", search_root.display());
             let targets = find_cargo_target_dirs(&search_root)?;
 
             if targets.is_empty() {
@@ -261,17 +238,10 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             };
             let min_bytes = min_mb * 1024 * 1024;
 
-            eprint!(
-                "Searching {} for files >= {} MB …\r",
-                search_root.display(),
-                min_mb
-            );
+            eprint!("Searching {} for files >= {} MB …\r", search_root.display(), min_mb);
 
             let results = find_large_files(&search_root, min_bytes, |files, found| {
-                eprint!(
-                    "  scanned {:>10} files  |  found {:>6} large files\r",
-                    files, found
-                );
+                eprint!("  scanned {:>10} files  |  found {:>6} large files\r", files, found);
             })?;
 
             // Clear progress line.
@@ -355,18 +325,8 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             print_disk_header();
             print_breakdown(&scan_root_path, &results, top, min_mb);
         }
-        AuditAction::Summarize {
-            root,
-            deps,
-            aggressive,
-            ignore_recent_hours,
-            tool_roots,
-        } => {
-            let roots = if root.is_empty() {
-                crate::nouns::default_scan_roots()?
-            } else {
-                root
-            };
+        AuditAction::Summarize { root, deps, aggressive, ignore_recent_hours, tool_roots } => {
+            let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
             let (stats, candidates, tool_reports) = run_audit_scan(
                 &roots,
@@ -483,10 +443,8 @@ fn run_audit_scan(
 
     reporter.finish("✅ Disk audit complete!");
 
-    let mut cand_list: Vec<Candidate> = candidates
-        .iter()
-        .map(|entry| entry.value().clone())
-        .collect();
+    let mut cand_list: Vec<Candidate> =
+        candidates.iter().map(|entry| entry.value().clone()).collect();
     cand_list.sort();
 
     let tool_reports = if tool_roots_enabled {
@@ -563,11 +521,7 @@ fn print_large_files(results: &[(PathBuf, u64)], top: usize, min_mb: u64) {
 
 fn print_breakdown(root: &std::path::Path, results: &[(PathBuf, u64)], top: usize, min_mb: u64) {
     let min_bytes = min_mb * 1024 * 1024;
-    let visible: Vec<_> = results
-        .iter()
-        .filter(|(_, b)| *b >= min_bytes)
-        .take(top)
-        .collect();
+    let visible: Vec<_> = results.iter().filter(|(_, b)| *b >= min_bytes).take(top).collect();
 
     let total_bytes: u64 = results.iter().map(|(_, b)| b).sum();
     let total_shown: u64 = visible.iter().map(|(_, b)| b).sum();
@@ -592,11 +546,7 @@ fn print_breakdown(root: &std::path::Path, results: &[(PathBuf, u64)], top: usiz
     println!("  {}", "─".repeat(80));
 
     for (path, bytes) in &visible {
-        let pct = if total_bytes > 0 {
-            (*bytes as f64 / total_bytes as f64) * 100.0
-        } else {
-            0.0
-        };
+        let pct = if total_bytes > 0 { (*bytes as f64 / total_bytes as f64) * 100.0 } else { 0.0 };
         let display = format_path_for_display(&path.to_string_lossy());
         let name = path
             .file_name()
@@ -671,16 +621,8 @@ fn categorize_dir(name: &str) -> &'static str {
         return "tool cache";
     }
     // Well-known data dirs
-    let data_dirs = [
-        "Documents",
-        "Downloads",
-        "Desktop",
-        "Pictures",
-        "Movies",
-        "Music",
-        "Library",
-        "Public",
-    ];
+    let data_dirs =
+        ["Documents", "Downloads", "Desktop", "Pictures", "Movies", "Music", "Library", "Public"];
     if data_dirs.contains(&name) {
         return "data";
     }
@@ -726,23 +668,14 @@ fn print_premium_audit_summary(
     println!("\n\x1b[1m\x1b[34m [1] FILESYSTEM METRICS\x1b[0m");
     println!("  • Total Files Scanned  : \x1b[1m{}\x1b[0m", files);
     println!("  • Directories Walked   : \x1b[1m{}\x1b[0m", dirs);
-    println!(
-        "  • Total Volume Size    : \x1b[1m\x1b[32m{}\x1b[0m",
-        human_bytes(bytes)
-    );
+    println!("  • Total Volume Size    : \x1b[1m\x1b[32m{}\x1b[0m", human_bytes(bytes));
     println!("  • Projects Detected    : \x1b[1m{}\x1b[0m", projects);
     if errors > 0 {
-        println!(
-            "  • Errors Encountered   : \x1b[1m\x1b[31m{}\x1b[0m",
-            errors
-        );
+        println!("  • Errors Encountered   : \x1b[1m\x1b[31m{}\x1b[0m", errors);
     }
 
     println!("\n\x1b[1m\x1b[34m [2] DEVELOPER ARTIFACTS (CLEANUP CANDIDATES)\x1b[0m");
-    println!(
-        "  • Candidates Found     : \x1b[1m{}\x1b[0m",
-        candidates.len()
-    );
+    println!("  • Candidates Found     : \x1b[1m{}\x1b[0m", candidates.len());
     if total_cand_bytes > 0 {
         println!(
             "  • Total Reclaimable    : \x1b[1m\x1b[32m{}\x1b[0m (direct files)",
@@ -779,10 +712,7 @@ fn print_premium_audit_summary(
                 format!("{:<20}", c.reason)
             };
 
-            println!(
-                "  │ {:<44} │ {:<12} │ {:<20} │",
-                path_truncated, size_str, reason_disp
-            );
+            println!("  │ {:<44} │ {:<12} │ {:<20} │", path_truncated, size_str, reason_disp);
         }
         if candidates.len() > 10 {
             println!(
@@ -795,18 +725,12 @@ fn print_premium_audit_summary(
 
     if !tool_reports.is_empty() {
         println!("\n\x1b[1m\x1b[34m [3] ROOT-LEVEL TOOL CACHES (TOOL ROOTS)\x1b[0m");
-        println!(
-            "  • Tool Roots Found     : \x1b[1m{}\x1b[0m",
-            tool_reports.len()
-        );
+        println!("  • Tool Roots Found     : \x1b[1m{}\x1b[0m", tool_reports.len());
         println!(
             "  • Total Tool Cache Size: \x1b[1m\x1b[32m{}\x1b[0m",
             human_bytes(total_tool_bytes)
         );
-        println!(
-            "  • Actionable/Review    : \x1b[1m\x1b[33m{}\x1b[0m",
-            actionable_tools
-        );
+        println!("  • Actionable/Review    : \x1b[1m\x1b[33m{}\x1b[0m", actionable_tools);
 
         println!("\n  Top Tool Roots:");
         println!("  ┌──────────────────────────────────────────────┬──────────────┬──────────────────────┐");
@@ -831,10 +755,7 @@ fn print_premium_audit_summary(
             let padding_len = 20 - r.recommendation.len();
             let padding = " ".repeat(padding_len);
 
-            println!(
-                "  │ {:<44} │ {:<12} │ {}{} │",
-                path_truncated, r.human, rec_disp, padding
-            );
+            println!("  │ {:<44} │ {:<12} │ {}{} │", path_truncated, r.human, rec_disp, padding);
         }
         if tool_reports.len() > 10 {
             println!(

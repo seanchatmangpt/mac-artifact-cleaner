@@ -1,10 +1,11 @@
 //! Sled-backed local artifact ledger (`OclDatabase`) recording scanned
 //! artifacts (path, size, hash, last-seen time) between scans.
 
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sled::Db;
-use std::path::{Path, PathBuf};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OclArtifact {

@@ -3,7 +3,7 @@
 ## Identity
 
 **Package:** `osx-clnr` | **Binary:** `oclnr` and `oclnr-mcp`  
-**Codename:** Pentecost  
+**Codename:** Pentecost | **First praxis project** (house standard: CalVer, MIT OR Apache-2.0, workspace lints, justfile canonical, star-toml admitted config)  
 **Purpose:** macOS developer disk auditor and cleanup utility.  
 **Core invariant:** Never increase destructive power without increasing receipts. The scanner cannot delete; the deleter cannot scan.
 

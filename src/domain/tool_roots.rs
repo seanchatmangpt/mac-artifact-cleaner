@@ -1,11 +1,17 @@
 //! Root-level tool and dependency cache tracking.
 
-use crate::domain::time::seconds_to_days;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicI64, AtomicU64, Ordering},
+        Mutex,
+    },
+};
+
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::Mutex;
+
+use crate::domain::time::seconds_to_days;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolRootReport {
@@ -116,26 +122,10 @@ pub fn build_tool_root_defs() -> Vec<ToolRootDef> {
         (".config", "config_state", "keep"),
         ("Library/Developer", "apple_developer_state", "review"),
         ("Library/Caches", "macos_user_caches", "cleanup_candidate"),
-        (
-            "Library/Application Support/Docker Desktop",
-            "docker_desktop_state",
-            "review",
-        ),
-        (
-            "Library/Containers/com.docker.docker",
-            "docker_desktop_state",
-            "review",
-        ),
-        (
-            "Library/Application Support/MobileSync/Backup",
-            "ios_backup",
-            "review",
-        ),
-        (
-            "Library/Messages/Attachments",
-            "messages_attachments",
-            "review",
-        ),
+        ("Library/Application Support/Docker Desktop", "docker_desktop_state", "review"),
+        ("Library/Containers/com.docker.docker", "docker_desktop_state", "review"),
+        ("Library/Application Support/MobileSync/Backup", "ios_backup", "review"),
+        ("Library/Messages/Attachments", "messages_attachments", "review"),
     ];
 
     defs.iter()
@@ -191,10 +181,7 @@ pub fn recommend_tool_root(
     match def.category {
         "kubernetes_config" | "config_state" => (
             "keep".to_string(),
-            format!(
-                "configuration state; do not delete blindly; {}",
-                access_note
-            ),
+            format!("configuration state; do not delete blindly; {}", access_note),
         ),
 
         "ios_backup" => {
@@ -204,10 +191,7 @@ pub fn recommend_tool_root(
                     format!("large iOS backup store ({:.1} GB); remove through Finder/device backup UI if obsolete", gb),
                 )
             } else {
-                (
-                    "review".to_string(),
-                    format!("iOS backup store; {}", access_note),
-                )
+                ("review".to_string(), format!("iOS backup store; {}", access_note))
             }
         }
 
@@ -220,10 +204,7 @@ pub fn recommend_tool_root(
             } else {
                 (
                     "review".to_string(),
-                    format!(
-                        "model/cache store ({:.1} GB); inspect model list before deleting",
-                        gb
-                    ),
+                    format!("model/cache store ({:.1} GB); inspect model list before deleting", gb),
                 )
             }
         }
@@ -235,10 +216,7 @@ pub fn recommend_tool_root(
                     format!("large container state ({:.1} GB); prefer docker system df/prune over rm -rf", gb),
                 )
             } else {
-                (
-                    "review".to_string(),
-                    format!("container state; {}", access_note),
-                )
+                ("review".to_string(), format!("container state; {}", access_note))
             }
         }
 
@@ -262,10 +240,7 @@ pub fn recommend_tool_root(
             if very_large && (stale_by_descendant || stale_by_modified) {
                 (
                     "cleanup_candidate".to_string(),
-                    format!(
-                        "large cache ({:.1} GB) and appears stale; {}",
-                        gb, access_note
-                    ),
+                    format!("large cache ({:.1} GB) and appears stale; {}", gb, access_note),
                 )
             } else if very_large {
                 (
@@ -292,16 +267,10 @@ pub fn recommend_tool_root(
             } else if very_large {
                 (
                     "review".to_string(),
-                    format!(
-                        "large AI/tool state ({:.1} GB); inspect before deleting",
-                        gb
-                    ),
+                    format!("large AI/tool state ({:.1} GB); inspect before deleting", gb),
                 )
             } else {
-                (
-                    "low_priority".to_string(),
-                    format!("AI/tool state not huge; {}", access_note),
-                )
+                ("low_priority".to_string(), format!("AI/tool state not huge; {}", access_note))
             }
         }
 
@@ -359,36 +328,16 @@ pub fn build_tool_root_report(
             continue;
         }
 
-        let created = if created_val > 0 {
-            Some(created_val)
-        } else {
-            None
-        };
-        let accessed = if accessed_val > 0 {
-            Some(accessed_val)
-        } else {
-            None
-        };
-        let modified = if modified_val > 0 {
-            Some(modified_val)
-        } else {
-            None
-        };
+        let created = if created_val > 0 { Some(created_val) } else { None };
+        let accessed = if accessed_val > 0 { Some(accessed_val) } else { None };
+        let modified = if modified_val > 0 { Some(modified_val) } else { None };
         let changed = if ctime_val > 0 { Some(ctime_val) } else { None };
 
         let newest_descendant = acc.newest_mtime.load(Ordering::Relaxed);
-        let newest_descendant = if newest_descendant > 0 {
-            Some(newest_descendant)
-        } else {
-            None
-        };
+        let newest_descendant = if newest_descendant > 0 { Some(newest_descendant) } else { None };
 
-        let newest_path = acc
-            .newest_mtime_path
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|p| p.display().to_string());
+        let newest_path =
+            acc.newest_mtime_path.lock().unwrap().as_ref().map(|p| p.display().to_string());
 
         let days_since_modified = modified.map(|t| seconds_to_days(now - t));
         let days_since_accessed = accessed.map(|t| seconds_to_days(now - t));

@@ -1,7 +1,8 @@
 //! iOS device backup noun.
 
-use crate::integration::progress::human_bytes as format_bytes;
 use clap::Subcommand;
+
+use crate::integration::progress::human_bytes as format_bytes;
 
 #[derive(Subcommand, Debug)]
 pub enum BackupAction {

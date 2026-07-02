@@ -124,11 +124,7 @@ pub fn diagnose_substrate(
     tmutil_path: Option<String>,
     command_execution_works: bool,
 ) -> SubstrateReport {
-    SubstrateReport {
-        is_macos,
-        tmutil_path,
-        command_execution_works,
-    }
+    SubstrateReport { is_macos, tmutil_path, command_execution_works }
 }
 
 /// Helper to parse file contents for module doc presence and pub fn doctests.
@@ -153,10 +149,7 @@ pub(crate) fn check_file_doctests_content(
                 .unwrap_or("unknown")
                 .to_string();
 
-            let info = FuncInfo {
-                file_name: file_name.to_string(),
-                fn_name: func_name,
-            };
+            let info = FuncInfo { file_name: file_name.to_string(), fn_name: func_name };
             checked_functions.push(info.clone());
 
             // Look all the way backward for doc comments and code block
@@ -212,11 +205,7 @@ pub fn diagnose_doctests(files: &[(String, String)]) -> DoctestReport {
         functions_missing_doctest.extend(missing);
     }
 
-    DoctestReport {
-        has_module_doc,
-        checked_functions,
-        functions_missing_doctest,
-    }
+    DoctestReport { has_module_doc, checked_functions, functions_missing_doctest }
 }
 
 /// Helper to scan file contents for unredacted paths.

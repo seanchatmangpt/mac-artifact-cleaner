@@ -1,7 +1,8 @@
 //! Doctor CLI noun implementation.
 
-use clap::Subcommand;
 use std::path::Path;
+
+use clap::Subcommand;
 
 use crate::domain::doctor::{
     diagnose_architecture, diagnose_doctests, diagnose_privacy, diagnose_substrate,
@@ -38,26 +39,15 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
             println!("- Cargo.toml exists: {}", report.cargo_toml_exists);
             println!("\nDirectories check:");
             for (dir, exists) in &report.main_dirs_exist {
-                println!(
-                    "  {:<20} : {}",
-                    dir,
-                    if *exists { "Found" } else { "Missing" }
-                );
+                println!("  {:<20} : {}", dir, if *exists { "Found" } else { "Missing" });
             }
             println!("\nNouns files check:");
             for (noun, exists) in &report.nouns_files_exist {
-                println!(
-                    "  {:<20} : {}",
-                    noun,
-                    if *exists { "Found" } else { "Missing" }
-                );
+                println!("  {:<20} : {}", noun, if *exists { "Found" } else { "Missing" });
             }
             println!("\nTotal architecture issues: {}", report.total_issues);
             if report.total_issues > 0 {
-                anyhow::bail!(
-                    "Architecture check failed with {} issues.",
-                    report.total_issues
-                );
+                anyhow::bail!("Architecture check failed with {} issues.", report.total_issues);
             } else {
                 println!("✅ Architecture check passed!");
             }
@@ -78,10 +68,7 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
                     .as_deref()
                     .unwrap_or("Not found (Time Machine capabilities might be limited)")
             );
-            println!(
-                "- Command execution works: {}",
-                report.command_execution_works
-            );
+            println!("- Command execution works: {}", report.command_execution_works);
             if !report.is_macos {
                 println!("⚠️ Warning: This tool is designed primarily for macOS.");
             } else {
@@ -102,14 +89,8 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
                 );
             }
 
-            println!(
-                "\nChecked public functions count: {}",
-                report.checked_functions.len()
-            );
-            println!(
-                "Missing doctests: {}",
-                report.functions_missing_doctest.len()
-            );
+            println!("\nChecked public functions count: {}", report.checked_functions.len());
+            println!("Missing doctests: {}", report.functions_missing_doctest.len());
 
             if !report.functions_missing_doctest.is_empty() {
                 println!("\nDetailed list of public functions missing doctests:");

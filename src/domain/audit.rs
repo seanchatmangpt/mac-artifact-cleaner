@@ -1,7 +1,9 @@
 //! Disk auditing statistics.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize},
+    Mutex,
+};
 
 /// Tracks counts and total sizes observed during auditing.
 pub struct Stats {

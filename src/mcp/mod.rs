@@ -63,7 +63,6 @@ pub use error::{ErrorCode, ErrorResponse};
 pub use protocol::{JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
 pub use server::OsxClnrMcpServer;
 pub use state::{WorkflowContext, WorkflowState};
-
 // Re-export key types
 pub use tools::{
     ApprovalMetadata, ArtifactKind, AuditScanInput, AuditScanOutput, AuditSummary, Candidate,

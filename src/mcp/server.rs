@@ -2,15 +2,18 @@
 //!
 //! Main orchestration logic for handling MCP requests and dispatching to tools.
 
-use super::error::{ErrorCode, ErrorResponse};
-use super::protocol::{InitializeResponse, ServerCapabilities, ServerInfo, ToolsCapability};
-use super::state::{WorkflowContext, WorkflowState};
-use super::subprocess::{parse_json_output, parse_jsonocel_output, OclnrRunner};
-use super::tools::*;
+use std::{collections::HashMap, path::PathBuf};
+
 use chrono::Utc;
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::path::PathBuf;
+
+use super::{
+    error::{ErrorCode, ErrorResponse},
+    protocol::{InitializeResponse, ServerCapabilities, ServerInfo, ToolsCapability},
+    state::{WorkflowContext, WorkflowState},
+    subprocess::{parse_json_output, parse_jsonocel_output, OclnrRunner},
+    tools::*,
+};
 
 /// MCP Server
 pub struct OsxClnrMcpServer {
@@ -23,11 +26,7 @@ impl OsxClnrMcpServer {
     /// Create new MCP server
     pub fn new(default_workspace: PathBuf) -> Result<Self, ErrorResponse> {
         let runner = OclnrRunner::new()?;
-        Ok(Self {
-            runner,
-            workflows: HashMap::new(),
-            default_workspace,
-        })
+        Ok(Self { runner, workflows: HashMap::new(), default_workspace })
     }
 
     /// Initialize MCP server (handshake with client)
@@ -35,9 +34,7 @@ impl OsxClnrMcpServer {
         let response = InitializeResponse {
             protocol_version: super::MCP_VERSION.to_string(),
             capabilities: ServerCapabilities {
-                tools: ToolsCapability {
-                    list_changed: false,
-                },
+                tools: ToolsCapability { list_changed: false },
                 experimental: None,
             },
             server_info: ServerInfo {
@@ -339,29 +336,19 @@ impl OsxClnrMcpServer {
     fn get_or_create_context(&mut self, workspace: Option<PathBuf>) -> WorkflowContext {
         let ws = workspace.unwrap_or_else(|| self.default_workspace.clone());
         let id = ws.display().to_string();
-        self.workflows
-            .entry(id)
-            .or_insert_with(|| WorkflowContext::new(ws.clone()))
-            .clone()
+        self.workflows.entry(id).or_insert_with(|| WorkflowContext::new(ws.clone())).clone()
     }
 
     fn query_workflow_state(&self, params: Value) -> Result<Value, ErrorResponse> {
         let input: serde_json::Map<String, Value> =
             serde_json::from_value(params).unwrap_or_default();
-        let workspace: Option<PathBuf> = input
-            .get("workspace")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from);
+        let workspace: Option<PathBuf> =
+            input.get("workspace").and_then(|v| v.as_str()).map(PathBuf::from);
 
         let ws_ref = workspace.as_ref().unwrap_or(&self.default_workspace);
-        let ctx = self
-            .workflows
-            .values()
-            .find(|w| &w.workspace == ws_ref)
-            .cloned()
-            .unwrap_or_else(|| {
-                WorkflowContext::new(workspace.unwrap_or_else(|| self.default_workspace.clone()))
-            });
+        let ctx = self.workflows.values().find(|w| &w.workspace == ws_ref).cloned().unwrap_or_else(
+            || WorkflowContext::new(workspace.unwrap_or_else(|| self.default_workspace.clone())),
+        );
 
         let output = QueryWorkflowStateOutput {
             state: ctx.state.as_str().to_string(),
@@ -382,9 +369,7 @@ impl OsxClnrMcpServer {
         let input: ClearArtifactsInput = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let workspace = input
-            .workspace
-            .unwrap_or_else(|| self.default_workspace.clone());
+        let workspace = input.workspace.unwrap_or_else(|| self.default_workspace.clone());
         let mut ctx = self.get_or_create_context(Some(workspace.clone()));
 
         if !input.confirm {
@@ -434,20 +419,16 @@ impl OsxClnrMcpServer {
         let input: AuditScanInput = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let workspace = input
-            .workspace
-            .clone()
-            .unwrap_or_else(|| self.default_workspace.clone());
+        let workspace = input.workspace.clone().unwrap_or_else(|| self.default_workspace.clone());
         let mut ctx = self.get_or_create_context(Some(workspace.clone()));
 
         ctx.transition(WorkflowState::AuditNeeded).map_err(|_| {
             ErrorResponse::invalid_state_transition(ctx.state.as_str(), "AUDIT_NEEDED")
         })?;
 
-        ctx.transition(WorkflowState::AuditInProgress)
-            .map_err(|_| {
-                ErrorResponse::invalid_state_transition(ctx.state.as_str(), "AUDIT_IN_PROGRESS")
-            })?;
+        ctx.transition(WorkflowState::AuditInProgress).map_err(|_| {
+            ErrorResponse::invalid_state_transition(ctx.state.as_str(), "AUDIT_IN_PROGRESS")
+        })?;
 
         // Spawn subprocess
         let roots = if input.roots.is_empty() {
@@ -511,12 +492,9 @@ impl OsxClnrMcpServer {
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let audit_file = input
-            .get("audit_file")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ErrorResponse::new(ErrorCode::InvalidInput, "audit_file required".to_string())
-            })?;
+        let audit_file = input.get("audit_file").and_then(|v| v.as_str()).ok_or_else(|| {
+            ErrorResponse::new(ErrorCode::InvalidInput, "audit_file required".to_string())
+        })?;
 
         let _top_n = input.get("top_n").and_then(|v| v.as_i64()).unwrap_or(50) as usize;
 
@@ -549,10 +527,7 @@ impl OsxClnrMcpServer {
         let input: PlanBuildInput = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let workspace = input
-            .workspace
-            .clone()
-            .unwrap_or_else(|| self.default_workspace.clone());
+        let workspace = input.workspace.clone().unwrap_or_else(|| self.default_workspace.clone());
         let mut ctx = self.get_or_create_context(Some(workspace.clone()));
 
         if ctx.state != WorkflowState::AuditComplete {
@@ -599,12 +574,9 @@ impl OsxClnrMcpServer {
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let plan_file = input
-            .get("plan_file")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ErrorResponse::new(ErrorCode::InvalidInput, "plan_file required".to_string())
-            })?;
+        let plan_file = input.get("plan_file").and_then(|v| v.as_str()).ok_or_else(|| {
+            ErrorResponse::new(ErrorCode::InvalidInput, "plan_file required".to_string())
+        })?;
 
         let path = PathBuf::from(plan_file);
         if !path.exists() {
@@ -628,10 +600,7 @@ impl OsxClnrMcpServer {
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
         if !input.plan_file.exists() {
-            return Err(ErrorResponse::file_not_found(
-                &input.plan_file,
-                "plan_build",
-            ));
+            return Err(ErrorResponse::file_not_found(&input.plan_file, "plan_build"));
         }
 
         Ok(serde_json::to_value(PlanValidateOutput {
@@ -658,17 +627,10 @@ impl OsxClnrMcpServer {
         }
 
         if !input.plan_file.exists() {
-            return Err(ErrorResponse::file_not_found(
-                &input.plan_file,
-                "plan_build",
-            ));
+            return Err(ErrorResponse::file_not_found(&input.plan_file, "plan_build"));
         }
 
-        let workspace = input
-            .plan_file
-            .parent()
-            .unwrap_or(&self.default_workspace)
-            .to_path_buf();
+        let workspace = input.plan_file.parent().unwrap_or(&self.default_workspace).to_path_buf();
         let mut ctx = self.get_or_create_context(Some(workspace));
 
         let mut approval = ApprovalMetadata::new(input.approver_name, input.approval_reason);
@@ -676,12 +638,7 @@ impl OsxClnrMcpServer {
 
         ctx.state = WorkflowState::PlanApproved;
         self.workflows.insert(
-            input
-                .plan_file
-                .parent()
-                .unwrap_or(&self.default_workspace)
-                .display()
-                .to_string(),
+            input.plan_file.parent().unwrap_or(&self.default_workspace).display().to_string(),
             ctx,
         );
 
@@ -699,10 +656,7 @@ impl OsxClnrMcpServer {
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
         if !input.plan_file.exists() {
-            return Err(ErrorResponse::file_not_found(
-                &input.plan_file,
-                "plan_build",
-            ));
+            return Err(ErrorResponse::file_not_found(&input.plan_file, "plan_build"));
         }
 
         Ok(serde_json::to_value(DeleteDryRunOutput {
@@ -726,16 +680,10 @@ impl OsxClnrMcpServer {
         }
 
         if !input.plan_file.exists() {
-            return Err(ErrorResponse::file_not_found(
-                &input.plan_file,
-                "plan_build",
-            ));
+            return Err(ErrorResponse::file_not_found(&input.plan_file, "plan_build"));
         }
 
-        let workspace = input
-            .workspace
-            .clone()
-            .unwrap_or_else(|| self.default_workspace.clone());
+        let workspace = input.workspace.clone().unwrap_or_else(|| self.default_workspace.clone());
         let mut ctx = self.get_or_create_context(Some(workspace.clone()));
 
         ctx.state = WorkflowState::DeleteInProgress;
@@ -790,12 +738,9 @@ impl OsxClnrMcpServer {
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let receipt_file = input
-            .get("receipt_file")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ErrorResponse::new(ErrorCode::InvalidInput, "receipt_file required".to_string())
-            })?;
+        let receipt_file = input.get("receipt_file").and_then(|v| v.as_str()).ok_or_else(|| {
+            ErrorResponse::new(ErrorCode::InvalidInput, "receipt_file required".to_string())
+        })?;
 
         let path = PathBuf::from(receipt_file);
         if !path.exists() {
@@ -830,10 +775,7 @@ impl OsxClnrMcpServer {
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let confirm = input
-            .get("confirm")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let confirm = input.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
 
         if !confirm {
             return Err(ErrorResponse::confirmation_required("receipt_certify"));
@@ -843,18 +785,14 @@ impl OsxClnrMcpServer {
     }
 
     fn safety_audit(&self, params: Value) -> Result<Value, ErrorResponse> {
-        use crate::domain::artifact::is_macos_os_dir;
-        use crate::domain::plan::DeletionPlan;
+        use crate::domain::{artifact::is_macos_os_dir, plan::DeletionPlan};
 
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let plan_file_str = input
-            .get("plan_file")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ErrorResponse::new(ErrorCode::InvalidInput, "plan_file required".to_string())
-            })?;
+        let plan_file_str = input.get("plan_file").and_then(|v| v.as_str()).ok_or_else(|| {
+            ErrorResponse::new(ErrorCode::InvalidInput, "plan_file required".to_string())
+        })?;
 
         let plan_file = std::path::Path::new(plan_file_str);
         if !plan_file.exists() {
@@ -865,17 +803,11 @@ impl OsxClnrMcpServer {
         }
 
         let raw = std::fs::read_to_string(plan_file).map_err(|e| {
-            ErrorResponse::new(
-                ErrorCode::SubprocessFailed,
-                format!("cannot read plan: {}", e),
-            )
+            ErrorResponse::new(ErrorCode::SubprocessFailed, format!("cannot read plan: {}", e))
         })?;
 
         let plan: DeletionPlan = serde_json::from_str(&raw).map_err(|e| {
-            ErrorResponse::new(
-                ErrorCode::JsonParseError,
-                format!("invalid plan JSON: {}", e),
-            )
+            ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid plan JSON: {}", e))
         })?;
 
         let mut issues: Vec<Value> = Vec::new();
@@ -921,10 +853,7 @@ impl OsxClnrMcpServer {
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let confirm = input
-            .get("confirm")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let confirm = input.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
 
         if !confirm {
             return Err(ErrorResponse::confirmation_required("plan_rollback"));
@@ -964,14 +893,8 @@ impl OsxClnrMcpServer {
         let input: SnapshotAuditInput = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let workspace = input
-            .workspace
-            .unwrap_or_else(|| self.default_workspace.clone());
-        let roots = if input.roots.is_empty() {
-            vec![workspace]
-        } else {
-            input.roots
-        };
+        let workspace = input.workspace.unwrap_or_else(|| self.default_workspace.clone());
+        let roots = if input.roots.is_empty() { vec![workspace] } else { input.roots };
 
         let result = self.runner.snapshot_audit(&self.default_workspace, roots)?;
         if !result.success() {
@@ -1014,14 +937,11 @@ fn summarize_disk_audit_ocel(log: &Value, scan_duration_secs: f64) -> AuditSumma
     let disk_audit_attr = |name: &str| -> u64 {
         objects
             .and_then(|objs| {
-                objs.iter()
-                    .find(|o| o.get("type").and_then(|t| t.as_str()) == Some("disk_audit"))
+                objs.iter().find(|o| o.get("type").and_then(|t| t.as_str()) == Some("disk_audit"))
             })
             .and_then(|o| o.get("attributes").and_then(|a| a.as_array()))
             .and_then(|attrs| {
-                attrs
-                    .iter()
-                    .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name))
+                attrs.iter().find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name))
             })
             .and_then(|a| a.get("value").and_then(|v| v.as_u64()))
             .unwrap_or(0)

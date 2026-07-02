@@ -3,11 +3,14 @@
 //! This crate provides `Surface` and `Fabric` structures for managing networks of connected
 //! surfaces using graph algorithms and serialized URLs.
 
-use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::EdgeRef;
-use petgraph::Direction;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use petgraph::{
+    graph::{DiGraph, NodeIndex},
+    visit::EdgeRef,
+    Direction,
+};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
 
@@ -194,12 +197,7 @@ impl Surface {
     pub fn new(id: String, url: Url, name: String) -> Self {
         let kind =
             SurfaceKind::from_url_scheme(url.scheme()).unwrap_or(SurfaceKind::LocalDirectory);
-        Self {
-            id,
-            url,
-            name,
-            kind,
-        }
+        Self { id, url, name, kind }
     }
 
     /// Parses and validates a `Surface` with strict scheme and path verification.
@@ -251,12 +249,7 @@ impl Surface {
             }
         }
 
-        Ok(Self {
-            id,
-            url,
-            name,
-            kind,
-        })
+        Ok(Self { id, url, name, kind })
     }
 
     /// Observes the current state ($O^*$) and metadata of the resource.
@@ -322,10 +315,7 @@ impl Surface {
                 metadata.insert("repo".to_string(), repo.to_string());
 
                 // GitHub repositories are considered logically valid in the network representation.
-                Ok(SurfaceState {
-                    exists: true,
-                    metadata,
-                })
+                Ok(SurfaceState { exists: true, metadata })
             }
         }
     }
@@ -387,10 +377,7 @@ impl Relation {
     /// assert_eq!(rel.weight, 1.0);
     /// ```
     pub fn new(kind: RelationKind, weight: f64) -> Self {
-        assert!(
-            weight.is_finite(),
-            "Relation weight must be finite (not NaN or Infinity)"
-        );
+        assert!(weight.is_finite(), "Relation weight must be finite (not NaN or Infinity)");
         Self { kind, weight }
     }
 }
@@ -435,11 +422,7 @@ impl Fabric {
     /// assert_eq!(fabric.len(), 0);
     /// ```
     pub fn new() -> Self {
-        Self {
-            node_map: HashMap::new(),
-            surfaces: HashMap::new(),
-            graph: DiGraph::new(),
-        }
+        Self { node_map: HashMap::new(), surfaces: HashMap::new(), graph: DiGraph::new() }
     }
 
     /// Returns the number of surfaces in the fabric.
@@ -500,9 +483,7 @@ impl Fabric {
             for edge in self.graph.edges_directed(index, Direction::Outgoing) {
                 let target_idx = edge.target();
                 let target_surface = self.surfaces.get(&target_idx.index()).ok_or_else(|| {
-                    FabricError::SurfaceNotFound {
-                        id: self.graph[target_idx].clone(),
-                    }
+                    FabricError::SurfaceNotFound { id: self.graph[target_idx].clone() }
                 })?;
                 Self::validate_edge_rule(&new_kind, &target_surface.kind, &edge.weight().kind)
                     .map_err(|reason| FabricError::InvalidConnection {
@@ -516,9 +497,7 @@ impl Fabric {
             for edge in self.graph.edges_directed(index, Direction::Incoming) {
                 let source_idx = edge.source();
                 let source_surface = self.surfaces.get(&source_idx.index()).ok_or_else(|| {
-                    FabricError::SurfaceNotFound {
-                        id: self.graph[source_idx].clone(),
-                    }
+                    FabricError::SurfaceNotFound { id: self.graph[source_idx].clone() }
                 })?;
                 Self::validate_edge_rule(&source_surface.kind, &new_kind, &edge.weight().kind)
                     .map_err(|reason| FabricError::InvalidConnection {
@@ -613,9 +592,7 @@ impl Fabric {
         let from_idx = *self
             .node_map
             .get(from)
-            .ok_or_else(|| FabricError::SurfaceNotFound {
-                id: from.to_string(),
-            })?;
+            .ok_or_else(|| FabricError::SurfaceNotFound { id: from.to_string() })?;
         let to_idx = *self
             .node_map
             .get(to)
@@ -638,12 +615,10 @@ impl Fabric {
         }
 
         // Validate edge rules
-        let from_surface =
-            self.surfaces
-                .get(&from_idx.index())
-                .ok_or_else(|| FabricError::SurfaceNotFound {
-                    id: from.to_string(),
-                })?;
+        let from_surface = self
+            .surfaces
+            .get(&from_idx.index())
+            .ok_or_else(|| FabricError::SurfaceNotFound { id: from.to_string() })?;
         let to_surface = self
             .surfaces
             .get(&to_idx.index())
@@ -703,9 +678,7 @@ impl Fabric {
         let from_idx = self
             .node_map
             .get(from)
-            .ok_or_else(|| FabricError::SurfaceNotFound {
-                id: from.to_string(),
-            })?;
+            .ok_or_else(|| FabricError::SurfaceNotFound { id: from.to_string() })?;
         let to_idx = self
             .node_map
             .get(to)
@@ -718,10 +691,7 @@ impl Fabric {
             |e| e.weight().weight,
             |_| 0.0,
         )
-        .ok_or_else(|| FabricError::NoPathExists {
-            from: from.to_string(),
-            to: to.to_string(),
-        })?;
+        .ok_or_else(|| FabricError::NoPathExists { from: from.to_string(), to: to.to_string() })?;
 
         let mut path_surfaces = Vec::new();
         for node_idx in path_indices.1 {
@@ -818,21 +788,12 @@ mod tests {
     #[test]
     fn test_cycle_detection() {
         let mut fabric = Fabric::new();
-        let s1 = Surface::new(
-            "s1".to_string(),
-            Url::parse("file:///s1").unwrap(),
-            "S1".to_string(),
-        );
-        let s2 = Surface::new(
-            "s2".to_string(),
-            Url::parse("file:///s2").unwrap(),
-            "S2".to_string(),
-        );
-        let s3 = Surface::new(
-            "s3".to_string(),
-            Url::parse("file:///s3").unwrap(),
-            "S3".to_string(),
-        );
+        let s1 =
+            Surface::new("s1".to_string(), Url::parse("file:///s1").unwrap(), "S1".to_string());
+        let s2 =
+            Surface::new("s2".to_string(), Url::parse("file:///s2").unwrap(), "S2".to_string());
+        let s3 =
+            Surface::new("s3".to_string(), Url::parse("file:///s3").unwrap(), "S3".to_string());
 
         fabric.add_surface(s1).unwrap();
         fabric.add_surface(s2).unwrap();

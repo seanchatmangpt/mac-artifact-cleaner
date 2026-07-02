@@ -3,24 +3,29 @@
 //! Parses, routes, and formats output for GitHub operations, delegating API logic
 //! to `integration::github` and candidate classification to `domain::github`.
 
-use crate::domain::delete::{DeletionPlanAdjudicator, PlanSafetyWitness};
-use crate::domain::github::{
-    is_branch_merged, is_cache_stale, is_issue_stale, is_pr_stale, is_release_stale_or_draft,
-    is_repo_stale_or_empty, is_run_stale, GithubTarget,
-};
-use crate::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
-use crate::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
-use crate::integration::github::{
-    close_issue, close_pr, compare_branch, delete_branch, delete_cache, delete_release,
-    delete_release_asset, delete_repository, delete_run, list_branches, list_caches, list_issues,
-    list_prs, list_releases, list_repositories, list_runs, CommandExecutor, RealCommandExecutor,
-};
+use std::path::{Path, PathBuf};
+
 use clap::Subcommand;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::path::{Path, PathBuf};
-use wasm4pm_compat::admission::Admit;
-use wasm4pm_compat::evidence::Evidence;
-use wasm4pm_compat::state::Raw;
+use wasm4pm_compat::{admission::Admit, evidence::Evidence, state::Raw};
+
+use crate::{
+    domain::{
+        delete::{DeletionPlanAdjudicator, PlanSafetyWitness},
+        github::{
+            is_branch_merged, is_cache_stale, is_issue_stale, is_pr_stale,
+            is_release_stale_or_draft, is_repo_stale_or_empty, is_run_stale, GithubTarget,
+        },
+        plan::{DeletionPlan, PlanItem, PlanItemKind},
+        receipt::{DeletionReceipt, DeletionResult, DeletionStatus},
+    },
+    integration::github::{
+        close_issue, close_pr, compare_branch, delete_branch, delete_cache, delete_release,
+        delete_release_asset, delete_repository, delete_run, list_branches, list_caches,
+        list_issues, list_prs, list_releases, list_repositories, list_runs, CommandExecutor,
+        RealCommandExecutor,
+    },
+};
 
 #[derive(Subcommand, Debug)]
 pub enum GithubAction {
@@ -229,12 +234,7 @@ pub fn execute_delete_plan_helper(
     let raw_evidence = Evidence::<_, Raw, PlanSafetyWitness>::raw(plan);
     let admitted_plan = match DeletionPlanAdjudicator::admit(raw_evidence) {
         Ok(admitted) => admitted.into_evidence(),
-        Err(refusal) => {
-            return Err(anyhow::anyhow!(
-                "Plan validation failed: {}",
-                refusal.reason
-            ))
-        }
+        Err(refusal) => return Err(anyhow::anyhow!("Plan validation failed: {}", refusal.reason)),
     };
     let plan = admitted_plan.into_inner();
 
@@ -337,38 +337,18 @@ pub fn execute_delete_plan_helper(
         .unwrap_or_default()
         .as_secs();
 
-    let receipt_obj = DeletionReceipt::new(
-        plan.created_unix,
-        start_time,
-        end_time,
-        results.clone(),
-        None,
-        None,
-    );
+    let receipt_obj =
+        DeletionReceipt::new(plan.created_unix, start_time, end_time, results.clone(), None, None);
 
     let receipt_json = serde_json::to_string_pretty(&receipt_obj)?;
     std::fs::write(&receipt_path, receipt_json)?;
-    println!(
-        "Successfully wrote execution receipt to {}",
-        receipt_path.display()
-    );
+    println!("Successfully wrote execution receipt to {}", receipt_path.display());
 
-    let deleted_count = results
-        .iter()
-        .filter(|r| r.status == DeletionStatus::Deleted)
-        .count();
-    let failed_count = results
-        .iter()
-        .filter(|r| r.status == DeletionStatus::Failed)
-        .count();
-    let skipped_count = results
-        .iter()
-        .filter(|r| r.status == DeletionStatus::SkippedMissing)
-        .count();
-    let refused_count = results
-        .iter()
-        .filter(|r| r.status == DeletionStatus::Refused)
-        .count();
+    let deleted_count = results.iter().filter(|r| r.status == DeletionStatus::Deleted).count();
+    let failed_count = results.iter().filter(|r| r.status == DeletionStatus::Failed).count();
+    let skipped_count =
+        results.iter().filter(|r| r.status == DeletionStatus::SkippedMissing).count();
+    let refused_count = results.iter().filter(|r| r.status == DeletionStatus::Refused).count();
 
     Ok(serde_json::json!({
         "status": "success",
@@ -418,12 +398,7 @@ pub fn github_receipt(
     if !report.is_consistent {
         println!("\nIssues:");
         for issue in &report.issues {
-            println!(
-                "  - [{:?}] {}: {}",
-                issue.issue_type,
-                issue.path.display(),
-                issue.message
-            );
+            println!("  - [{:?}] {}: {}", issue.issue_type, issue.path.display(), issue.message);
         }
         return Err(clap_noun_verb::NounVerbError::execution_error(
             "Receipt verification failed (inconsistent evidence).",
@@ -512,39 +487,19 @@ fn delete_github_target(
 ) -> anyhow::Result<()> {
     match target {
         GithubTarget::Repo { owner, repo } => delete_repository(executor, owner, repo),
-        GithubTarget::Branch {
-            owner,
-            repo,
-            branch,
-        } => delete_branch(executor, owner, repo, branch),
-        GithubTarget::Run {
-            owner,
-            repo,
-            run_id,
-        } => delete_run(executor, owner, repo, *run_id),
+        GithubTarget::Branch { owner, repo, branch } => {
+            delete_branch(executor, owner, repo, branch)
+        }
+        GithubTarget::Run { owner, repo, run_id } => delete_run(executor, owner, repo, *run_id),
         GithubTarget::Release { owner, repo, tag } => delete_release(executor, owner, repo, tag),
-        GithubTarget::Cache {
-            owner,
-            repo,
-            cache_id,
-            ..
-        } => delete_cache(executor, owner, repo, *cache_id),
-        GithubTarget::Issue {
-            owner,
-            repo,
-            number,
-        } => close_issue(executor, owner, repo, *number),
-        GithubTarget::Pr {
-            owner,
-            repo,
-            number,
-        } => close_pr(executor, owner, repo, *number),
-        GithubTarget::ReleaseAsset {
-            owner,
-            repo,
-            asset_id,
-            ..
-        } => delete_release_asset(executor, owner, repo, *asset_id),
+        GithubTarget::Cache { owner, repo, cache_id, .. } => {
+            delete_cache(executor, owner, repo, *cache_id)
+        }
+        GithubTarget::Issue { owner, repo, number } => close_issue(executor, owner, repo, *number),
+        GithubTarget::Pr { owner, repo, number } => close_pr(executor, owner, repo, *number),
+        GithubTarget::ReleaseAsset { owner, repo, asset_id, .. } => {
+            delete_release_asset(executor, owner, repo, *asset_id)
+        }
     }
 }
 
@@ -576,10 +531,7 @@ pub fn discover_candidates(
 
         // 1. Evaluate repository itself
         if is_repo_stale_or_empty(&repo, repo_days, &current_time_iso) {
-            let target = GithubTarget::Repo {
-                owner: owner.clone(),
-                repo: repo_name.clone(),
-            };
+            let target = GithubTarget::Repo { owner: owner.clone(), repo: repo_name.clone() };
             let reason = if repo.is_empty {
                 "Empty repository".to_string()
             } else {
@@ -618,10 +570,7 @@ pub fn discover_candidates(
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to list runs for {}/{}: {}",
-                    owner, repo_name, e
-                );
+                eprintln!("Warning: Failed to list runs for {}/{}: {}", owner, repo_name, e);
             }
         }
 
@@ -678,10 +627,7 @@ pub fn discover_candidates(
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to list branches for {}/{}: {}",
-                    owner, repo_name, e
-                );
+                eprintln!("Warning: Failed to list branches for {}/{}: {}", owner, repo_name, e);
             }
         }
 
@@ -733,10 +679,7 @@ pub fn discover_candidates(
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to list releases for {}/{}: {}",
-                    owner, repo_name, e
-                );
+                eprintln!("Warning: Failed to list releases for {}/{}: {}", owner, repo_name, e);
             }
         }
 
@@ -761,10 +704,7 @@ pub fn discover_candidates(
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to list caches for {}/{}: {}",
-                    owner, repo_name, e
-                );
+                eprintln!("Warning: Failed to list caches for {}/{}: {}", owner, repo_name, e);
             }
         }
 
@@ -788,10 +728,7 @@ pub fn discover_candidates(
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to list issues for {}/{}: {}",
-                    owner, repo_name, e
-                );
+                eprintln!("Warning: Failed to list issues for {}/{}: {}", owner, repo_name, e);
             }
         }
 
@@ -815,10 +752,7 @@ pub fn discover_candidates(
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to list PRs for {}/{}: {}",
-                    owner, repo_name, e
-                );
+                eprintln!("Warning: Failed to list PRs for {}/{}: {}", owner, repo_name, e);
             }
         }
     }

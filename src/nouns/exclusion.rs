@@ -1,10 +1,13 @@
 //! Time Machine Exclusion CLI noun implementation.
 
-use crate::domain::ocel::build_exclusion_plan_ocel;
-use crate::domain::plan::DeletionPlan;
-use crate::integration::tmutil::{apply_exclusions_script, write_tm_exclusions_script};
-use clap::Subcommand;
 use std::path::PathBuf;
+
+use clap::Subcommand;
+
+use crate::{
+    domain::{ocel::build_exclusion_plan_ocel, plan::DeletionPlan},
+    integration::tmutil::{apply_exclusions_script, write_tm_exclusions_script},
+};
 
 #[derive(Subcommand, Debug)]
 pub enum ExclusionAction {
@@ -41,10 +44,7 @@ pub fn handle(action: ExclusionAction) -> anyhow::Result<()> {
                 candidates.len()
             );
             write_tm_exclusions_script(&output, &candidates)?;
-            println!(
-                "Wrote Time Machine exclusion script to: {}",
-                output.display()
-            );
+            println!("Wrote Time Machine exclusion script to: {}", output.display());
 
             if let Some(o_path) = ocel {
                 let ocel_log =

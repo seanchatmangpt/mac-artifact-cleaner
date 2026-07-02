@@ -10,14 +10,12 @@
 //! sealed `affidavit::Receipt`. Object identities are BLAKE3(path), never raw
 //! paths, so the sealed provenance leaks no filesystem structure.
 
-use crate::domain::receipt::DeletionReceipt;
-use affidavit::chain::ChainAssembler;
-use affidavit::{Blake3Hash, ObjectRef, OperationEvent};
-
 // Re-export the affidavit types Pentecost names at this seam, so callers depend
 // on the integration module rather than reaching into the upstream crate.
-pub use affidavit::types::AdmittedReceipt;
-pub use affidavit::{Receipt, Verdict};
+use affidavit::{chain::ChainAssembler, Blake3Hash, ObjectRef, OperationEvent};
+pub use affidavit::{types::AdmittedReceipt, Receipt, Verdict};
+
+use crate::domain::receipt::DeletionReceipt;
 
 /// Project a [`DeletionReceipt`] into a sealed affidavit [`Receipt`].
 ///
@@ -64,16 +62,12 @@ pub fn build_deletion_affidavit(receipt: &DeletionReceipt) -> Receipt {
             qualifier: None,
         }],
         payload_commitment: Blake3Hash::from_bytes(
-            serde_json::to_string(&receipt.execution_record)
-                .unwrap_or_default()
-                .as_bytes(),
+            serde_json::to_string(&receipt.execution_record).unwrap_or_default().as_bytes(),
         ),
     };
     // Append is infallible here: the event canonicalizes (no non-serializable
     // payloads), so a failure would be a library-level invariant break.
-    assembler
-        .append(header_event)
-        .expect("header event canonicalizes");
+    assembler.append(header_event).expect("header event canonicalizes");
 
     // Per-result events: one per deleted/skipped/failed/refused item.
     for (i, result) in receipt.execution_record.results.iter().enumerate() {
@@ -137,9 +131,7 @@ pub fn certify(receipt: &Receipt) -> Verdict {
 /// assert_eq!(addr, content_address(&sealed));       // stable
 /// ```
 pub fn content_address(receipt: &Receipt) -> String {
-    affidavit::chain::content_address(receipt)
-        .map(|h| h.as_hex().to_string())
-        .unwrap_or_default()
+    affidavit::chain::content_address(receipt).map(|h| h.as_hex().to_string()).unwrap_or_default()
 }
 
 /// Canonical (sorted-key) JSON bytes for a sealed receipt — byte-stable and
