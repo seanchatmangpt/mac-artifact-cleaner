@@ -24,10 +24,10 @@ jobs:
     name: fmt
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: osx-clnr
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: seanchatmangpt/clap-noun-verb
           path: clap-noun-verb
@@ -42,10 +42,10 @@ jobs:
     name: clippy
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: osx-clnr
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: seanchatmangpt/clap-noun-verb
           path: clap-noun-verb
@@ -63,10 +63,10 @@ jobs:
     name: test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: osx-clnr
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: seanchatmangpt/clap-noun-verb
           path: clap-noun-verb
@@ -83,10 +83,10 @@ jobs:
     name: deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: osx-clnr
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: seanchatmangpt/clap-noun-verb
           path: clap-noun-verb
@@ -98,5 +98,5 @@ jobs:
     name: typos
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: crate-ci/typos@v1
