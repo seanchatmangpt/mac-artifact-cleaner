@@ -102,7 +102,7 @@ pub struct InitializeRequest {
 /// MCP Server capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitializeCapabilities {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub experimental: Option<Value>,
 }
 
@@ -127,7 +127,7 @@ pub struct InitializeResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ServerCapabilities {
     pub tools: ToolsCapability,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub experimental: Option<Value>,
 }
 

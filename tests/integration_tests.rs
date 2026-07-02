@@ -1,8 +1,7 @@
 use dashmap::DashMap;
-use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use osx_clnr::domain::artifact::{
     artifact_candidates_from_snapshot, detect_project_from_snapshot, ArgsSnapshot, Candidate,
@@ -130,7 +129,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
         tool_roots: false,
         ignore_recent_hours: 1,
     };
-    let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));
+    let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
     let stats = Arc::new(Stats::default());
     let tool_accs = Arc::new(DashMap::new());
 
@@ -141,10 +140,12 @@ fn test_end_to_end_artifact_scan_build_delete() {
         stats.clone(),
         &[],
         tool_accs.clone(),
+        None,
     )
     .unwrap();
 
-    let cand_list: Vec<Candidate> = candidates.lock().unwrap().iter().cloned().collect();
+    let mut cand_list: Vec<Candidate> = candidates.iter().map(|e| e.value().clone()).collect();
+    cand_list.sort();
     assert_eq!(cand_list.len(), 2);
 
     let path_list: Vec<PathBuf> = cand_list.iter().map(|c| c.path.clone()).collect();
@@ -864,7 +865,7 @@ fn test_traversal_barriers() {
         ignore_recent_hours: 1,
     };
 
-    let candidates = Arc::new(Mutex::new(BTreeSet::new()));
+    let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
     let stats = Arc::new(Stats::default());
     let tool_defs = vec![];
     let tool_accs = Arc::new(DashMap::new());
@@ -876,6 +877,7 @@ fn test_traversal_barriers() {
         stats.clone(),
         &tool_defs,
         tool_accs,
+        None,
     )
     .unwrap();
 
@@ -1036,5 +1038,265 @@ fn test_snapshot_delete_ocel_is_truthfully_typed() {
     assert_ne!(
         delete_log.events[0].event_type,
         thin_log.events[0].event_type
+    );
+}
+
+/// Concurrency regression test for `scan_root` over multiple roots.
+///
+/// Guards against double-counting/races when roots are scanned concurrently
+/// (as `run_audit_scan` now does via `std::thread::scope`): scanning two
+/// distinct roots concurrently (sharing `candidates`/`stats`/`tool_accs`, as
+/// `scan_root` requires) must produce exactly the same combined totals as
+/// scanning them sequentially.
+#[test]
+fn test_concurrent_root_scans_match_sequential_baseline() {
+    fn make_root(tag: &str) -> tempfile::TempDir {
+        let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
+        let root = tmp.path();
+        let proj = root.join(format!("{tag}-proj"));
+        fs::create_dir_all(&proj).unwrap();
+        File::create(proj.join("Cargo.toml")).unwrap();
+        let target = proj.join("target");
+        fs::create_dir(&target).unwrap();
+        File::create(target.join("output.bin")).unwrap();
+
+        // Old mtimes so `ignore_recent_hours` filtering doesn't drop the candidate.
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "find '{}' -exec touch -t 202001010000 {{}} +",
+                proj.display()
+            ))
+            .status();
+
+        tmp
+    }
+
+    let args = ArgsSnapshot {
+        deps: true,
+        aggressive: true,
+        verbose: false,
+        tool_roots: false,
+        ignore_recent_hours: 1,
+    };
+
+    let root_a_tmp = make_root("a");
+    let root_b_tmp = make_root("b");
+    let root_a = root_a_tmp.path().to_path_buf();
+    let root_b = root_b_tmp.path().to_path_buf();
+
+    // Sequential baseline.
+    let seq_candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
+    let seq_stats = Arc::new(Stats::default());
+    let seq_tool_accs = Arc::new(DashMap::new());
+    for r in [&root_a, &root_b] {
+        scan_root(
+            r,
+            &args,
+            seq_candidates.clone(),
+            seq_stats.clone(),
+            &[],
+            seq_tool_accs.clone(),
+            None,
+        )
+        .unwrap();
+    }
+    let mut seq_cands: Vec<PathBuf> = seq_candidates.iter().map(|e| e.key().clone()).collect();
+    seq_cands.sort();
+
+    // Concurrent version, mirroring run_audit_scan's std::thread::scope wiring.
+    let conc_candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
+    let conc_stats = Arc::new(Stats::default());
+    let conc_tool_accs = Arc::new(DashMap::new());
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = [&root_a, &root_b]
+            .into_iter()
+            .map(|r| {
+                let candidates = conc_candidates.clone();
+                let stats = conc_stats.clone();
+                let tool_accs = conc_tool_accs.clone();
+                let args = &args;
+                scope.spawn(move || scan_root(r, args, candidates, stats, &[], tool_accs, None))
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+    });
+    let mut conc_cands: Vec<PathBuf> = conc_candidates.iter().map(|e| e.key().clone()).collect();
+    conc_cands.sort();
+
+    assert_eq!(seq_cands, conc_cands);
+    assert_eq!(
+        seq_stats
+            .files_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        conc_stats
+            .files_seen
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    assert_eq!(
+        seq_stats
+            .dirs_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        conc_stats
+            .dirs_seen
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    assert_eq!(
+        seq_stats
+            .candidates_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        conc_stats
+            .candidates_seen
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+}
+
+/// Regression test for the scan-cache cache-hit path dropping candidates and
+/// undercounting stats on repeat scans (see `src/integration/fs.rs`'s
+/// `fold_cached_stats`/`aggregate_subtrees` and
+/// `src/integration/scan_cache.rs`).
+///
+/// Builds a workspace with several nested deletion candidates a few levels
+/// deep (mirroring the artifact shapes used elsewhere in this file: a Rust
+/// `target/` dir and a Python `venv/`), then scans it twice with the same
+/// on-disk `ScanCache` — exactly as `run_audit_scan` wires the cache in
+/// (`src/nouns/audit.rs`). Nothing on disk changes between the two scans, so
+/// every directory should hit the cache on the second pass; the candidate set
+/// and `files_seen`/`bytes_seen`/`dirs_seen`/`candidates_seen` totals from
+/// that cache-hit run must exactly match the first, cache-miss run.
+#[test]
+fn test_repeat_scan_with_cache_matches_first_scan() {
+    use osx_clnr::integration::scan_cache::ScanCache;
+
+    // Cache lives outside the scanned tree so its own on-disk files (created
+    // only after the walk completes, via `insert_batch`) can never be picked
+    // up as extra entries by a later scan of `root`.
+    let cache_tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
+    let cache = Arc::new(ScanCache::open(cache_tmp.path()).unwrap());
+
+    let root_tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
+    let root = root_tmp.path();
+
+    // Nested Rust project a few levels deep: root/a/b/rust-proj/target
+    let rust_proj = root.join("a").join("b").join("rust-proj");
+    fs::create_dir_all(&rust_proj).unwrap();
+    File::create(rust_proj.join("Cargo.toml")).unwrap();
+    let rust_target = rust_proj.join("target");
+    fs::create_dir(&rust_target).unwrap();
+    File::create(rust_target.join("output.bin")).unwrap();
+
+    // Nested Python project a few levels deep in a sibling subtree:
+    // root/c/d/e/py-proj/venv
+    let py_proj = root.join("c").join("d").join("e").join("py-proj");
+    fs::create_dir_all(&py_proj).unwrap();
+    File::create(py_proj.join("requirements.txt")).unwrap();
+    let py_venv = py_proj.join("venv");
+    fs::create_dir(&py_venv).unwrap();
+    File::create(py_venv.join("pip")).unwrap();
+
+    // Workaround for recent project ignoring: set mtimes to past for
+    // everything under root, so `ignore_recent_hours` filtering doesn't drop
+    // candidates on either scan, and so the second scan's directory mtimes
+    // are byte-for-byte identical to the first (the precondition for every
+    // directory to hit the cache).
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "find '{}' -exec touch -t 202001010000 {{}} +",
+            root.display()
+        ))
+        .status();
+
+    let args = ArgsSnapshot {
+        deps: true,
+        aggressive: true,
+        verbose: false,
+        tool_roots: false,
+        ignore_recent_hours: 1,
+    };
+
+    // First scan: populates the cache (cache-miss path).
+    let first_candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
+    let first_stats = Arc::new(Stats::default());
+    let first_tool_accs = Arc::new(DashMap::new());
+    scan_root(
+        root,
+        &args,
+        first_candidates.clone(),
+        first_stats.clone(),
+        &[],
+        first_tool_accs.clone(),
+        Some(cache.clone()),
+    )
+    .unwrap();
+
+    let mut first_cands: Vec<PathBuf> = first_candidates.iter().map(|e| e.key().clone()).collect();
+    first_cands.sort();
+    // Sanity check: the fixture actually produced both candidates before
+    // comparing repeat-scan behavior against it.
+    assert_eq!(first_cands, vec![rust_target.clone(), py_venv.clone()]);
+
+    // Second scan: identical workspace, same on-disk cache — should be
+    // entirely served by cache hits.
+    let second_candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
+    let second_stats = Arc::new(Stats::default());
+    let second_tool_accs = Arc::new(DashMap::new());
+    scan_root(
+        root,
+        &args,
+        second_candidates.clone(),
+        second_stats.clone(),
+        &[],
+        second_tool_accs.clone(),
+        Some(cache.clone()),
+    )
+    .unwrap();
+
+    let mut second_cands: Vec<PathBuf> =
+        second_candidates.iter().map(|e| e.key().clone()).collect();
+    second_cands.sort();
+
+    assert_eq!(
+        first_cands, second_cands,
+        "cache-hit repeat scan must not drop or add candidates"
+    );
+
+    assert_eq!(
+        first_stats
+            .files_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        second_stats
+            .files_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        "cache-hit repeat scan must not undercount files_seen"
+    );
+    assert_eq!(
+        first_stats
+            .bytes_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        second_stats
+            .bytes_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        "cache-hit repeat scan must not undercount bytes_seen"
+    );
+    assert_eq!(
+        first_stats
+            .dirs_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        second_stats
+            .dirs_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        "cache-hit repeat scan must not undercount dirs_seen"
+    );
+    assert_eq!(
+        first_stats
+            .candidates_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        second_stats
+            .candidates_seen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        "cache-hit repeat scan must not undercount candidates_seen"
     );
 }

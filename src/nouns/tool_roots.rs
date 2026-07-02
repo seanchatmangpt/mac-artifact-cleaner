@@ -2,9 +2,8 @@
 
 use clap::Subcommand;
 use dashmap::DashMap;
-use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::domain::artifact::{ArgsSnapshot, Candidate};
 use crate::domain::audit::Stats;
@@ -175,7 +174,7 @@ fn run_tool_roots_scan(
     let reporter = ProgressReporter::start("Auditing tool roots".to_string(), stats.clone());
 
     // Safety optimization: sweep only existing directories matching defined tool roots
-    let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));
+    let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
     for def in &tool_defs {
         if def.path.exists() {
             scan_root(
@@ -185,6 +184,7 @@ fn run_tool_roots_scan(
                 stats.clone(),
                 &tool_defs,
                 tool_accs.clone(),
+                None,
             )?;
         }
     }

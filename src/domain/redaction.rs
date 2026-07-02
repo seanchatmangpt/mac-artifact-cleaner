@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_privacy_redact_paths_and_credentials() {
-        let input = "Users home path is /Users/sac/dev/proj. Token is secret_token_xyz, and password = \"my-pwd-123\".";
+        let input = "Users home path is /Users/john/dev/proj. Token is secret_token_xyz, and password = \"my-pwd-123\".";
         let output = redact_content(input);
         println!("DEBUG OUTPUT: {}", output);
         assert!(output.contains("/Users/<user>/dev/proj"));

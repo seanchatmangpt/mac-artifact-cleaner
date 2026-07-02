@@ -12,11 +12,11 @@
 //! use std::path::PathBuf;
 //!
 //! let plan = DeletionPlan::new(
-//!     vec![PathBuf::from("/Users/sac/osx-clnr")],
+//!     vec![PathBuf::from("/Users/john/osx-clnr")],
 //!     false,
 //!     true,
 //!     vec![PlanItem {
-//!         path: PathBuf::from("/Users/sac/osx-clnr/target"),
+//!         path: PathBuf::from("/Users/john/osx-clnr/target"),
 //!         kind: PlanItemKind::Dir,
 //!         reason: "rebuildable cargo target".to_string(),
 //!         bytes: 200,
@@ -25,7 +25,7 @@
 //! );
 //!
 //! // Build a fabric with plan only
-//! let fabric = build_fabric(&plan, None, "/Users/sac/osx-clnr/plan.json", "/Users/sac/osx-clnr/receipt.json").unwrap();
+//! let fabric = build_fabric(&plan, None, "/Users/john/osx-clnr/plan.json", "/Users/john/osx-clnr/receipt.json").unwrap();
 //! assert_eq!(fabric.len(), 3); // 1 plan node, 1 root node, 1 item node
 //!
 //! // Build a fabric with plan and receipt
@@ -35,7 +35,7 @@
 //!     plan.created_unix + 10,
 //!     plan.created_unix + 20,
 //!     vec![DeletionResult {
-//!         path: PathBuf::from("/Users/sac/osx-clnr/target"),
+//!         path: PathBuf::from("/Users/john/osx-clnr/target"),
 //!         status: DeletionStatus::Deleted,
 //!         error: None,
 //!         blake3_hash: None,
@@ -48,8 +48,8 @@
 //! let fabric_with_receipt = build_fabric(
 //!     &plan,
 //!     Some(&receipt),
-//!     "/Users/sac/osx-clnr/plan.json",
-//!     "/Users/sac/osx-clnr/receipt.json",
+//!     "/Users/john/osx-clnr/plan.json",
+//!     "/Users/john/osx-clnr/receipt.json",
 //! ).unwrap();
 //! assert_eq!(fabric_with_receipt.len(), 4); // 1 plan node, 1 root node, 1 item node, 1 receipt node
 //! ```

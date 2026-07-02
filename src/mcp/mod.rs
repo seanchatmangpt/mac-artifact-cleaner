@@ -1,4 +1,11 @@
-#![allow(clippy::result_large_err, clippy::new_without_default, clippy::useless_format, clippy::ptr_arg, clippy::len_zero, clippy::unnecessary_lazy_evaluations)]
+#![allow(
+    clippy::result_large_err,
+    clippy::new_without_default,
+    clippy::useless_format,
+    clippy::ptr_arg,
+    clippy::len_zero,
+    clippy::unnecessary_lazy_evaluations
+)]
 //! osx-clnr MCP Server
 //!
 //! Model Context Protocol (MCP) server exposing osx-clnr capabilities.

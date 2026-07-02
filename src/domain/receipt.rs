@@ -164,6 +164,27 @@ pub fn check_reclaim(
 }
 
 impl DeletionReceipt {
+    /// Constructs a receipt from the operational facts of a deletion run.
+    ///
+    /// ```
+    /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
+    ///
+    /// let r = DeletionReceipt::new(
+    ///     0, 1, 2,
+    ///     vec![DeletionResult {
+    ///         path: "/tmp/proj/target".into(),
+    ///         status: DeletionStatus::Deleted,
+    ///         error: None,
+    ///         blake3_hash: None,
+    ///         bytes_freed: 1024,
+    ///     }],
+    ///     Some(8_000_000_000),
+    ///     Some(8_000_001_024),
+    /// );
+    /// assert_eq!(r.execution_record.version, 1);
+    /// assert_eq!(r.execution_record.results.len(), 1);
+    /// assert_eq!(r.execution_record.available_before, Some(8_000_000_000));
+    /// ```
     pub fn new(
         plan_created_unix: u64,
         execution_started_unix: u64,

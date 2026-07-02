@@ -158,17 +158,12 @@ pub struct AuditScanInput {
     pub include_aggressive: bool,
     #[serde(default = "default_ignore_recent_hours")]
     pub ignore_recent_hours: u32,
-    #[serde(default = "default_tool_roots")]
+    #[serde(default)]
     pub tool_roots: bool,
-    #[serde(default = "default_max_concurrent")]
-    pub max_concurrent: usize,
 }
 
 fn default_ignore_recent_hours() -> u32 {
     168
-}
-fn default_tool_roots() -> bool {
-    true
 }
 fn default_max_concurrent() -> usize {
     4

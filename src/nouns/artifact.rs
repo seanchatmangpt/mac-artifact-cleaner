@@ -2,9 +2,8 @@
 
 use clap::Subcommand;
 use dashmap::DashMap;
-use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::domain::artifact::{ArgsSnapshot, Candidate};
 use crate::domain::audit::Stats;
@@ -60,7 +59,7 @@ pub fn handle(action: ArtifactAction) -> anyhow::Result<()> {
                 ignore_recent_hours,
             };
 
-            let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));
+            let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
             let stats = Arc::new(Stats::default());
             *stats.phase.lock().unwrap() = "scanning files".to_string();
 
@@ -77,6 +76,7 @@ pub fn handle(action: ArtifactAction) -> anyhow::Result<()> {
                     stats.clone(),
                     &tool_defs,
                     tool_accs.clone(),
+                    None,
                 )?;
             }
 
@@ -100,12 +100,14 @@ pub fn handle(action: ArtifactAction) -> anyhow::Result<()> {
             println!("  Errors encountered:  {}", errors);
             println!("==================================================");
 
-            let lock = candidates.lock().unwrap();
-            println!("\nFound {} Deletion Candidates:", lock.len());
-            if lock.is_empty() {
+            println!("\nFound {} Deletion Candidates:", candidates.len());
+            if candidates.is_empty() {
                 println!("  No candidates found.");
             } else {
-                for c in lock.iter() {
+                let mut sorted: Vec<Candidate> =
+                    candidates.iter().map(|e| e.value().clone()).collect();
+                sorted.sort();
+                for c in &sorted {
                     println!("  • {} ({})", c.path.display(), c.reason);
                 }
             }

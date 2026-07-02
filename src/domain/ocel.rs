@@ -742,6 +742,21 @@ pub fn build_snapshot_thin_ocel(
 /// for both would make the event log lie about which operation actually ran — a
 /// model-vs-log mismatch. This emits `snapshot_delete_requested` so process
 /// mining can tell the two apart.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::ocel::build_snapshot_delete_ocel;
+///
+/// let log = build_snapshot_delete_ocel(
+///     "/",
+///     &["snap1".to_string(), "snap2".to_string()],
+///     &["snap2".to_string()],
+///     &["snap1".to_string()],
+/// );
+/// assert_eq!(log.events[0].event_type, "snapshot_delete_requested");
+/// assert_eq!(log.objects[0].object_type, "snapshot_state");
+/// ```
 pub fn build_snapshot_delete_ocel(
     volume: &str,
     before: &[String],

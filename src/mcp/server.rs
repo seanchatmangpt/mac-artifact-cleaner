@@ -88,8 +88,7 @@ impl OsxClnrMcpServer {
                         "include_deps": { "type": "boolean" },
                         "include_aggressive": { "type": "boolean" },
                         "ignore_recent_hours": { "type": "integer", "default": 168 },
-                        "tool_roots": { "type": "boolean", "default": true },
-                        "max_concurrent": { "type": "integer", "default": 4 }
+                        "tool_roots": { "type": "boolean", "default": false }
                     }
                 }
             }),
@@ -441,10 +440,9 @@ impl OsxClnrMcpServer {
             .unwrap_or_else(|| self.default_workspace.clone());
         let mut ctx = self.get_or_create_context(Some(workspace.clone()));
 
-        ctx.transition(WorkflowState::AuditNeeded)
-            .map_err(|_| {
-                ErrorResponse::invalid_state_transition(ctx.state.as_str(), "AUDIT_NEEDED")
-            })?;
+        ctx.transition(WorkflowState::AuditNeeded).map_err(|_| {
+            ErrorResponse::invalid_state_transition(ctx.state.as_str(), "AUDIT_NEEDED")
+        })?;
 
         ctx.transition(WorkflowState::AuditInProgress)
             .map_err(|_| {
@@ -453,11 +451,13 @@ impl OsxClnrMcpServer {
 
         // Spawn subprocess
         let roots = if input.roots.is_empty() {
-            vec![dirs::home_dir().unwrap_or_default()]
+            crate::nouns::default_scan_roots()
+                .map_err(|e| ErrorResponse::new(ErrorCode::InvalidInput, e.to_string()))?
         } else {
             input.roots
         };
 
+        let start = std::time::Instant::now();
         let result = self.runner.audit_run(
             &workspace,
             roots,
@@ -466,6 +466,7 @@ impl OsxClnrMcpServer {
             input.ignore_recent_hours,
             input.tool_roots,
         )?;
+        let scan_duration_secs = start.elapsed().as_secs_f64();
 
         if !result.success() {
             ctx.transition(WorkflowState::AuditFailed).ok();
@@ -482,10 +483,11 @@ impl OsxClnrMcpServer {
         ctx.clear_error();
         self.workflows.insert(workspace.display().to_string(), ctx);
 
-        Ok(serde_json::to_value(AuditScanOutput {
-            state: "AUDIT_COMPLETE".to_string(),
-            audit_file: audit_file.display().to_string(),
-            summary: AuditSummary {
+        let summary = std::fs::read_to_string(&audit_file)
+            .ok()
+            .and_then(|contents| parse_json_output(&contents).ok())
+            .map(|log| summarize_disk_audit_ocel(&log, scan_duration_secs))
+            .unwrap_or(AuditSummary {
                 total_dirs: 0,
                 total_files: 0,
                 total_bytes: 0,
@@ -493,8 +495,13 @@ impl OsxClnrMcpServer {
                 projects_detected: HashMap::new(),
                 largest_candidates: vec![],
                 errors: vec![],
-                scan_duration_secs: 0.0,
-            },
+                scan_duration_secs,
+            });
+
+        Ok(serde_json::to_value(AuditScanOutput {
+            state: "AUDIT_COMPLETE".to_string(),
+            audit_file: audit_file.display().to_string(),
+            summary,
             message: "Audit complete".to_string(),
         })
         .unwrap())
@@ -836,20 +843,81 @@ impl OsxClnrMcpServer {
     }
 
     fn safety_audit(&self, params: Value) -> Result<Value, ErrorResponse> {
+        use crate::domain::artifact::is_macos_os_dir;
+        use crate::domain::plan::DeletionPlan;
+
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
-        let _plan_file = input
+        let plan_file_str = input
             .get("plan_file")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 ErrorResponse::new(ErrorCode::InvalidInput, "plan_file required".to_string())
             })?;
 
-        Ok(json!({ "safe": true, "issues": [] }))
+        let plan_file = std::path::Path::new(plan_file_str);
+        if !plan_file.exists() {
+            return Err(ErrorResponse::new(
+                ErrorCode::InvalidInput,
+                format!("plan file not found: {}", plan_file_str),
+            ));
+        }
+
+        let raw = std::fs::read_to_string(plan_file).map_err(|e| {
+            ErrorResponse::new(
+                ErrorCode::SubprocessFailed,
+                format!("cannot read plan: {}", e),
+            )
+        })?;
+
+        let plan: DeletionPlan = serde_json::from_str(&raw).map_err(|e| {
+            ErrorResponse::new(
+                ErrorCode::JsonParseError,
+                format!("invalid plan JSON: {}", e),
+            )
+        })?;
+
+        let mut issues: Vec<Value> = Vec::new();
+
+        for item in &plan.items {
+            if is_macos_os_dir(&item.path) {
+                issues.push(json!({
+                    "severity": "critical",
+                    "kind": "protected_os_path",
+                    "path": item.path.to_string_lossy(),
+                    "message": "Path is inside a macOS OS-protected directory"
+                }));
+            }
+
+            // Flag dotfiles in home directory root
+            if let Some(name) = item.path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with('.') {
+                    if let Some(parent) = item.path.parent() {
+                        if parent == dirs::home_dir().unwrap_or_default() {
+                            issues.push(json!({
+                                "severity": "warning",
+                                "kind": "dotfile_in_home",
+                                "path": item.path.to_string_lossy(),
+                                "message": "Dotfile at home root — verify this is not a config file"
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        let safe = issues.iter().all(|i| i["severity"] != "critical");
+        Ok(json!({
+            "safe": safe,
+            "issues": issues,
+            "candidates_checked": plan.items.len()
+        }))
     }
 
     fn plan_rollback(&self, params: Value) -> Result<Value, ErrorResponse> {
+        use crate::integration::tmutil;
+
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
@@ -862,7 +930,34 @@ impl OsxClnrMcpServer {
             return Err(ErrorResponse::confirmation_required("plan_rollback"));
         }
 
-        Ok(json!({"restored": true}))
+        let mount = input.get("mount").and_then(|v| v.as_str()).unwrap_or("/");
+
+        let snapshots = tmutil::list_local_snapshots(mount).map_err(|e| {
+            ErrorResponse::new(
+                ErrorCode::SubprocessFailed,
+                format!("tmutil list snapshots failed: {}", e),
+            )
+        })?;
+
+        if snapshots.is_empty() {
+            return Ok(json!({
+                "restored": false,
+                "reason": "no local APFS snapshots available for rollback",
+                "mount": mount
+            }));
+        }
+
+        // Report available snapshots — caller chooses which to restore.
+        // Actual restore requires `tmutil localsnapshot restore` which needs root;
+        // we surface the list and instruct the user to use macOS Recovery or tmutil.
+        Ok(json!({
+            "restored": false,
+            "action_required": "manual",
+            "mount": mount,
+            "available_snapshots": snapshots,
+            "instructions": "To restore: boot to macOS Recovery, or run 'tmutil restore -s <snapshot>' as root.",
+            "message": format!("{} snapshots available for rollback", snapshots.len())
+        }))
     }
 
     fn snapshot_audit(&self, params: Value) -> Result<Value, ErrorResponse> {
@@ -909,6 +1004,46 @@ impl OsxClnrMcpServer {
             message: "Emergency reclaim complete".to_string(),
         })
         .unwrap())
+    }
+}
+
+/// Extracts audit summary fields from a parsed disk-audit OCEL log.
+fn summarize_disk_audit_ocel(log: &Value, scan_duration_secs: f64) -> AuditSummary {
+    let objects = log.get("objects").and_then(|v| v.as_array());
+
+    let disk_audit_attr = |name: &str| -> u64 {
+        objects
+            .and_then(|objs| {
+                objs.iter()
+                    .find(|o| o.get("type").and_then(|t| t.as_str()) == Some("disk_audit"))
+            })
+            .and_then(|o| o.get("attributes").and_then(|a| a.as_array()))
+            .and_then(|attrs| {
+                attrs
+                    .iter()
+                    .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name))
+            })
+            .and_then(|a| a.get("value").and_then(|v| v.as_u64()))
+            .unwrap_or(0)
+    };
+
+    let total_candidates = objects
+        .map(|objs| {
+            objs.iter()
+                .filter(|o| o.get("type").and_then(|t| t.as_str()) == Some("artifact_candidate"))
+                .count()
+        })
+        .unwrap_or(0);
+
+    AuditSummary {
+        total_dirs: disk_audit_attr("dirs_seen") as usize,
+        total_files: disk_audit_attr("files_seen") as usize,
+        total_bytes: disk_audit_attr("bytes_seen"),
+        total_candidates,
+        projects_detected: HashMap::new(),
+        largest_candidates: vec![],
+        errors: vec![],
+        scan_duration_secs,
     }
 }
 

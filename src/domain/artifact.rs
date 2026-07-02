@@ -80,11 +80,33 @@ impl EntrySnapshot {
     }
 
     /// Returns `true` if this entry is a directory.
+    ///
+    /// ```
+    /// use osx_clnr::domain::artifact::{EntryKind, EntrySnapshot};
+    /// use std::path::PathBuf;
+    ///
+    /// let dir = EntrySnapshot::new(PathBuf::from("/p/src"), "src".into(), None, EntryKind::Dir);
+    /// assert!(dir.is_dir());
+    ///
+    /// let file = EntrySnapshot::new(PathBuf::from("/p/main.rs"), "main.rs".into(), Some("rs".into()), EntryKind::File);
+    /// assert!(!file.is_dir());
+    /// ```
     pub fn is_dir(&self) -> bool {
         self.kind == EntryKind::Dir
     }
 
     /// Returns `true` if this entry is a file.
+    ///
+    /// ```
+    /// use osx_clnr::domain::artifact::{EntryKind, EntrySnapshot};
+    /// use std::path::PathBuf;
+    ///
+    /// let file = EntrySnapshot::new(PathBuf::from("/p/main.rs"), "main.rs".into(), Some("rs".into()), EntryKind::File);
+    /// assert!(file.is_file());
+    ///
+    /// let dir = EntrySnapshot::new(PathBuf::from("/p/src"), "src".into(), None, EntryKind::Dir);
+    /// assert!(!dir.is_file());
+    /// ```
     pub fn is_file(&self) -> bool {
         self.kind == EntryKind::File
     }
@@ -236,6 +258,26 @@ impl DirSnapshot {
     }
 
     /// Returns names of all child files whose extension matches the given one.
+    ///
+    /// ```
+    /// use osx_clnr::domain::artifact::{DirSnapshot, EntryKind, EntrySnapshot};
+    /// use std::path::PathBuf;
+    ///
+    /// let snap = DirSnapshot {
+    ///     children: vec![
+    ///         EntrySnapshot::new(PathBuf::from("/p/main.rs"), "main.rs".into(), Some("rs".into()), EntryKind::File),
+    ///         EntrySnapshot::new(PathBuf::from("/p/lib.rs"), "lib.rs".into(), Some("rs".into()), EntryKind::File),
+    ///         EntrySnapshot::new(PathBuf::from("/p/README.md"), "README.md".into(), Some("md".into()), EntryKind::File),
+    ///     ],
+    /// };
+    ///
+    /// // Positive case
+    /// let rs_files: Vec<_> = snap.files_with_ext("rs").collect();
+    /// assert_eq!(rs_files.len(), 2);
+    ///
+    /// // Negative case: no matches for an unseen extension
+    /// assert_eq!(snap.files_with_ext("toml").count(), 0);
+    /// ```
     pub fn files_with_ext<'a>(&'a self, ext: &'a str) -> impl Iterator<Item = &'a EntrySnapshot> {
         self.children.iter().filter(move |e| {
             e.is_file()
@@ -269,6 +311,91 @@ pub struct ArgsSnapshot {
     pub ignore_recent_hours: u64,
 }
 
+// ── Scan cache (pure) ──────────────────────────────────────────────────────────
+
+/// A cached record of a previously-scanned directory, used to skip re-descending
+/// into unchanged subtrees on repeat scans.
+///
+/// Every aggregate field (`files`, `bytes`, `dirs`, `candidates`,
+/// `candidates_list`) is a **true recursive total for the entire subtree**
+/// rooted at this directory — not just its immediate children — so that
+/// pruning a cache-hit subtree during a walk (see
+/// `crate::integration::fs::scan_root`) can fold in exactly the counts a
+/// fresh, full re-scan of that subtree would have produced, and can
+/// re-materialize every candidate that lives anywhere underneath it.
+///
+/// This struct carries only primitives and the pure `Candidate` DTO — no
+/// `sled` or other integration-layer types — so it can be constructed and
+/// compared entirely within the domain layer. The integration layer
+/// (`src/integration/scan_cache.rs`) owns serialization and the on-disk
+/// `sled::Db` handle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedDirEntry {
+    /// Directory mtime (`st_mtime`) at the time this entry was cached.
+    pub mtime: i64,
+    /// Hash of the sorted `(name, kind)` pairs of the directory's immediate
+    /// children — the early-cutoff signal. Two scans of a directory whose
+    /// mtime changed but whose children are identical (e.g. a benign `atime`
+    /// touch or backup-tool `utimes` call) still hash equal.
+    pub child_names_hash: u64,
+    /// Recursive file count for the entire subtree rooted at this directory
+    /// (this directory's own files plus every file in every visited
+    /// descendant directory). Files inside pruned artifact/barrier leaves
+    /// (e.g. `node_modules`) are not walked and so are not counted here —
+    /// those leaves are accounted for via `candidates` instead.
+    pub files: u64,
+    /// Recursive physical byte count for the entire subtree rooted at this
+    /// directory, mirroring `files`.
+    pub bytes: u64,
+    /// Recursive count of directories, including this one, in the subtree
+    /// (i.e. `1 + sum(descendant dirs)`).
+    pub dirs: u64,
+    /// Recursive count of artifact candidates discovered anywhere within
+    /// this subtree. Always equal to `candidates_list.len()`.
+    pub candidates: u64,
+    /// Every artifact candidate discovered anywhere within this subtree.
+    /// On a cache hit, `scan_root` re-inserts each of these into the live
+    /// candidates set, exactly as if the subtree had been freshly scanned.
+    pub candidates_list: Vec<Candidate>,
+}
+
+/// Decides whether a previously-cached directory entry is still valid for
+/// `current_mtime`/`current_children_hash`, following a Salsa-style
+/// early-cutoff: an mtime change alone does not invalidate the cache if the
+/// child listing hashes identically.
+///
+/// This function is pure: it takes only primitives and makes no filesystem
+/// or OS calls.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::{cache_hit, CachedDirEntry};
+///
+/// let prev = CachedDirEntry {
+///     mtime: 1000,
+///     child_names_hash: 42,
+///     files: 3,
+///     bytes: 4096,
+///     dirs: 1,
+///     candidates: 1,
+///     candidates_list: vec![],
+/// };
+///
+/// // Positive case: mtime and hash both match -> cache hit.
+/// assert!(cache_hit(&prev, 1000, 42));
+///
+/// // Negative case: mtime differs and the hash differs too -> real change, miss.
+/// assert!(!cache_hit(&prev, 1001, 99));
+///
+/// // Early-cutoff case: mtime differs (e.g. atime-only touch or backup tool)
+/// // but the child listing hash is unchanged -> still a hit.
+/// assert!(cache_hit(&prev, 1001, 42));
+/// ```
+pub fn cache_hit(prev: &CachedDirEntry, current_mtime: i64, current_children_hash: u64) -> bool {
+    prev.mtime == current_mtime || prev.child_names_hash == current_children_hash
+}
+
 // ── Classification predicates ──────────────────────────────────────────────────
 
 /// Returns true when a directory path represents a system/macOS directory
@@ -295,7 +422,7 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
         return false;
     }
 
-    // Allow everything inside the user's home directory (e.g. /Users/name/Library/...)
+    // Allow everything inside the user's home directory (e.g. /Users/example/Library/...)
     // but block the root-level /Library, /System, etc.
     if s.starts_with("/Users/") && !s.contains("/Library/Application Support/CloudDocs") {
         // We still want to block some very specific user paths that are too noisy or sensitive
@@ -372,13 +499,13 @@ pub fn is_global_cache(path: &Path) -> bool {
 /// use osx_clnr::domain::artifact::global_cache_candidates;
 /// use std::path::Path;
 ///
-/// let cands = global_cache_candidates(Path::new("/Users/u"));
+/// let cands = global_cache_candidates(Path::new("/Users/john"));
 ///
 /// // Positive case: the user's Library cache is nominated, under home.
-/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/u/Library/Caches")));
+/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/john/Library/Caches")));
 ///
 /// // Refusal case: nothing system-level (outside home) is ever nominated.
-/// assert!(cands.iter().all(|(p, _)| p.starts_with("/Users/u")));
+/// assert!(cands.iter().all(|(p, _)| p.starts_with("/Users/john")));
 /// ```
 pub fn global_cache_candidates(home: &Path) -> Vec<(std::path::PathBuf, String)> {
     [
@@ -451,6 +578,17 @@ pub fn is_artifact_leaf_name(name: &str) -> bool {
 
 /// Returns true if the given directory name represents a traversal barrier.
 /// This includes standard barrier names and custom prefix barriers (e.g. `target_`).
+///
+/// ```
+/// use osx_clnr::domain::artifact::is_traversal_barrier_name;
+///
+/// // Positive cases
+/// assert!(is_traversal_barrier_name("node_modules"));
+/// assert!(is_traversal_barrier_name("target_wasm32"));
+///
+/// // Negative case
+/// assert!(!is_traversal_barrier_name("src"));
+/// ```
 pub fn is_traversal_barrier_name(name: &str) -> bool {
     if name.starts_with("target_") {
         return true;

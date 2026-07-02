@@ -2,9 +2,8 @@
 
 use clap::Subcommand;
 use dashmap::DashMap;
-use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::domain::artifact::{ArgsSnapshot, Candidate};
 use crate::domain::audit::Stats;
@@ -78,7 +77,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                 ignore_recent_hours,
             };
 
-            let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));
+            let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
             let stats = Arc::new(Stats::default());
             *stats.phase.lock().unwrap() = "scanning files".to_string();
 
@@ -95,6 +94,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                     stats.clone(),
                     &tool_defs,
                     tool_accs.clone(),
+                    None,
                 )?;
             }
 
@@ -118,9 +118,9 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             println!("  Errors encountered:  {}", errors);
             println!("==================================================");
 
-            let lock = candidates.lock().unwrap();
-            let mut candidate_vec: Vec<Candidate> = lock.iter().cloned().collect();
-            drop(lock);
+            let mut candidate_vec: Vec<Candidate> =
+                candidates.iter().map(|e| e.value().clone()).collect();
+            candidate_vec.sort();
 
             // Optionally nominate large user-level caches the per-project scanner
             // never reaches. Guarded by `is_macos_os_dir` and existence; the curated

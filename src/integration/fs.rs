@@ -12,19 +12,19 @@
 
 use dashmap::DashMap;
 use ignore::{WalkBuilder, WalkState};
-use std::collections::BTreeSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::domain::artifact::{
-    artifact_candidates_from_snapshot, detect_project_from_snapshot, is_global_cache,
-    is_macos_os_dir, is_traversal_barrier_name, ArgsSnapshot, Candidate, DirSnapshot, EntryKind,
-    EntrySnapshot,
+    artifact_candidates_from_snapshot, cache_hit, detect_project_from_snapshot, is_global_cache,
+    is_macos_os_dir, is_traversal_barrier_name, ArgsSnapshot, CachedDirEntry, Candidate,
+    DirSnapshot, EntryKind, EntrySnapshot,
 };
 use crate::domain::audit::Stats;
 use crate::domain::tool_roots::{ToolRootAcc, ToolRootDef};
+use crate::integration::scan_cache::{child_names_hash, ScanCache};
 use anyhow::Context;
 
 // ── DirSnapshot builder ────────────────────────────────────────────────────────
@@ -50,7 +50,10 @@ pub fn read_dir_snapshot(dir: &Path) -> DirSnapshot {
             Ok(ft) if ft.is_dir() => EntryKind::Dir,
             Ok(ft) if ft.is_file() => EntryKind::File,
             _ => {
-                // Symlinks and unknowns: check via metadata.
+                // `entry.file_type()` only fails to resolve to file/dir here on
+                // genuine `DT_UNKNOWN` results (rare — FUSE and a handful of
+                // other filesystems don't populate `d_type`), not as a routine
+                // path. Fall back to a `stat` via `Path::is_dir` in that case.
                 if path.is_dir() {
                     EntryKind::Dir
                 } else {
@@ -248,10 +251,11 @@ fn is_recently_active(project_root: &Path, hours: u64) -> bool {
 pub fn scan_root(
     root: &Path,
     args: &ArgsSnapshot,
-    candidates: Arc<Mutex<BTreeSet<Candidate>>>,
+    candidates: Arc<DashMap<PathBuf, Candidate>>,
     stats: Arc<Stats>,
     known_tool_defs: &[ToolRootDef],
     tool_accs: Arc<DashMap<PathBuf, ToolRootAcc>>,
+    scan_cache: Option<Arc<ScanCache>>,
 ) -> anyhow::Result<()> {
     if !root.exists() {
         if args.verbose {
@@ -266,6 +270,29 @@ pub fn scan_root(
 
     let root_for_filter = root.to_path_buf();
     let stats_for_filter = stats.clone();
+    let scan_cache_for_filter = scan_cache.clone();
+    let candidates_for_filter = candidates.clone();
+
+    // Memoizes a directory's freshly-read `DirSnapshot` between `filter_entry`
+    // (which reads it once to compute the early-cutoff hash when a cached
+    // entry's mtime has changed) and the main visitor closure below (which
+    // needs the same snapshot again to detect projects/candidates). Without
+    // this, both call sites independently called `read_dir_snapshot`, doing
+    // the same `std::fs::read_dir` twice for every directory whose mtime had
+    // changed but which turned out to be a real, walkable miss.
+    let snapshot_memo: Arc<DashMap<PathBuf, DirSnapshot>> = Arc::new(DashMap::new());
+    let snapshot_memo_for_filter = snapshot_memo.clone();
+
+    // Bookkeeping consumed by `aggregate_subtrees` after the walk completes:
+    // one `DirRecord` per freshly-visited directory (its own, non-recursive
+    // stats + the candidates found directly within it), and one
+    // `CachedDirEntry` per directory pruned via a scan-cache hit (already a
+    // full recursive aggregate from a prior scan). Folding these bottom-up
+    // yields true recursive subtree totals instead of the previous
+    // shallow/immediate-children-only counts.
+    let dir_records: Arc<Mutex<Vec<(PathBuf, DirRecord)>>> = Arc::new(Mutex::new(Vec::new()));
+    let cache_hits: Arc<Mutex<Vec<(PathBuf, CachedDirEntry)>>> = Arc::new(Mutex::new(Vec::new()));
+    let cache_hits_for_filter = cache_hits.clone();
 
     let mut builder = WalkBuilder::new(root);
     builder
@@ -300,18 +327,61 @@ pub fn scan_root(
                 return false;
             }
         }
+
+        // Cache-based early cutoff: only directories are cached. A hit means
+        // this directory's children (as of last scan) are unchanged, so we
+        // fold the previously-recorded, true-recursive counts into `stats`,
+        // re-insert its cached candidates into the live set, and prune
+        // descent into the subtree instead of re-walking it.
+        if let Some(cache) = &scan_cache_for_filter {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_dir() {
+                    if let Ok(Some(prev)) = cache.get(path) {
+                        let mtime = meta.mtime();
+                        if prev.mtime == mtime {
+                            fold_cached_stats(&stats_for_filter, &candidates_for_filter, &prev);
+                            cache_hits_for_filter
+                                .lock()
+                                .unwrap()
+                                .push((path.to_path_buf(), prev));
+                            return false;
+                        }
+                        // mtime changed — early-cutoff: check whether the
+                        // child listing itself is actually unchanged (e.g. a
+                        // benign atime-only touch or backup-tool utimes call).
+                        let snap = read_dir_snapshot(path);
+                        let hash = child_names_hash(&snap);
+                        if cache_hit(&prev, mtime, hash) {
+                            fold_cached_stats(&stats_for_filter, &candidates_for_filter, &prev);
+                            cache_hits_for_filter
+                                .lock()
+                                .unwrap()
+                                .push((path.to_path_buf(), prev));
+                            return false;
+                        }
+                        // Real change — this directory will be visited
+                        // normally below. Stash the snapshot already read
+                        // here so the main closure doesn't read it again.
+                        snapshot_memo_for_filter.insert(path.to_path_buf(), snap);
+                    }
+                }
+            }
+        }
         true
     });
 
     let walker = builder.build_parallel();
     let args_snapshot = *args;
-    let known_tool_defs = known_tool_defs.to_vec();
+    let known_tool_defs: Arc<[ToolRootDef]> = Arc::from(known_tool_defs.to_vec());
 
     walker.run(|| {
         let candidates = candidates.clone();
         let stats = stats.clone();
         let known_tool_defs = known_tool_defs.clone();
         let tool_accs = tool_accs.clone();
+        let scan_cache = scan_cache.clone();
+        let snapshot_memo = snapshot_memo.clone();
+        let dir_records = dir_records.clone();
 
         Box::new(move |result| {
             let entry = match result {
@@ -337,7 +407,9 @@ pub fn scan_root(
                 eprintln!("Visiting: {}", path.display());
             }
 
-            if let Ok(meta) = entry.metadata() {
+            let meta = entry.metadata().ok();
+            let mut is_dir = false;
+            if let Some(meta) = &meta {
                 if meta.is_file() {
                     let physical = meta.blocks() * 512;
                     stats.files_seen.fetch_add(1, Ordering::Relaxed);
@@ -352,6 +424,7 @@ pub fn scan_root(
                         );
                     }
                 } else if meta.is_dir() {
+                    is_dir = true;
                     stats.dirs_seen.fetch_add(1, Ordering::Relaxed);
                     if args_snapshot.tool_roots {
                         record_tool_root_dir(path, &known_tool_defs, &tool_accs);
@@ -359,18 +432,19 @@ pub fn scan_root(
                 }
             }
 
-            let is_dir = entry
-                .file_type()
-                .map(|ft| ft.is_dir())
-                .unwrap_or_else(|| path.is_dir());
-
             if !is_dir {
                 return WalkState::Continue;
             }
 
             // Build an inert snapshot of this directory's children and pass it
             // to pure domain functions. No live OS handles are passed into domain.
-            let snap = read_dir_snapshot(path);
+            // Reuse the snapshot already read in `filter_entry`'s early-cutoff
+            // check, if any, instead of reading this directory a second time.
+            let snap = snapshot_memo
+                .remove(path)
+                .map(|(_, s)| s)
+                .unwrap_or_else(|| read_dir_snapshot(path));
+            let mut own_candidates: Vec<Candidate> = Vec::new();
             if let Some(project) = detect_project_from_snapshot(&snap) {
                 stats.projects_seen.fetch_add(1, Ordering::Relaxed);
 
@@ -381,22 +455,209 @@ pub fn scan_root(
                         .candidates_seen
                         .fetch_add(found.len(), Ordering::Relaxed);
 
-                    let mut lock = candidates.lock().unwrap();
                     for c in found {
                         if args_snapshot.ignore_recent_hours > 0 {
                             if is_recently_active(&c.path, args_snapshot.ignore_recent_hours) {
                                 continue;
                             }
                         }
-                        lock.insert(c);
+                        candidates.insert(c.path.clone(), c.clone());
+                        own_candidates.push(c);
                     }
                 }
             }
+
+            if scan_cache.is_some() {
+                let (files, bytes) = shallow_dir_stats(&snap);
+                dir_records.lock().unwrap().push((
+                    path.to_path_buf(),
+                    DirRecord {
+                        mtime: meta.as_ref().map(|m| m.mtime()).unwrap_or(0),
+                        child_names_hash: child_names_hash(&snap),
+                        own_files: files,
+                        own_bytes: bytes,
+                        own_candidates,
+                    },
+                ));
+            }
+
             WalkState::Continue
         })
     });
 
+    if let Some(cache) = &scan_cache {
+        let records = std::mem::take(&mut *dir_records.lock().unwrap());
+        let hits = std::mem::take(&mut *cache_hits.lock().unwrap());
+        let staged = aggregate_subtrees(records, hits);
+        if let Err(e) = cache.insert_batch(&staged) {
+            // A cache write failure must never fail the scan itself.
+            eprintln!("warning: failed to write scan cache: {e}");
+        }
+    }
+
     Ok(())
+}
+
+/// Per-directory bookkeeping collected during the parallel walk for every
+/// freshly-visited (non-cache-hit) directory: its own, non-recursive stats
+/// and the candidates found directly within it, plus enough identity
+/// (mtime/hash) to write a cache entry once its subtree total is known.
+/// Consumed by `aggregate_subtrees` after the walk completes.
+struct DirRecord {
+    mtime: i64,
+    child_names_hash: u64,
+    own_files: u64,
+    own_bytes: u64,
+    own_candidates: Vec<Candidate>,
+}
+
+/// Folds a cached directory's previously-recorded, true-recursive subtree
+/// counts into `stats`, and re-inserts its cached candidates into the live
+/// `candidates` set — used when a cache hit lets `scan_root` skip
+/// re-descending into that subtree, so the pruned subtree still contributes
+/// to totals and output exactly as a fresh scan would have.
+fn fold_cached_stats(
+    stats: &Stats,
+    candidates: &DashMap<PathBuf, Candidate>,
+    prev: &CachedDirEntry,
+) {
+    stats
+        .dirs_seen
+        .fetch_add(prev.dirs as usize, Ordering::Relaxed);
+    stats
+        .files_seen
+        .fetch_add(prev.files as usize, Ordering::Relaxed);
+    stats.bytes_seen.fetch_add(prev.bytes, Ordering::Relaxed);
+    stats
+        .candidates_seen
+        .fetch_add(prev.candidates as usize, Ordering::Relaxed);
+    for c in &prev.candidates_list {
+        candidates.insert(c.path.clone(), c.clone());
+    }
+}
+
+/// Computes true recursive subtree aggregates for every directory visited
+/// during a `scan_root` call and returns the batch of `(path,
+/// CachedDirEntry)` pairs to persist.
+///
+/// `records` holds one entry per freshly-visited directory with its own
+/// (non-recursive) stats; `hits` holds one entry per directory pruned
+/// because it hit the scan cache, whose `CachedDirEntry` is already a full
+/// recursive aggregate from a prior scan. Every entry is folded into its
+/// parent's running total, processing deepest paths first so a directory is
+/// only finalized after every one of its descendants has already
+/// contributed to it — a post-order reduction expressed as a single
+/// depth-sorted pass rather than as recursion. Cache-hit directories
+/// contribute to their ancestors' totals but are not re-emitted (nothing
+/// about them changed); only freshly-visited directories get a new
+/// `CachedDirEntry`.
+fn aggregate_subtrees(
+    records: Vec<(PathBuf, DirRecord)>,
+    hits: Vec<(PathBuf, CachedDirEntry)>,
+) -> Vec<(PathBuf, CachedDirEntry)> {
+    struct Agg {
+        dirs: u64,
+        files: u64,
+        bytes: u64,
+        candidates: Vec<Candidate>,
+        /// `Some((mtime, child_names_hash))` for freshly-visited directories,
+        /// which need a new cache entry written; `None` for cache-hit
+        /// directories, which only need to contribute to their ancestors.
+        own: Option<(i64, u64)>,
+    }
+
+    let mut agg_map: std::collections::HashMap<PathBuf, Agg> = std::collections::HashMap::new();
+
+    for (path, rec) in records {
+        agg_map.insert(
+            path,
+            Agg {
+                dirs: 1,
+                files: rec.own_files,
+                bytes: rec.own_bytes,
+                candidates: rec.own_candidates,
+                own: Some((rec.mtime, rec.child_names_hash)),
+            },
+        );
+    }
+    for (path, prev) in hits {
+        agg_map.insert(
+            path,
+            Agg {
+                dirs: prev.dirs,
+                files: prev.files,
+                bytes: prev.bytes,
+                candidates: prev.candidates_list,
+                own: None,
+            },
+        );
+    }
+
+    let mut paths: Vec<PathBuf> = agg_map.keys().cloned().collect();
+    // Deepest paths first, so a directory only rolls up into its parent
+    // once every one of its own descendants has already rolled up into it.
+    paths.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+
+    for path in &paths {
+        let Some(parent) = path.parent() else {
+            continue;
+        };
+        let (c_dirs, c_files, c_bytes, c_candidates) = {
+            let Some(child) = agg_map.get(path) else {
+                continue;
+            };
+            (
+                child.dirs,
+                child.files,
+                child.bytes,
+                child.candidates.clone(),
+            )
+        };
+        if let Some(parent_agg) = agg_map.get_mut(parent) {
+            parent_agg.dirs += c_dirs;
+            parent_agg.files += c_files;
+            parent_agg.bytes += c_bytes;
+            parent_agg.candidates.extend(c_candidates);
+        }
+    }
+
+    agg_map
+        .into_iter()
+        .filter_map(|(path, agg)| {
+            let (mtime, child_names_hash) = agg.own?;
+            Some((
+                path,
+                CachedDirEntry {
+                    mtime,
+                    child_names_hash,
+                    files: agg.files,
+                    bytes: agg.bytes,
+                    dirs: agg.dirs,
+                    candidates: agg.candidates.len() as u64,
+                    candidates_list: agg.candidates,
+                },
+            ))
+        })
+        .collect()
+}
+
+/// Computes file count / physical byte total for a directory's *immediate*
+/// file children only (non-recursive) — the cheap counts available from a
+/// `DirSnapshot` plus a `stat` per file. `scan_root` combines this per-directory
+/// "own" total with descendant totals in `aggregate_subtrees` to produce the
+/// true recursive aggregate stored in `CachedDirEntry`.
+fn shallow_dir_stats(snap: &DirSnapshot) -> (u64, u64) {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    for child in &snap.children {
+        if child.is_file() {
+            if let Ok(meta) = std::fs::metadata(&child.path) {
+                files += 1;
+                bytes += meta.blocks() * 512;
+            }
+        }
+    }
+    (files, bytes)
 }
 
 // ── Disk breakdown by top-level directory ─────────────────────────────────────

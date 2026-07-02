@@ -22,6 +22,9 @@ snapshot-thin-receipt*.json
 tm-exclusion-plan*.json
 tm-exclusion-receipt*.json
 
+# Sled-backed scan cache directory (written to cwd)
+.oclnr-cache/
+
 # Local logs
 *.log
 *.trace

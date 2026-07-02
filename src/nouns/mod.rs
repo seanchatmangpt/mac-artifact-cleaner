@@ -2,22 +2,29 @@
 
 pub mod artifact;
 pub mod audit;
+pub mod backup;
+pub mod brew;
 pub mod completion;
+pub mod daemon;
 pub mod delete;
 pub mod dev;
+pub mod docker;
 pub mod doctor;
 pub mod emergency;
 pub mod exclusion;
 pub mod github;
+pub mod monitor;
 pub mod ocel;
 pub mod plan;
 pub mod privacy;
 pub mod receipt;
 pub mod snapshot;
 pub mod tool_roots;
+pub mod tools;
 pub mod wizard;
 pub mod wpm;
 pub mod wpm_use_cases;
+pub mod xcode;
 
 use crate::domain::policy::OclnrPolicy;
 use clap::{Parser, Subcommand};
@@ -134,6 +141,55 @@ pub enum Command {
         #[command(subcommand)]
         action: github::GithubAction,
     },
+    /// Docker container runtime scan
+    Docker {
+        #[command(subcommand)]
+        action: docker::DockerAction,
+    },
+    /// Homebrew package manager scan
+    Brew {
+        #[command(subcommand)]
+        action: brew::BrewAction,
+    },
+    /// Background monitor daemon management
+    Daemon {
+        #[command(subcommand)]
+        action: daemon::DaemonAction,
+    },
+    /// Xcode simulator and DerivedData scan
+    Xcode {
+        #[command(subcommand)]
+        action: xcode::XcodeAction,
+    },
+    /// iOS device backup scan
+    Backup {
+        #[command(subcommand)]
+        action: backup::BackupAction,
+    },
+    /// Developer toolchain and package manager scans
+    Tools {
+        #[command(subcommand)]
+        action: tools::ToolsAction,
+    },
+    /// Check disk free space against a threshold and notify if under pressure.
+    ///
+    /// This is the command the `daemon install` launchd plist invokes on its
+    /// `StartInterval`. By default it performs a single check-and-exit; pass
+    /// `--watch` to poll continuously instead (for standalone, non-launchd use).
+    Monitor {
+        /// Disk free space threshold in GB; notify when below this
+        #[arg(long)]
+        threshold_gb: f64,
+        /// Volume mount point to check
+        #[arg(long, default_value = "/")]
+        mount: String,
+        /// Poll continuously instead of checking once and exiting
+        #[arg(long)]
+        watch: bool,
+        /// Poll interval in seconds, only used with --watch
+        #[arg(long, default_value = "300")]
+        interval_secs: u64,
+    },
 }
 
 /// Returns the default list of roots to scan for developer artifacts.
@@ -193,5 +249,17 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::Privacy { action } => privacy::handle(action),
         Command::Wpm { action } => wpm::handle(action),
         Command::Github { action } => github::handle(action),
+        Command::Docker { action } => docker::handle(action),
+        Command::Brew { action } => brew::handle(action),
+        Command::Daemon { action } => daemon::handle(action),
+        Command::Xcode { action } => xcode::handle(action),
+        Command::Backup { action } => backup::handle(action),
+        Command::Tools { action } => tools::handle(action),
+        Command::Monitor {
+            threshold_gb,
+            mount,
+            watch,
+            interval_secs,
+        } => monitor::handle(threshold_gb, mount, watch, interval_secs),
     }
 }

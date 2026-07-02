@@ -2,10 +2,9 @@
 
 use clap::Subcommand;
 use dashmap::DashMap;
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::domain::artifact::{ArgsSnapshot, Candidate};
 use crate::domain::audit::Stats;
@@ -19,6 +18,7 @@ use crate::integration::fs::{
 };
 use crate::integration::progress::human_bytes;
 use crate::integration::progress::ProgressReporter;
+use crate::integration::scan_cache::ScanCache;
 
 #[derive(Subcommand, Debug)]
 pub enum AuditAction {
@@ -416,7 +416,7 @@ fn run_audit_scan(
         ignore_recent_hours,
     };
 
-    let candidates = Arc::new(Mutex::new(BTreeSet::<Candidate>::new()));
+    let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
     let stats = Arc::new(Stats::default());
     *stats.phase.lock().unwrap() = "scanning disk".to_string();
 
@@ -430,20 +430,64 @@ fn run_audit_scan(
         }
     }
 
-    for r in roots {
-        scan_root(
-            r,
-            &args,
-            candidates.clone(),
-            stats.clone(),
-            &tool_defs,
-            tool_accs.clone(),
-        )?;
-    }
+    // One cache per workspace (the current directory — matching the existing
+    // workspace-relative convention for disk-audit.jsonocel/cleanup-plan.json),
+    // shared across all concurrently-scanned roots. A cache-open failure must
+    // never fail the whole scan — degrade to scanning without a cache.
+    let scan_cache = match ScanCache::open(std::path::Path::new(".")) {
+        Ok(cache) => Some(Arc::new(cache)),
+        Err(e) => {
+            eprintln!("warning: could not open scan cache, scanning without it: {e}");
+            None
+        }
+    };
+
+    std::thread::scope(|scope| -> anyhow::Result<()> {
+        let handles: Vec<_> = roots
+            .iter()
+            .map(|r| {
+                let candidates = candidates.clone();
+                let stats = stats.clone();
+                let tool_accs = tool_accs.clone();
+                let scan_cache = scan_cache.clone();
+                let tool_defs = &tool_defs;
+                let args = &args;
+                scope.spawn(move || {
+                    scan_root(r, args, candidates, stats, tool_defs, tool_accs, scan_cache)
+                })
+            })
+            .collect();
+
+        // Propagate errors from every root, not just the first.
+        let mut first_err = None;
+        for h in handles {
+            match h.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
+                Err(panic) => {
+                    if first_err.is_none() {
+                        first_err = Some(anyhow::anyhow!("scan_root thread panicked: {panic:?}"));
+                    }
+                }
+            }
+        }
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    })?;
 
     reporter.finish("✅ Disk audit complete!");
 
-    let cand_list: Vec<Candidate> = candidates.lock().unwrap().iter().cloned().collect();
+    let mut cand_list: Vec<Candidate> = candidates
+        .iter()
+        .map(|entry| entry.value().clone())
+        .collect();
+    cand_list.sort();
 
     let tool_reports = if tool_roots_enabled {
         crate::integration::fs::populate_tool_roots_metadata(&tool_defs, &tool_accs);
