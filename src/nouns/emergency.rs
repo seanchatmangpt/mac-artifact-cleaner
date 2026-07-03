@@ -57,6 +57,20 @@ pub fn handle(mount: String, yes: bool, receipt: Option<PathBuf>) -> anyhow::Res
     println!("Starting free space:");
     let start_avail = report_space(&mount);
 
+    // Hard refusal: `--yes` authorizes destructive action against a *real*
+    // mount point. If we can't even `statvfs` it, `mount` is bogus (typo,
+    // non-existent path, not a mount at all) and we must not silently fall
+    // back to sweeping the caller's real $HOME — that would run a genuine,
+    // unscoped reclaim the caller never asked for. Dry-run is unaffected
+    // since it only reports, never deletes.
+    if yes && start_avail.is_none() {
+        anyhow::bail!(
+            "refusing to reclaim: mount '{}' does not exist or is not a real mount point \
+             (statvfs failed); pass a valid --mount",
+            mount
+        );
+    }
+
     // ── Step 1: APFS local snapshots ────────────────────────────────────────
     // On a snapshot-based boot volume this is the highest-leverage action and
     // needs no large temp writes — exactly what we want at ~0 bytes free.
