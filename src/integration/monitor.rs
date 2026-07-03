@@ -3,12 +3,12 @@ use std::{path::Path, sync::Arc, time::SystemTime};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Result, Watcher};
 
 use crate::{
-    domain::{
-        crypto::generate_manifest,
-        ocl::{OclArtifact, OclDatabase},
-        time::system_time_to_unix,
+    domain::{ocl::OclArtifact, time::system_time_to_unix},
+    integration::{
+        fs::{generate_manifest, volume_space},
+        notify::notify_disk_pressure,
+        ocl_store::OclDatabase,
     },
-    integration::{fs::volume_space, notify::notify_disk_pressure},
 };
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;

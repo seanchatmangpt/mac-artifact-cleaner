@@ -275,4 +275,196 @@ mod tests {
         let guidance = ctx.next_step_guidance();
         assert!(guidance.contains("audit_scan"));
     }
+
+    /// All 18 WorkflowState variants, in declaration order.
+    const ALL_STATES: [WorkflowState; 18] = [
+        WorkflowState::Unstarted,
+        WorkflowState::AuditNeeded,
+        WorkflowState::AuditInProgress,
+        WorkflowState::AuditComplete,
+        WorkflowState::AuditFailed,
+        WorkflowState::PlanNeeded,
+        WorkflowState::PlanInProgress,
+        WorkflowState::PlanReady,
+        WorkflowState::PlanValidationFailed,
+        WorkflowState::PlanApproved,
+        WorkflowState::DeleteNeeded,
+        WorkflowState::DeleteInProgress,
+        WorkflowState::DeleteComplete,
+        WorkflowState::DeleteFailed,
+        WorkflowState::ReceiptReady,
+        WorkflowState::VerificationInProgress,
+        WorkflowState::CleanupComplete,
+        WorkflowState::CleanupFailed,
+    ];
+
+    fn ctx_in_state(state: WorkflowState) -> WorkflowContext {
+        let mut ctx = WorkflowContext::new(PathBuf::from("/tmp"));
+        ctx.state = state;
+        ctx
+    }
+
+    /// Exhaustive grid test: every (current, next) pair in the 18x18 state
+    /// space is checked against an explicit expected-valid-pairs set mirroring
+    /// `can_transition_to`'s match arms. Any accidental addition, removal, or
+    /// widening (e.g. an error-catch-all shadowing a specific arm) of a legal
+    /// transition changes this test's outcome. This is what would have caught
+    /// the AUDIT_COMPLETE -> PLAN_IN_PROGRESS bug (skipping PLAN_NEEDED).
+    #[test]
+    fn test_exhaustive_transition_grid() {
+        use WorkflowState::*;
+
+        // Non-error "happy path" and retry transitions explicitly allowed by
+        // can_transition_to, mirrored 1:1 from its match arms above the
+        // catch-all error arms.
+        let explicit_valid: &[(WorkflowState, WorkflowState)] = &[
+            (Unstarted, AuditNeeded),
+            (CleanupComplete, AuditNeeded),
+            (AuditNeeded, AuditInProgress),
+            (AuditInProgress, AuditComplete),
+            (AuditComplete, PlanNeeded),
+            (PlanNeeded, PlanInProgress),
+            (PlanInProgress, PlanReady),
+            (PlanReady, PlanInProgress),
+            (PlanReady, PlanApproved),
+            (PlanValidationFailed, PlanInProgress),
+            (PlanApproved, DeleteNeeded),
+            (DeleteNeeded, DeleteInProgress),
+            (DeleteInProgress, DeleteComplete),
+            (DeleteComplete, VerificationInProgress),
+            (VerificationInProgress, ReceiptReady),
+            (ReceiptReady, CleanupComplete),
+        ];
+
+        // Error/failure states are reachable from *any* current state
+        // (catch-all `(_, X) => Ok(())` arms).
+        let error_targets: &[WorkflowState] =
+            &[AuditFailed, PlanValidationFailed, DeleteFailed, CleanupFailed];
+
+        for &current in ALL_STATES.iter() {
+            for &next in ALL_STATES.iter() {
+                let ctx = ctx_in_state(current);
+                let actual = ctx.can_transition_to(next);
+
+                let expected_ok =
+                    explicit_valid.contains(&(current, next)) || error_targets.contains(&next);
+
+                assert_eq!(
+                    actual.is_ok(),
+                    expected_ok,
+                    "transition {} -> {}: expected {}, got {:?}",
+                    current.as_str(),
+                    next.as_str(),
+                    if expected_ok { "Ok" } else { "Err" },
+                    actual
+                );
+            }
+        }
+    }
+
+    /// Regression test for the specific bug found this session: a handler
+    /// tried to transition AUDIT_COMPLETE directly to PLAN_IN_PROGRESS,
+    /// skipping the required PLAN_NEEDED intermediate step.
+    #[test]
+    fn test_known_invalid_skips_rejected() {
+        use WorkflowState::*;
+
+        let invalid_skips: &[(WorkflowState, WorkflowState)] = &[
+            // The exact bug: AUDIT_COMPLETE -> PLAN_IN_PROGRESS skips PLAN_NEEDED.
+            (AuditComplete, PlanInProgress),
+            // Skipping straight from AuditComplete to later plan/delete stages.
+            (AuditComplete, PlanReady),
+            (AuditComplete, PlanApproved),
+            (AuditComplete, DeleteNeeded),
+            // Can't approve a plan that hasn't been readied.
+            (PlanNeeded, PlanApproved),
+            (PlanInProgress, PlanApproved),
+            // Can't delete without an approved plan.
+            (PlanReady, DeleteNeeded),
+            (PlanApproved, DeleteInProgress),
+            // Can't jump straight to verification/receipt/cleanup.
+            (DeleteNeeded, DeleteComplete),
+            (DeleteComplete, ReceiptReady),
+            (DeleteComplete, CleanupComplete),
+            (VerificationInProgress, CleanupComplete),
+            // Unstarted cannot skip straight into the middle of the pipeline.
+            (Unstarted, PlanNeeded),
+            (Unstarted, DeleteNeeded),
+            (Unstarted, CleanupComplete),
+        ];
+
+        for &(current, next) in invalid_skips {
+            let ctx = ctx_in_state(current);
+            assert!(
+                ctx.can_transition_to(next).is_err(),
+                "expected {} -> {} to be rejected, but it was allowed",
+                current.as_str(),
+                next.as_str()
+            );
+        }
+    }
+
+    /// Every state must be able to reach every error/failure variant
+    /// (the catch-all `(_, ErrorState) => Ok(())` arms).
+    #[test]
+    fn test_every_state_can_reach_every_error_variant() {
+        use WorkflowState::*;
+
+        let error_targets: [WorkflowState; 4] =
+            [AuditFailed, PlanValidationFailed, DeleteFailed, CleanupFailed];
+
+        for &current in ALL_STATES.iter() {
+            for &err in error_targets.iter() {
+                let ctx = ctx_in_state(current);
+                assert!(
+                    ctx.can_transition_to(err).is_ok(),
+                    "expected {} -> {} (error transition) to be allowed",
+                    current.as_str(),
+                    err.as_str()
+                );
+            }
+        }
+    }
+
+    /// Walks the full documented happy-path sequence end-to-end, including
+    /// the loop back from CleanupComplete to AuditNeeded, asserting every
+    /// step succeeds via the real `transition` method (not just
+    /// `can_transition_to`).
+    #[test]
+    fn test_full_happy_path_sequence() {
+        use WorkflowState::*;
+
+        let sequence: &[WorkflowState] = &[
+            Unstarted,
+            AuditNeeded,
+            AuditInProgress,
+            AuditComplete,
+            PlanNeeded,
+            PlanInProgress,
+            PlanReady,
+            PlanApproved,
+            DeleteNeeded,
+            DeleteInProgress,
+            DeleteComplete,
+            VerificationInProgress,
+            ReceiptReady,
+            CleanupComplete,
+            // Loop back for the next cleanup cycle.
+            AuditNeeded,
+        ];
+
+        let mut ctx = WorkflowContext::new(PathBuf::from("/tmp"));
+        assert_eq!(ctx.state, Unstarted);
+
+        for &next in sequence.iter().skip(1) {
+            let from = ctx.state;
+            assert!(
+                ctx.transition(next).is_ok(),
+                "expected happy-path transition {} -> {} to succeed",
+                from.as_str(),
+                next.as_str()
+            );
+            assert_eq!(ctx.state, next);
+        }
+    }
 }

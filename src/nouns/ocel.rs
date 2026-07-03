@@ -39,7 +39,9 @@ pub fn handle(action: OcelAction) -> anyhow::Result<()> {
                 Err(refusal) => {
                     println!("❌ OCEL log has validation errors:");
                     println!("  - {}", refusal.reason);
-                    anyhow::bail!("OCEL validation failed");
+                    anyhow::bail!(
+                        "OCEL validation failed\n\nSuggestions:\n  - Check that evidence files are valid JSON/JSONOCEL\n  - Re-run `oclnr audit run` or `oclnr delete execute` to regenerate the OCEL log\n  - Verify no external process modified the log file"
+                    );
                 }
             }
         }

@@ -68,6 +68,7 @@ pub fn handle(path: Option<PathBuf>) -> anyhow::Result<()> {
     delete::handle(delete::DeleteAction::Execute {
         plan: plan_file.clone(),
         receipt: receipt_file.clone(),
+        yes: true,
     })?;
 
     println!("\n{}", "=====================================================".green().bold());

@@ -164,6 +164,16 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                 })
                 .collect();
 
+            // Drop zero-byte file/dir candidates (mostly near-empty AI-tool temp
+            // folders like `.claude/tmp`) — they aren't worth reasoning about or
+            // deleting individually, and left unfiltered they can dominate the
+            // item count and drown out real reclaim opportunities. GitHub-kind
+            // items intentionally carry `bytes: 0` here (their size isn't known
+            // at plan-build time) and are kept regardless.
+            items.retain(|i| {
+                i.bytes > 0 || !matches!(i.kind, PlanItemKind::File | PlanItemKind::Dir)
+            });
+
             // Largest reclaim first — both for the printed preview and so deletion
             // tackles the biggest wins before any I/O errors can interrupt it.
             items.sort_by_key(|b| std::cmp::Reverse(b.bytes));

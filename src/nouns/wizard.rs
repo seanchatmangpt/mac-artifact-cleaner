@@ -65,6 +65,7 @@ pub fn handle() -> anyhow::Result<()> {
     delete::handle(delete::DeleteAction::Execute {
         plan: plan_file.clone(),
         receipt: receipt_file.clone(),
+        yes: true,
     })?;
 
     println!("\n{}", "[4/4] APFS Snapshot Check...".blue());

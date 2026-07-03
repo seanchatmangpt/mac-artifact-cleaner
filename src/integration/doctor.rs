@@ -71,6 +71,50 @@ pub fn read_doctest_files(workspace_root: &Path) -> Vec<(String, String)> {
     out
 }
 
+/// Reads the file contents of all files under `src/domain/**` (recursively)
+/// for domain-purity checking.
+pub fn read_domain_files(workspace_root: &Path) -> Vec<(String, String)> {
+    let domain_dir = workspace_root.join("src/domain");
+    let mut out = Vec::new();
+
+    fn traverse(dir: &Path, root: &Path, out: &mut Vec<(String, String)>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    traverse(&path, root, out);
+                } else if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+                    let rel =
+                        path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        out.push((rel, content));
+                    }
+                }
+            }
+        }
+    }
+
+    if domain_dir.is_dir() {
+        traverse(&domain_dir, workspace_root, &mut out);
+    }
+    out
+}
+
+/// Reads the file contents of the delete-execute code paths
+/// (`src/nouns/delete.rs` and `src/domain/delete.rs`) for the
+/// scanner/deleter separation policy check.
+pub fn read_delete_path_files(workspace_root: &Path) -> Vec<(String, String)> {
+    let candidates = ["src/nouns/delete.rs", "src/domain/delete.rs"];
+    let mut out = Vec::new();
+    for candidate in &candidates {
+        let path = workspace_root.join(candidate);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            out.push((candidate.to_string(), content));
+        }
+    }
+    out
+}
+
 /// Reads all relevant repository files for privacy checking.
 pub fn read_privacy_files(
     workspace_root: &Path,

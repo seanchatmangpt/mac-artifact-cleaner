@@ -1,42 +1,31 @@
-//! Content-addressing helpers: BLAKE3 file hashing used to produce
+//! Content-addressing helpers: BLAKE3 hashing used to produce
 //! tamper-evident manifests for deletion receipts.
-
-use std::{
-    fs::File,
-    io::{Read, Result},
-    path::Path,
-};
+//!
+//! **Domain purity**: this module only hashes already-read bytes handed to it
+//! by the caller. Reading file contents from disk is the integration layer's
+//! job (`crate::integration::fs::generate_manifest`), which streams the file
+//! and delegates the actual digest computation back to [`hash_bytes`].
 
 use blake3;
 
-/// Computes the BLAKE3 hex digest of a file's contents, streaming it in
-/// 64 KiB chunks so large files don't need to be loaded into memory at once.
+/// Computes the BLAKE3 hex digest of `data`.
 ///
 /// ```
-/// use osx_clnr::domain::crypto::generate_manifest;
-/// use std::io::Write;
+/// use osx_clnr::domain::crypto::hash_bytes;
 ///
-/// let mut file = tempfile::NamedTempFile::new().unwrap();
-/// write!(file, "hello world").unwrap();
+/// // Positive: hex digest is 32 bytes = 64 hex chars.
+/// let digest = hash_bytes(b"hello world");
+/// assert_eq!(digest.len(), 64);
 ///
-/// let digest = generate_manifest(file.path()).unwrap();
-/// assert_eq!(digest.len(), 64); // BLAKE3 hex digest is 32 bytes = 64 hex chars
+/// // Negative: different content yields a different digest.
+/// let other = hash_bytes(b"hello there");
+/// assert_ne!(digest, other);
 ///
-/// // Refusal: a missing file yields an I/O error, not a panic.
-/// assert!(generate_manifest(std::path::Path::new("/nonexistent/file")).is_err());
+/// // Refusal: empty input still hashes deterministically rather than
+/// // panicking or erroring — there is no invalid byte slice.
+/// assert_eq!(hash_bytes(b"").len(), 64);
+/// assert_eq!(hash_bytes(b""), hash_bytes(b""));
 /// ```
-pub fn generate_manifest(path: &Path) -> Result<String> {
-    let mut file = File::open(path)?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0; 65536];
-
-    loop {
-        let n = file.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-
-    Ok(hasher.finalize().to_hex().to_string())
+pub fn hash_bytes(data: &[u8]) -> String {
+    blake3::hash(data).to_hex().to_string()
 }

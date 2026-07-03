@@ -199,7 +199,13 @@ pub struct PlanBuildInput {
     #[serde(default)]
     pub audit_file: Option<PathBuf>,
     #[serde(default)]
+    pub roots: Vec<PathBuf>,
+    #[serde(default)]
     pub candidates: Option<Vec<Value>>,
+    #[serde(default)]
+    pub deps: bool,
+    #[serde(default)]
+    pub aggressive: bool,
     #[serde(default)]
     pub include_global_caches: bool,
     #[serde(default)]

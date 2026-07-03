@@ -5,7 +5,8 @@ use std::path::Path;
 use clap::Subcommand;
 
 use crate::domain::doctor::{
-    diagnose_architecture, diagnose_doctests, diagnose_privacy, diagnose_substrate,
+    diagnose_architecture, diagnose_doctests, diagnose_domain_purity, diagnose_privacy,
+    diagnose_scan_delete_separation, diagnose_substrate,
 };
 
 #[derive(Subcommand, Debug)]
@@ -18,6 +19,10 @@ pub enum DoctorAction {
     Doctests,
     /// Assert privacy and redaction rule compliance
     Privacy,
+    /// Assert src/domain/** has zero std::fs/std::process/OS calls
+    DomainPurity,
+    /// Assert the scanner-cannot-delete / deleter-cannot-scan invariant
+    ScanDeleteSeparation,
 }
 
 pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
@@ -47,7 +52,10 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
             }
             println!("\nTotal architecture issues: {}", report.total_issues);
             if report.total_issues > 0 {
-                anyhow::bail!("Architecture check failed with {} issues.", report.total_issues);
+                anyhow::bail!(
+                    "Architecture check failed with {} issues.\n\nSuggestions:\n  - Review the directories/nouns checks above for missing files\n  - Ensure src/domain, src/integration, src/nouns, src/mcp exist as expected\n  - Re-run `oclnr doctor arch` after fixing",
+                    report.total_issues
+                );
             } else {
                 println!("✅ Architecture check passed!");
             }
@@ -97,9 +105,65 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
                 for info in &report.functions_missing_doctest {
                     println!("  - File: {}, Function: {}", info.file_name, info.fn_name);
                 }
-                anyhow::bail!("Doctests check failed. Public functions must contain doctests.");
+                anyhow::bail!(
+                    "Doctests check failed. Public functions must contain doctests.\n\nSuggestions:\n  - Add doctests to the functions listed above (positive + negative + refusal cases)\n  - Re-run `oclnr doctor doc` to confirm"
+                );
             } else {
                 println!("✅ All public functions have valid doctests!");
+            }
+        }
+        DoctorAction::DomainPurity => {
+            println!("Auditing domain purity (src/domain/** must have zero std::fs/std::process/OS calls)...");
+            let files = crate::integration::doctor::read_domain_files(workspace_root);
+            let report = diagnose_domain_purity(&files);
+
+            println!("- Files scanned: {}", report.files_scanned);
+
+            if !report.violations.is_empty() {
+                println!("\n❌ Domain-purity violations found:");
+                for v in &report.violations {
+                    println!("  - {}:{} -> {}", v.file_path, v.line_number, v.matched_pattern);
+                }
+                anyhow::bail!(
+                    "Domain-purity check failed with {} violation(s). src/domain/** must have zero std::fs, std::process, or OS calls.",
+                    report.violations.len()
+                );
+            } else {
+                println!(
+                    "✅ Domain-purity check passed! No forbidden OS calls found in src/domain/**."
+                );
+            }
+        }
+        DoctorAction::ScanDeleteSeparation => {
+            println!("Auditing scanner/deleter separation (scanner cannot delete; deleter cannot scan)...");
+            let files = crate::integration::doctor::read_delete_path_files(workspace_root);
+            let report = diagnose_scan_delete_separation(&files);
+
+            println!("- Files scanned: {}", report.files_scanned);
+            println!(
+                "- delete path reads from plan_file: {}",
+                if report.plan_file_param_found { "Yes" } else { "No" }
+            );
+
+            let mut failed = false;
+            if !report.violations.is_empty() {
+                println!("\n❌ Forbidden scan/audit calls found in delete path:");
+                for v in &report.violations {
+                    println!("  - {}:{} -> {}", v.file_path, v.line_number, v.matched_pattern);
+                }
+                failed = true;
+            }
+            if !report.plan_file_param_found {
+                println!("\n❌ Delete path does not appear to read from a plan_file parameter.");
+                failed = true;
+            }
+
+            if failed {
+                anyhow::bail!(
+                    "Scan/delete separation check failed. The deleter must never scan; it must read exclusively from a previously-built plan file."
+                );
+            } else {
+                println!("✅ Scan/delete separation check passed!");
             }
         }
         DoctorAction::Privacy => {
@@ -142,7 +206,9 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
                         leak.file_path, leak.line_number, leak.matched_pattern
                     );
                 }
-                anyhow::bail!("Privacy check failed. Found unredacted local paths.");
+                anyhow::bail!(
+                    "Privacy check failed. Found unredacted local paths.\n\nSuggestions:\n  - Run `oclnr privacy redact --file <path>` on each flagged file\n  - Re-run `oclnr doctor priv` to confirm"
+                );
             } else {
                 println!(
                     "✅ Privacy check passed! No local user profiles or unredacted paths found."

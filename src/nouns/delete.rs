@@ -12,13 +12,12 @@ use wasm4pm_compat::{admission::Admit, evidence::Evidence, state::Raw};
 
 use crate::{
     domain::{
-        crypto::generate_manifest,
         delete::{DeletionPlanAdjudicator, PlanSafetyWitness},
         plan::{DeletionPlan, PlanItemKind},
         receipt::{DeletionReceipt, DeletionResult, DeletionStatus},
     },
     integration::{
-        fs::{delete_dir_all, delete_file, volume_space, write_or_dump_on_full},
+        fs::{delete_dir_all, delete_file, generate_manifest, volume_space, write_or_dump_on_full},
         progress::human_bytes,
     },
 };
@@ -33,24 +32,64 @@ pub enum DeleteAction {
         /// Path to write the execution receipt
         #[arg(short, long)]
         receipt: PathBuf,
+        /// Actually delete; default is a dry-run preview
+        #[arg(long)]
+        yes: bool,
     },
 }
 
 pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
     match action {
-        DeleteAction::Execute { plan: plan_path, receipt: receipt_path } => {
-            let content = std::fs::read_to_string(&plan_path)?;
-            let plan: DeletionPlan = serde_json::from_str(&content)?;
+        DeleteAction::Execute { plan: plan_path, receipt: receipt_path, yes } => {
+            let content = std::fs::read_to_string(&plan_path).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to read plan file {}: {}\n\nSuggestions:\n  - Check that {} was created by `oclnr plan build`\n  - Re-run `oclnr plan build` to regenerate the plan\n  - Check file permissions on {}",
+                    plan_path.display(),
+                    e,
+                    plan_path.display(),
+                    plan_path.display()
+                )
+            })?;
+            let plan: DeletionPlan = serde_json::from_str(&content).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to parse plan file {}: {}\n\nSuggestions:\n  - Check that {} is valid JSON\n  - Re-run `oclnr plan build` to regenerate the plan",
+                    plan_path.display(),
+                    e,
+                    plan_path.display()
+                )
+            })?;
 
             // Validation step — transition from Raw to Admitted using Evidence typestates.
             let raw_evidence = Evidence::<_, Raw, PlanSafetyWitness>::raw(plan);
             let admitted_plan = match DeletionPlanAdjudicator::admit(raw_evidence) {
                 Ok(admitted) => admitted.into_evidence(),
-                Err(refusal) => anyhow::bail!("Plan validation failed: {}", refusal.reason),
+                Err(refusal) => anyhow::bail!(
+                    "Plan validation failed: {}\n\nSuggestions:\n  - Call `oclnr plan inspect --plan {}` to review the plan\n  - Rebuild the plan with `oclnr plan build`\n  - Verify no external processes modified the filesystem since the plan was created",
+                    refusal.reason,
+                    plan_path.display()
+                ),
             };
 
             // Rebind plan to the value inside the Admitted evidence to prove it's safe to use.
             let plan = admitted_plan.into_inner();
+
+            if !yes {
+                println!("==================================================");
+                println!("             DELETION DRY-RUN PREVIEW             ");
+                println!("==================================================");
+                println!("  Mode: DRY-RUN (pass --yes to execute deletion)");
+                println!("  Plan: {}", plan_path.display());
+                println!("  Items that would be deleted: {}", plan.items.len());
+                let mut total_bytes: u64 = 0;
+                for item in &plan.items {
+                    total_bytes += item.bytes;
+                    println!("    - {} ({})", item.path.display(), human_bytes(item.bytes));
+                }
+                println!("  Total (planned): {}", human_bytes(total_bytes));
+                println!("==================================================");
+                println!("\nNo files were deleted. Re-run with --yes to execute.");
+                return Ok(());
+            }
 
             println!("Executing deletion from plan: {}", plan_path.display());
             let space_before = volume_space(std::path::Path::new("/")).ok();

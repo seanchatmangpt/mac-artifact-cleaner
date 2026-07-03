@@ -105,11 +105,15 @@ pub fn handle(action: PrivacyAction) -> anyhow::Result<()> {
                         leak.file_path, leak.line_number, leak.matched_pattern
                     );
                 }
-                anyhow::bail!("Privacy scan failed. Found unredacted local paths.");
+                anyhow::bail!(
+                    "Privacy scan failed. Found unredacted local paths.\n\nSuggestions:\n  - Run `oclnr privacy redact --file <path>` on each flagged file\n  - Check that output files (disk-audit.json, *.jsonocel, cleanup-plan.json, deletion-receipt.jsonocel) are gitignored\n  - Re-run `oclnr privacy scan` to confirm the paths are clean"
+                );
             }
 
             if !report.found_sensitive_files.is_empty() {
-                anyhow::bail!("Privacy scan failed. Found sensitive files that should be cleaned or gitignored.");
+                anyhow::bail!(
+                    "Privacy scan failed. Found sensitive files that should be cleaned or gitignored.\n\nSuggestions:\n  - Add the flagged files to .gitignore\n  - Remove them from the repository if already tracked\n  - Re-run `oclnr privacy scan` to confirm"
+                );
             }
 
             println!("✅ Privacy scan passed! No local user profiles, credentials, or unredacted paths found.");

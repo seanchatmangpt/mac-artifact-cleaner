@@ -252,6 +252,251 @@ pub(crate) fn scan_unredacted_paths(file_path: &str, content: &str) -> Vec<Priva
     leaks
 }
 
+/// A single detected domain-purity violation (forbidden OS/fs/process call
+/// found inside `src/domain/**`).
+#[derive(Debug, Clone)]
+pub struct PurityViolation {
+    pub file_path: String,
+    pub line_number: usize,
+    pub matched_pattern: String,
+}
+
+/// Report returned by `diagnose_domain_purity`
+#[derive(Debug, Clone)]
+pub struct DomainPurityReport {
+    pub files_scanned: usize,
+    pub violations: Vec<PurityViolation>,
+}
+
+/// Forbidden patterns that indicate a domain-purity violation: direct
+/// filesystem, process, or other OS-call access from `src/domain/**`.
+const FORBIDDEN_DOMAIN_PATTERNS: &[&str] = &[
+    "std::fs::",
+    "use std::fs",
+    "fs::File",
+    "fs::read",
+    "fs::write",
+    "fs::create",
+    "fs::remove",
+    "fs::metadata",
+    "fs::DirEntry",
+    "std::process::Command",
+    "use std::process",
+    "process::Command",
+    "std::net::",
+    "use std::net",
+    "sled::Db",
+    "sled::",
+];
+
+/// Scans a single domain file's content for forbidden OS-call patterns,
+/// skipping lines carrying an explicit `// doctor-allow: domain-purity`
+/// justification comment.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::doctor::scan_domain_purity;
+///
+/// // Positive case: no violations
+/// let clean = scan_domain_purity("plan.rs", "pub fn build() -> u32 { 1 }");
+/// assert!(clean.is_empty());
+///
+/// // Negative case: a std::fs import is flagged
+/// let dirty = scan_domain_purity("crypto.rs", "use std::fs::File;\n");
+/// assert_eq!(dirty.len(), 1);
+/// assert_eq!(dirty[0].line_number, 1);
+///
+/// // Refusal case: explicitly allow-listed line is not flagged
+/// let allowed = scan_domain_purity(
+///     "ocl.rs",
+///     "use std::fs::File; // doctor-allow: domain-purity\n",
+/// );
+/// assert!(allowed.is_empty());
+/// ```
+pub fn scan_domain_purity(file_path: &str, content: &str) -> Vec<PurityViolation> {
+    let mut violations = Vec::new();
+
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim_start();
+        // Skip comments and doc-comments: they reference these patterns in
+        // prose (e.g. explaining what the integration layer does) without
+        // actually invoking them.
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        // Skip string-literal pattern definitions (this module's own
+        // allowlist tables reference the pattern text without using it).
+        if trimmed.starts_with('"') || trimmed.contains("\": &[&str]") {
+            continue;
+        }
+        if line.contains("doctor-allow: domain-purity") {
+            continue;
+        }
+        for pattern in FORBIDDEN_DOMAIN_PATTERNS {
+            if line.contains(pattern) {
+                violations.push(PurityViolation {
+                    file_path: file_path.to_string(),
+                    line_number: i + 1,
+                    matched_pattern: (*pattern).to_string(),
+                });
+                break;
+            }
+        }
+    }
+
+    violations
+}
+
+/// Diagnoses `src/domain/**` for violations of the hard domain-purity
+/// constraint: zero `std::fs`, `std::process`, or other OS calls.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::doctor::diagnose_domain_purity;
+///
+/// // Positive case: clean domain files pass
+/// let files = vec![("plan.rs".to_string(), "pub fn build() {}".to_string())];
+/// let report = diagnose_domain_purity(&files);
+/// assert!(report.violations.is_empty());
+///
+/// // Negative case: std::fs usage is caught
+/// let dirty = vec![("crypto.rs".to_string(), "use std::fs::File;".to_string())];
+/// let report = diagnose_domain_purity(&dirty);
+/// assert_eq!(report.violations.len(), 1);
+/// assert_eq!(report.violations[0].file_path, "crypto.rs");
+/// ```
+pub fn diagnose_domain_purity(files: &[(String, String)]) -> DomainPurityReport {
+    let mut violations = Vec::new();
+    for (file_path, content) in files {
+        violations.extend(scan_domain_purity(file_path, content));
+    }
+    DomainPurityReport { files_scanned: files.len(), violations }
+}
+
+/// A single detected scanner/deleter policy violation.
+#[derive(Debug, Clone)]
+pub struct PolicyViolation {
+    pub file_path: String,
+    pub line_number: usize,
+    pub matched_pattern: String,
+}
+
+/// Report returned by `diagnose_scan_delete_separation`
+#[derive(Debug, Clone)]
+pub struct ScanDeleteSeparationReport {
+    pub files_scanned: usize,
+    pub violations: Vec<PolicyViolation>,
+    pub plan_file_param_found: bool,
+}
+
+/// Function-call patterns that indicate the deleter is invoking a live
+/// filesystem scan, violating "the scanner cannot delete; the deleter
+/// cannot scan".
+const FORBIDDEN_SCAN_CALLS: &[&str] = &[
+    "scan_root(",
+    "audit_run(",
+    "run_audit(",
+    "scan_filesystem(",
+    "walk_filesystem(",
+    "audit_scan(",
+];
+
+/// Scans delete-path file content for forbidden calls into scanning entry
+/// points, skipping explicitly allow-listed lines.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::doctor::scan_for_forbidden_scan_calls;
+///
+/// // Positive case: no violations
+/// let clean = scan_for_forbidden_scan_calls("delete.rs", "pub fn delete_execute() {}");
+/// assert!(clean.is_empty());
+///
+/// // Negative case: a scan call from the delete path is flagged
+/// let dirty = scan_for_forbidden_scan_calls("delete.rs", "let x = scan_root(path);\n");
+/// assert_eq!(dirty.len(), 1);
+///
+/// // Refusal case: explicitly allow-listed line is not flagged
+/// let allowed = scan_for_forbidden_scan_calls(
+///     "delete.rs",
+///     "let x = scan_root(path); // doctor-allow: scan-delete-separation\n",
+/// );
+/// assert!(allowed.is_empty());
+/// ```
+pub fn scan_for_forbidden_scan_calls(file_path: &str, content: &str) -> Vec<PolicyViolation> {
+    let mut violations = Vec::new();
+
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        if line.contains("doctor-allow: scan-delete-separation") {
+            continue;
+        }
+        for pattern in FORBIDDEN_SCAN_CALLS {
+            if line.contains(pattern) {
+                violations.push(PolicyViolation {
+                    file_path: file_path.to_string(),
+                    line_number: i + 1,
+                    matched_pattern: (*pattern).to_string(),
+                });
+                break;
+            }
+        }
+    }
+
+    violations
+}
+
+/// Diagnoses the "scanner cannot delete; deleter cannot scan" invariant by
+/// checking the delete-execute code paths for forbidden calls into scan/audit
+/// entry points, and verifying the delete path reads from a plan-file
+/// parameter (`plan_file`) rather than performing a live directory walk.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::doctor::diagnose_scan_delete_separation;
+///
+/// // Positive case: clean delete path, reads from plan_file
+/// let files = vec![(
+///     "delete.rs".to_string(),
+///     "pub fn delete_execute(plan_file: &str) {}".to_string(),
+/// )];
+/// let report = diagnose_scan_delete_separation(&files);
+/// assert!(report.violations.is_empty());
+/// assert!(report.plan_file_param_found);
+///
+/// // Negative case: delete path calls a scan entry point
+/// let dirty = vec![(
+///     "delete.rs".to_string(),
+///     "pub fn delete_execute() { scan_root(root); }".to_string(),
+/// )];
+/// let report = diagnose_scan_delete_separation(&dirty);
+/// assert_eq!(report.violations.len(), 1);
+///
+/// // Refusal case: no delete files supplied still reports plan_file as not found
+/// let report = diagnose_scan_delete_separation(&[]);
+/// assert!(!report.plan_file_param_found);
+/// ```
+pub fn diagnose_scan_delete_separation(files: &[(String, String)]) -> ScanDeleteSeparationReport {
+    let mut violations = Vec::new();
+    let mut plan_file_param_found = false;
+
+    for (file_path, content) in files {
+        violations.extend(scan_for_forbidden_scan_calls(file_path, content));
+        if content.contains("plan_file") || content.contains("plan_path") {
+            plan_file_param_found = true;
+        }
+    }
+
+    ScanDeleteSeparationReport { files_scanned: files.len(), violations, plan_file_param_found }
+}
+
 /// Diagnoses the repository for potential privacy leaks or missing gitignore patterns.
 ///
 /// # Examples

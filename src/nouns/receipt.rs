@@ -81,7 +81,7 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
                 }
                 println!("==================================================");
                 anyhow::bail!(
-                    "Receipt verification failed with {} consistency issues.",
+                    "Receipt verification failed with {} consistency issues.\n\nSuggestions:\n  - Review the issues listed above for details\n  - Verify no external process modified the filesystem during deletion\n  - Re-run `oclnr delete execute` from a fresh plan if the receipt is unrecoverable",
                     report.issues.len()
                 );
             }
@@ -180,7 +180,10 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
             if verdict.accepted {
                 Ok(())
             } else {
-                anyhow::bail!("Affidavit certification REJECTED: {}", verdict.reason);
+                anyhow::bail!(
+                    "Affidavit certification REJECTED: {}\n\nSuggestions:\n  - Review the rejection reason above\n  - Re-run `oclnr receipt verify` to check receipt consistency\n  - Do not treat the deletion as certified until this is resolved",
+                    verdict.reason
+                );
             }
         }
     }

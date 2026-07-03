@@ -107,58 +107,74 @@ impl OclnrRunner {
         self.run_command(cmd, "oclnr audit run")
     }
 
-    /// Run: oclnr plan create [options]
+    /// Run: oclnr plan build --root ... --output cleanup-plan.json [options]
+    ///
+    /// `plan build` re-scans (it does not read a saved audit file); the audit
+    /// is used upstream to decide roots/flags and to gate the workflow state.
     #[allow(clippy::result_large_err)]
     pub fn plan_create(
         &self,
         workspace: &PathBuf,
-        audit_file: &PathBuf,
-        max_reclaim_gb: Option<f64>,
+        roots: Vec<PathBuf>,
+        deps: bool,
+        aggressive: bool,
         include_global_caches: bool,
     ) -> Result<SubprocessResult, ErrorResponse> {
+        let output = workspace.join("cleanup-plan.json");
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("plan")
-            .arg("create")
-            .arg("--audit")
-            .arg(audit_file)
+            .arg("build")
+            .arg("--output")
+            .arg(&output)
             .current_dir(workspace)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        if let Some(max_gb) = max_reclaim_gb {
-            cmd.arg("--max-reclaim-gb").arg(max_gb.to_string());
+        for root in roots {
+            cmd.arg("--root").arg(root);
+        }
+        if deps {
+            cmd.arg("--deps");
+        }
+        if aggressive {
+            cmd.arg("--aggressive");
         }
         if include_global_caches {
             cmd.arg("--include-global-caches");
         }
 
-        self.run_command(cmd, "oclnr plan create")
+        self.run_command(cmd, "oclnr plan build")
     }
 
-    /// Run: oclnr delete run --plan cleanup-plan.json [--yes]
+    /// Run: oclnr delete execute --plan cleanup-plan.json --receipt <receipt> [--yes]
+    ///
+    /// The CLI verb is `execute` (not `run`), and `--receipt` is a required
+    /// argument even for a dry-run preview (the CLI simply returns before
+    /// writing it when `--yes` is absent).
     #[allow(clippy::result_large_err)]
     pub fn delete_run(
         &self,
         workspace: &PathBuf,
         plan_file: &PathBuf,
+        receipt_file: &PathBuf,
         confirm: bool,
     ) -> Result<SubprocessResult, ErrorResponse> {
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("delete")
-            .arg("run")
+            .arg("execute")
             .arg("--plan")
             .arg(plan_file)
+            .arg("--receipt")
+            .arg(receipt_file)
             .current_dir(workspace)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         if confirm {
             cmd.arg("--yes");
-        } else {
-            cmd.arg("--dry-run");
         }
 
-        self.run_command(cmd, "oclnr delete run")
+        self.run_command(cmd, "oclnr delete execute")
     }
 
     /// Run: oclnr receipt verify [--receipt receipt-file]
@@ -182,23 +198,81 @@ impl OclnrRunner {
         self.run_command(cmd, "oclnr receipt verify")
     }
 
-    /// Run: oclnr snapshot audit [--roots ...]
+    /// Run: oclnr receipt certify --receipt <receipt> [--out <out>]
+    #[allow(clippy::result_large_err)]
+    pub fn receipt_certify(
+        &self,
+        workspace: &PathBuf,
+        receipt_file: &PathBuf,
+        out_file: Option<&PathBuf>,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        let mut cmd = Command::new(&self.oclnr_path);
+        cmd.arg("receipt")
+            .arg("certify")
+            .arg("--receipt")
+            .arg(receipt_file)
+            .current_dir(workspace)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Some(out) = out_file {
+            cmd.arg("--out").arg(out);
+        }
+
+        self.run_command(cmd, "oclnr receipt certify")
+    }
+
+    /// Run: oclnr emergency --mount <mount> [--yes] [--receipt <receipt>]
+    #[allow(clippy::result_large_err)]
+    pub fn emergency_reclaim(
+        &self,
+        workspace: &PathBuf,
+        mount: &str,
+        confirm: bool,
+        receipt_file: Option<&PathBuf>,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        let mut cmd = Command::new(&self.oclnr_path);
+        cmd.arg("emergency")
+            .arg("--mount")
+            .arg(mount)
+            .current_dir(workspace)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if confirm {
+            cmd.arg("--yes");
+        }
+        if let Some(receipt) = receipt_file {
+            cmd.arg("--receipt").arg(receipt);
+        }
+
+        self.run_command(cmd, "oclnr emergency")
+    }
+
+    /// Run: oclnr snapshot audit --mount <mount>
+    ///
+    /// `snapshot audit` takes a single `--mount` flag (default `/`), not a
+    /// list of positional roots — the first caller-supplied root (if any) is
+    /// used as the mount point.
     #[allow(clippy::result_large_err)]
     pub fn snapshot_audit(
         &self,
         workspace: &PathBuf,
         roots: Vec<PathBuf>,
     ) -> Result<SubprocessResult, ErrorResponse> {
+        let mount = roots
+            .first()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "/".to_string());
+
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("snapshot")
             .arg("audit")
+            .arg("--mount")
+            .arg(mount)
             .current_dir(workspace)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-
-        for root in roots {
-            cmd.arg(root.to_string_lossy().to_string());
-        }
 
         self.run_command(cmd, "oclnr snapshot audit")
     }
