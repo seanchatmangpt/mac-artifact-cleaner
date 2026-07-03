@@ -84,7 +84,9 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             // delete whatever the plan file currently says regardless of
             // what was reviewed and signed.
             if yes {
-                if let Err(reason) = require_plan_approved(&plan) {
+                let secret = crate::integration::config::approval_secret()
+                    .map_err(|e| anyhow::anyhow!("cannot source plan-approval secret: {}", e))?;
+                if let Err(reason) = require_plan_approved(&plan, &secret) {
                     anyhow::bail!(
                         "Plan approval check failed: {}\n\nSuggestions:\n  - Call `plan_approve` on this exact plan file before executing\n  - Re-run `oclnr plan build` and re-approve if the plan was intentionally changed\n  - Do not hand-edit cleanup-plan.json after approval",
                         reason

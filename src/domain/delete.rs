@@ -157,12 +157,19 @@ impl Admit for DeletionPlanAdjudicator {
 ///   *after* `plan_approve` signed it is refused, even though the file is
 ///   otherwise well-formed JSON with a valid `version` field.
 ///
+/// `secret` must be sourced by the caller (integration layer / MCP server /
+/// CLI) from an environment variable or a machine-local key file — never
+/// from the plan file itself — otherwise the check degrades back to the
+/// forgeable plain-hash comparison this function replaced.
+///
 /// # Examples
 ///
 /// ```
 /// use osx_clnr::domain::delete::require_plan_approved;
 /// use osx_clnr::domain::plan::{DeletionPlan, PlanApproval, PlanItem, PlanItemKind};
 /// use std::path::PathBuf;
+///
+/// let secret = b"the-real-secret";
 ///
 /// let mut plan = DeletionPlan::new(
 ///     vec![PathBuf::from("/Users/user")],
@@ -178,26 +185,37 @@ impl Admit for DeletionPlanAdjudicator {
 /// );
 ///
 /// // Refusal: a hand-written or never-approved plan is rejected outright.
-/// assert!(require_plan_approved(&plan).is_err());
+/// assert!(require_plan_approved(&plan, secret).is_err());
 ///
-/// let plan_hash = plan.content_hash();
+/// // Refusal: an attacker who can only write the plan file hand-computes
+/// // the plain content hash offline (no HMAC signature) and forges an
+/// // approval block with it — the exact attack the verifier demonstrated.
+/// let forged_hash = plan.content_hash();
 /// plan.approval = Some(PlanApproval {
-///     approver: "alice".to_string(),
-///     approval_reason: "cleanup".to_string(),
+///     approver: "attacker".to_string(),
+///     approval_reason: "self-approved".to_string(),
 ///     approved_at_unix: 0,
-///     plan_hash,
+///     plan_hash: forged_hash,
+///     hmac_signature: String::new(),
 /// });
+/// assert!(require_plan_approved(&plan, secret).is_err());
 ///
-/// // Positive: freshly approved, untampered plan is accepted.
-/// assert!(require_plan_approved(&plan).is_ok());
+/// // Positive: freshly approved (via `sign_approval` with the real secret),
+/// // untampered plan is accepted.
+/// plan.approval = Some(plan.sign_approval(secret, "alice", "cleanup"));
+/// assert!(require_plan_approved(&plan, secret).is_ok());
 ///
 /// // Refusal: an item substituted into the plan after signing (the exact
 /// // attack from the bug report — a directory injected post-approval) is
 /// // caught even though `approval` is still present and well-formed.
 /// let mut tampered = plan.clone();
 /// tampered.items[0].path = PathBuf::from("/Users/user/injected-after-approval");
-/// assert!(require_plan_approved(&tampered).is_err());
+/// assert!(require_plan_approved(&tampered, secret).is_err());
+///
+/// // Refusal: verifying against the wrong secret (e.g. a different machine,
+/// // or an attacker's guess) fails even for an otherwise-legitimate signature.
+/// assert!(require_plan_approved(&plan, b"wrong-guess").is_err());
 /// ```
-pub fn require_plan_approved(plan: &DeletionPlan) -> Result<(), String> {
-    plan.verify_approval()
+pub fn require_plan_approved(plan: &DeletionPlan, secret: &[u8]) -> Result<(), String> {
+    plan.verify_approval(secret)
 }

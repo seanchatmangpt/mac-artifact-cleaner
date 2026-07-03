@@ -378,10 +378,6 @@ impl OsxClnrMcpServer {
         let workspace = input.workspace.unwrap_or_else(|| self.default_workspace.clone());
         let mut ctx = self.get_or_create_context(Some(workspace.clone()));
 
-        if !input.confirm {
-            return Err(ErrorResponse::confirmation_required("clear_artifacts"));
-        }
-
         let now = Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let archive_dir = input.archive_to.unwrap_or_else(|| {
             let mut p = workspace.clone();
@@ -389,7 +385,6 @@ impl OsxClnrMcpServer {
             p
         });
 
-        let mut archived = Vec::new();
         let has_audit = ctx.audit_file.as_ref().is_some_and(|p| p.exists());
 
         if !has_audit {
@@ -407,6 +402,32 @@ impl OsxClnrMcpServer {
             ));
         }
 
+        let audit = ctx.audit_file.clone().unwrap();
+        let dest = archive_dir.join(audit.file_name().unwrap_or_default());
+
+        if input.dry_run {
+            // Preview only: describe what would be archived without touching
+            // the filesystem or mutating workflow state. dry_run always wins,
+            // even if `confirm` is also true.
+            return Ok(serde_json::to_value(ClearArtifactsOutput {
+                success: true,
+                archived_files: vec![ArchivedFile {
+                    source: audit.display().to_string(),
+                    destination: dest.display().to_string(),
+                }],
+                archive_location: archive_dir.display().to_string(),
+                timestamp: now,
+                dry_run: true,
+            })
+            .unwrap());
+        }
+
+        if !input.confirm {
+            return Err(ErrorResponse::confirmation_required("clear_artifacts"));
+        }
+
+        let mut archived = Vec::new();
+
         // Archive audit file. Any I/O failure (e.g. permission denied creating
         // the archive directory) must surface as an error, not a silent no-op
         // reported as success.
@@ -417,8 +438,6 @@ impl OsxClnrMcpServer {
             )
         })?;
 
-        let audit = ctx.audit_file.clone().unwrap();
-        let dest = archive_dir.join(audit.file_name().unwrap_or_default());
         std::fs::copy(&audit, &dest).map_err(|e| {
             ErrorResponse::new(
                 ErrorCode::IoError,
@@ -443,6 +462,7 @@ impl OsxClnrMcpServer {
             archived_files: archived,
             archive_location: archive_dir.display().to_string(),
             timestamp: now,
+            dry_run: false,
         })
         .unwrap())
     }
@@ -457,12 +477,25 @@ impl OsxClnrMcpServer {
         // `roots` means an empty-object call (`{}`) triggers a slow, real
         // filesystem walk of the whole home dir with no confirmation gate.
         // Require callers to pass `roots` explicitly instead.
-        if input.roots.is_empty() {
+        // A root that is empty or whitespace-only (e.g. `roots: [""]`)
+        // resolves to a blank/relative path that downstream code treats as
+        // "no constraint", defeating this guard exactly like an empty array
+        // does. Reject those too, regardless of `tool_roots`.
+        let has_blank_root = input.roots.iter().any(|r| r.to_string_lossy().trim().is_empty());
+
+        // `tool_roots: true` is a legitimately scoped, non-home-directory
+        // operation (it scans known developer tool roots rather than the
+        // whole home directory), so it satisfies this guard on its own even
+        // when `roots` is empty -- matching what the error message below
+        // advertises.
+        if (input.roots.is_empty() && !input.tool_roots) || has_blank_root {
             return Err(ErrorResponse::new(
                 ErrorCode::InvalidInput,
-                "roots is required and must be non-empty: audit_scan does not scan the full \
-                 home directory implicitly. Pass one or more explicit paths to scan (e.g. the \
-                 current project directory), such as [\"/path/to/project\"]."
+                "roots is required and must be non-empty (with no blank entries): audit_scan \
+                 does not scan the full home directory implicitly. Pass one or more explicit \
+                 non-blank paths to scan (e.g. the current project directory), such as \
+                 [\"/path/to/project\"], or set tool_roots: true to scan known developer tool \
+                 roots instead."
                     .to_string(),
             )
             .with_suggestions(vec![
@@ -911,24 +944,34 @@ impl OsxClnrMcpServer {
             })?;
 
         let mut approval = ApprovalMetadata::new(input.approver_name, input.approval_reason);
-        // TODO(secret-sourcing): this HMAC key is a placeholder shared with the
-        // rest of the MCP server's approval flow. Wiring a real key-management
-        // source (keychain / env-provisioned secret) is out of scope for this
-        // fix — see plan_approve's doctest / receipt_certify for the same gap.
-        approval.sign(&plan_content, b"secret").ok();
+
+        // Source the real approval secret (env var or machine-local key
+        // file — never derivable from the plan file itself) and use it for
+        // both the return-value HMAC (`ApprovalMetadata::sign`, kept for
+        // callers that only look at the RPC response) and the on-disk
+        // `PlanApproval.hmac_signature`, which is what `delete execute`
+        // actually gates on. A previous version signed with a hardcoded
+        // literal key (`b"secret"`) and never checked that signature at
+        // delete time at all — only a plain, unkeyed content hash was
+        // checked, which a verifier proved forgeable by hand-computing the
+        // same hash offline without ever calling this tool.
+        let secret = crate::integration::config::approval_secret().map_err(|e| {
+            ErrorResponse::new(
+                ErrorCode::IoError,
+                format!("cannot source plan-approval secret: {}", e),
+            )
+        })?;
+        approval.sign(&plan_content, &secret).ok();
 
         // Persist the approval into the plan file itself, bound to a
         // content hash of the plan's substantive fields (computed excluding
-        // the approval field). This closes the gap where `plan_approve`'s
-        // signature was only ever a return value: nothing on disk recorded
-        // that the plan had been reviewed, so `oclnr delete execute` could
-        // not tell an approved plan from a hand-edited or tampered one.
-        plan.approval = Some(crate::domain::plan::PlanApproval {
-            approver: approval.approver.clone(),
-            approval_reason: approval.approval_reason.clone(),
-            approved_at_unix: approval.approved_at_unix,
-            plan_hash: plan.content_hash(),
-        });
+        // the approval field) *and* a real keyed HMAC signature over that
+        // hash. This closes the gap where `plan_approve`'s signature was
+        // only ever a return value: nothing on disk recorded that the plan
+        // had been reviewed, so `oclnr delete execute` could not tell an
+        // approved plan from a hand-edited or forged one.
+        plan.approval =
+            Some(plan.sign_approval(&secret, &approval.approver, &approval.approval_reason));
         let signed_content = serde_json::to_string_pretty(&plan).map_err(|e| {
             ErrorResponse::new(ErrorCode::IoError, format!("cannot serialize signed plan: {}", e))
         })?;
