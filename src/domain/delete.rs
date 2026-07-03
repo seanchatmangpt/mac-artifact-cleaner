@@ -143,3 +143,61 @@ impl Admit for DeletionPlanAdjudicator {
         }
     }
 }
+
+/// Requires that `plan` carries a valid, untampered [`PlanApproval`] before
+/// destructive execution proceeds.
+///
+/// This is deliberately **not** folded into [`DeletionPlanAdjudicator`]
+/// (which is shared with the GitHub-resource deletion path, an unrelated
+/// workflow that has no approval step of its own). `oclnr delete execute`
+/// calls this in addition to the adjudicator so that:
+///
+/// - a plan file that was never run through `plan_approve` is refused, and
+/// - a plan that was hand-edited (items appended, paths substituted, etc.)
+///   *after* `plan_approve` signed it is refused, even though the file is
+///   otherwise well-formed JSON with a valid `version` field.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::delete::require_plan_approved;
+/// use osx_clnr::domain::plan::{DeletionPlan, PlanApproval, PlanItem, PlanItemKind};
+/// use std::path::PathBuf;
+///
+/// let mut plan = DeletionPlan::new(
+///     vec![PathBuf::from("/Users/user")],
+///     false,
+///     true,
+///     vec![PlanItem {
+///         path: PathBuf::from("/Users/user/dev/project/target"),
+///         kind: PlanItemKind::Dir,
+///         reason: "rust target".to_string(),
+///         bytes: 0,
+///     }],
+///     vec![],
+/// );
+///
+/// // Refusal: a hand-written or never-approved plan is rejected outright.
+/// assert!(require_plan_approved(&plan).is_err());
+///
+/// let plan_hash = plan.content_hash();
+/// plan.approval = Some(PlanApproval {
+///     approver: "alice".to_string(),
+///     approval_reason: "cleanup".to_string(),
+///     approved_at_unix: 0,
+///     plan_hash,
+/// });
+///
+/// // Positive: freshly approved, untampered plan is accepted.
+/// assert!(require_plan_approved(&plan).is_ok());
+///
+/// // Refusal: an item substituted into the plan after signing (the exact
+/// // attack from the bug report — a directory injected post-approval) is
+/// // caught even though `approval` is still present and well-formed.
+/// let mut tampered = plan.clone();
+/// tampered.items[0].path = PathBuf::from("/Users/user/injected-after-approval");
+/// assert!(require_plan_approved(&tampered).is_err());
+/// ```
+pub fn require_plan_approved(plan: &DeletionPlan) -> Result<(), String> {
+    plan.verify_approval()
+}

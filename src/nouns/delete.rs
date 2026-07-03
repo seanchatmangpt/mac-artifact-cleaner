@@ -12,7 +12,7 @@ use wasm4pm_compat::{admission::Admit, evidence::Evidence, state::Raw};
 
 use crate::{
     domain::{
-        delete::{DeletionPlanAdjudicator, PlanSafetyWitness},
+        delete::{require_plan_approved, DeletionPlanAdjudicator, PlanSafetyWitness},
         plan::{DeletionPlan, PlanItemKind},
         receipt::{DeletionReceipt, DeletionResult, DeletionStatus},
     },
@@ -72,6 +72,25 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
 
             // Rebind plan to the value inside the Admitted evidence to prove it's safe to use.
             let plan = admitted_plan.into_inner();
+
+            // Require a valid, untampered approval signature bound to this
+            // exact plan content before any destructive execution. Preview
+            // (dry-run, `!yes`) is still allowed on an unapproved plan so
+            // `plan_inspect`/`delete_dry_run` can review before approving —
+            // only the actual deletion is gated. Refuses plans that were
+            // never approved via `plan_approve`, and refuses plans that were
+            // hand-edited (items appended/substituted) after approval —
+            // closing the gap where `delete execute --yes` would otherwise
+            // delete whatever the plan file currently says regardless of
+            // what was reviewed and signed.
+            if yes {
+                if let Err(reason) = require_plan_approved(&plan) {
+                    anyhow::bail!(
+                        "Plan approval check failed: {}\n\nSuggestions:\n  - Call `plan_approve` on this exact plan file before executing\n  - Re-run `oclnr plan build` and re-approve if the plan was intentionally changed\n  - Do not hand-edit cleanup-plan.json after approval",
+                        reason
+                    );
+                }
+            }
 
             if !yes {
                 println!("==================================================");

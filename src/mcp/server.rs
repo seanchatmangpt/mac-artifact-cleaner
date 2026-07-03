@@ -114,7 +114,8 @@ impl OsxClnrMcpServer {
                         "deps": { "type": "boolean" },
                         "aggressive": { "type": "boolean" },
                         "include_global_caches": { "type": "boolean" },
-                        "max_reclaim_gb": { "type": "number" }
+                        "max_reclaim_gb": { "type": "number" },
+                        "ignore_recent_hours": { "type": "integer" }
                     }
                 }
             }),
@@ -389,19 +390,45 @@ impl OsxClnrMcpServer {
         });
 
         let mut archived = Vec::new();
+        let has_audit = ctx.audit_file.as_ref().is_some_and(|p| p.exists());
 
-        // Archive audit file
-        if let Some(audit) = &ctx.audit_file {
-            if audit.exists() {
-                std::fs::create_dir_all(&archive_dir).ok();
-                let dest = archive_dir.join(audit.file_name().unwrap_or_default());
-                std::fs::copy(audit, &dest).ok();
-                archived.push(ArchivedFile {
-                    source: audit.display().to_string(),
-                    destination: dest.display().to_string(),
-                });
-            }
+        if !has_audit {
+            // Nothing to archive: this workspace has no scanned evidence at all.
+            // Fabricating an archive_location / success here would mislead a
+            // caller into believing artifacts were archived when nothing
+            // happened and the workspace/archive path was never validated.
+            return Err(ErrorResponse::new(
+                ErrorCode::InvalidInput,
+                format!(
+                    "No audit evidence found for workspace {}; nothing to archive. \
+                     Run audit_scan first, or verify the workspace path is correct.",
+                    workspace.display()
+                ),
+            ));
         }
+
+        // Archive audit file. Any I/O failure (e.g. permission denied creating
+        // the archive directory) must surface as an error, not a silent no-op
+        // reported as success.
+        std::fs::create_dir_all(&archive_dir).map_err(|e| {
+            ErrorResponse::new(
+                ErrorCode::IoError,
+                format!("Failed to create archive directory {}: {}", archive_dir.display(), e),
+            )
+        })?;
+
+        let audit = ctx.audit_file.clone().unwrap();
+        let dest = archive_dir.join(audit.file_name().unwrap_or_default());
+        std::fs::copy(&audit, &dest).map_err(|e| {
+            ErrorResponse::new(
+                ErrorCode::IoError,
+                format!("Failed to copy {} to {}: {}", audit.display(), dest.display(), e),
+            )
+        })?;
+        archived.push(ArchivedFile {
+            source: audit.display().to_string(),
+            destination: dest.display().to_string(),
+        });
 
         // Reset context
         ctx.state = WorkflowState::Unstarted;
@@ -424,6 +451,29 @@ impl OsxClnrMcpServer {
         let input: AuditScanInput = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
 
+        // Guard against an unbounded, unconfirmed full-home-directory scan.
+        // `default_scan_roots()` resolves to the user's entire home directory
+        // plus /tmp; silently falling back to it whenever the caller omits
+        // `roots` means an empty-object call (`{}`) triggers a slow, real
+        // filesystem walk of the whole home dir with no confirmation gate.
+        // Require callers to pass `roots` explicitly instead.
+        if input.roots.is_empty() {
+            return Err(ErrorResponse::new(
+                ErrorCode::InvalidInput,
+                "roots is required and must be non-empty: audit_scan does not scan the full \
+                 home directory implicitly. Pass one or more explicit paths to scan (e.g. the \
+                 current project directory), such as [\"/path/to/project\"]."
+                    .to_string(),
+            )
+            .with_suggestions(vec![
+                "Pass roots: [\"<project-dir>\"] to scope the scan to a specific directory"
+                    .to_string(),
+                "Use tool_roots: true to scan known developer tool roots instead of the home \
+                 directory"
+                    .to_string(),
+            ]));
+        }
+
         let workspace = input.workspace.clone().unwrap_or_else(|| self.default_workspace.clone());
         let mut ctx = self.get_or_create_context(Some(workspace.clone()));
 
@@ -436,17 +486,12 @@ impl OsxClnrMcpServer {
         })?;
 
         // Spawn subprocess
-        let roots = if input.roots.is_empty() {
-            crate::nouns::default_scan_roots()
-                .map_err(|e| ErrorResponse::new(ErrorCode::InvalidInput, e.to_string()))?
-        } else {
-            input.roots
-        };
+        let roots = input.roots;
 
         let start = std::time::Instant::now();
         let result = self.runner.audit_run(
             &workspace,
-            roots,
+            roots.clone(),
             input.include_deps,
             input.include_aggressive,
             input.ignore_recent_hours,
@@ -465,6 +510,8 @@ impl OsxClnrMcpServer {
         let audit_file = workspace.join("disk-audit.jsonocel");
         ctx.state = WorkflowState::AuditComplete;
         ctx.audit_file = Some(audit_file.clone());
+        ctx.audit_roots = Some(roots.clone());
+        ctx.audit_ignore_recent_hours = Some(input.ignore_recent_hours);
         ctx.last_audit_time = Some(Utc::now());
         ctx.clear_error();
         self.workflows.insert(workspace.display().to_string(), ctx);
@@ -631,12 +678,29 @@ impl OsxClnrMcpServer {
             ErrorResponse::invalid_state_transition(ctx.state.as_str(), "PLAN_IN_PROGRESS")
         })?;
 
-        let roots = if input.roots.is_empty() {
+        // Scope the plan to the same roots the referenced audit was actually
+        // scanned against. Falling back to global default roots here would let
+        // a plan silently diverge from the audit's scope (e.g. audit scoped to
+        // a narrow test directory, plan surfacing unrelated files across the
+        // whole home directory / /tmp). Only fall back to defaults if no
+        // prior audit recorded its roots at all.
+        let roots = if !input.roots.is_empty() {
+            input.roots.clone()
+        } else if let Some(audit_roots) = ctx.audit_roots.clone() {
+            audit_roots
+        } else {
             crate::nouns::default_scan_roots()
                 .map_err(|e| ErrorResponse::new(ErrorCode::InvalidInput, e.to_string()))?
-        } else {
-            input.roots.clone()
         };
+
+        // Recency: prefer an explicit override on this call, then fall back
+        // to whatever recency decision the referenced audit_scan actually
+        // used, then finally the CLI's own default. This keeps plan_build
+        // consistent with the audit it was built from instead of silently
+        // re-deriving recency with the CLI's hardcoded default.
+        let ignore_recent_hours = input
+            .ignore_recent_hours
+            .unwrap_or_else(|| ctx.audit_ignore_recent_hours.unwrap_or(168));
 
         let result = self.runner.plan_create(
             &workspace,
@@ -644,6 +708,7 @@ impl OsxClnrMcpServer {
             input.deps,
             input.aggressive,
             input.include_global_caches,
+            ignore_recent_hours,
         )?;
 
         if !result.success() {
@@ -835,11 +900,15 @@ impl OsxClnrMcpServer {
         let workspace = input.plan_file.parent().unwrap_or(&self.default_workspace).to_path_buf();
         let mut ctx = self.get_or_create_context(Some(workspace));
 
-        // Sign the actual plan file's bytes so the signature is bound to what
-        // was reviewed — a modified plan produces a different signature.
+        // Parse the plan so approval can be bound to its actual content
+        // hash, not just the file's raw bytes treated as an opaque blob.
         let plan_content = std::fs::read_to_string(&input.plan_file).map_err(|e| {
             ErrorResponse::new(ErrorCode::IoError, format!("cannot read plan: {}", e))
         })?;
+        let mut plan: crate::domain::plan::DeletionPlan = serde_json::from_str(&plan_content)
+            .map_err(|e| {
+                ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid plan JSON: {}", e))
+            })?;
 
         let mut approval = ApprovalMetadata::new(input.approver_name, input.approval_reason);
         // TODO(secret-sourcing): this HMAC key is a placeholder shared with the
@@ -847,6 +916,25 @@ impl OsxClnrMcpServer {
         // source (keychain / env-provisioned secret) is out of scope for this
         // fix — see plan_approve's doctest / receipt_certify for the same gap.
         approval.sign(&plan_content, b"secret").ok();
+
+        // Persist the approval into the plan file itself, bound to a
+        // content hash of the plan's substantive fields (computed excluding
+        // the approval field). This closes the gap where `plan_approve`'s
+        // signature was only ever a return value: nothing on disk recorded
+        // that the plan had been reviewed, so `oclnr delete execute` could
+        // not tell an approved plan from a hand-edited or tampered one.
+        plan.approval = Some(crate::domain::plan::PlanApproval {
+            approver: approval.approver.clone(),
+            approval_reason: approval.approval_reason.clone(),
+            approved_at_unix: approval.approved_at_unix,
+            plan_hash: plan.content_hash(),
+        });
+        let signed_content = serde_json::to_string_pretty(&plan).map_err(|e| {
+            ErrorResponse::new(ErrorCode::IoError, format!("cannot serialize signed plan: {}", e))
+        })?;
+        std::fs::write(&input.plan_file, signed_content).map_err(|e| {
+            ErrorResponse::new(ErrorCode::IoError, format!("cannot write signed plan: {}", e))
+        })?;
 
         ctx.state = WorkflowState::PlanApproved;
         self.workflows.insert(
@@ -1138,6 +1226,21 @@ impl OsxClnrMcpServer {
         let affidavit_receipt = affidavit_integration::build_deletion_affidavit(&receipt);
         let verdict = affidavit_integration::certify(&affidavit_receipt);
 
+        // If a sealed affidavit file exists alongside this receipt, its
+        // stored chain_hash is the provenance claim to check — compare it
+        // against what we just recomputed. A mismatch means the receipt or
+        // affidavit file was hand-edited after sealing and must reject.
+        let affidavit_path = receipt_file.with_extension("affidavit.json");
+        let stored_chain_hash = std::fs::read_to_string(&affidavit_path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.get("chain_hash").and_then(|h| h.as_str().map(str::to_string)));
+        let verdict = affidavit_integration::verify_chain_hash(
+            verdict,
+            affidavit_receipt.chain_hash.as_hex(),
+            stored_chain_hash.as_deref(),
+        );
+
         let total_bytes_freed_recorded: u64 =
             receipt.execution_record.results.iter().map(|r| r.bytes_freed).sum();
         let actual_free_space_delta = match (
@@ -1148,7 +1251,7 @@ impl OsxClnrMcpServer {
             _ => 0,
         };
 
-        let all_targets_gone = report.is_consistent && cli_result.success();
+        let all_targets_gone = report.is_consistent && cli_result.success() && verdict.accepted;
 
         Ok(serde_json::to_value(ReceiptVerifyOutput {
             state: if all_targets_gone {
@@ -1314,7 +1417,7 @@ impl OsxClnrMcpServer {
     }
 
     fn plan_rollback(&self, params: Value) -> Result<Value, ErrorResponse> {
-        use crate::integration::tmutil;
+        use crate::{domain::receipt::DeletionReceipt, integration::tmutil};
 
         let input: serde_json::Map<String, Value> = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
@@ -1324,6 +1427,24 @@ impl OsxClnrMcpServer {
         if !confirm {
             return Err(ErrorResponse::confirmation_required("plan_rollback"));
         }
+
+        // A rollback must be scoped to the receipt/snapshot it is rolling
+        // back, so a receipt_file is required and must actually parse as a
+        // valid DeletionReceipt — the same validation receipt_parse and
+        // receipt_verify perform. This prevents a bogus/empty/nonexistent
+        // receipt_file from silently producing a normal-looking response.
+        let receipt_file = input.get("receipt_file").and_then(|v| v.as_str()).ok_or_else(|| {
+            ErrorResponse::new(ErrorCode::InvalidInput, "receipt_file required".to_string())
+        })?;
+        let receipt_path = PathBuf::from(receipt_file);
+        if !receipt_path.exists() {
+            return Err(ErrorResponse::file_not_found(&receipt_path, "delete_execute"));
+        }
+        let content = std::fs::read_to_string(&receipt_path)
+            .map_err(|e| ErrorResponse::new(ErrorCode::IoError, e.to_string()))?;
+        let _receipt: DeletionReceipt = serde_json::from_str(&content).map_err(|e| {
+            ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid receipt JSON: {}", e))
+        })?;
 
         let mount = input.get("mount").and_then(|v| v.as_str()).unwrap_or("/");
 

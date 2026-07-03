@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{artifact::Candidate, tool_roots::ToolRootReport};
+use crate::domain::{artifact::Candidate, crypto::hash_bytes, tool_roots::ToolRootReport};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeletionPlan {
@@ -15,6 +15,28 @@ pub struct DeletionPlan {
     pub aggressive: bool,
     pub items: Vec<PlanItem>,
     pub tool_roots: Vec<ToolRootReport>,
+    /// Approval record binding this plan's content to a specific reviewer.
+    /// `None` means the plan has never been approved. Populated by
+    /// `plan_approve`, persisted into the plan file on disk, and re-verified
+    /// by `delete execute` before any deletion runs — a plan whose content
+    /// hash no longer matches `PlanApproval::plan_hash` (because it was
+    /// hand-edited, or items were substituted after signing) is refused.
+    #[serde(default)]
+    pub approval: Option<PlanApproval>,
+}
+
+/// Approval record embedded in a deletion plan file.
+///
+/// `plan_hash` is a content hash of the plan's substantive fields (roots,
+/// deps, aggressive, items, tool_roots) computed *excluding* this
+/// `approval` field itself, so it can be recomputed from the plan at any
+/// later point and compared to detect tampering.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanApproval {
+    pub approver: String,
+    pub approval_reason: String,
+    pub approved_at_unix: i64,
+    pub plan_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -81,7 +103,117 @@ impl DeletionPlan {
             .unwrap_or_default()
             .as_secs();
 
-        Self { version: 1, created_unix, roots, deps, aggressive, items, tool_roots }
+        Self {
+            version: 1,
+            created_unix,
+            roots,
+            deps,
+            aggressive,
+            items,
+            tool_roots,
+            approval: None,
+        }
+    }
+
+    /// Computes a stable content hash over the plan's substantive fields,
+    /// deliberately excluding `approval` itself so the hash can be verified
+    /// against the field it lives next to.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    /// use std::path::PathBuf;
+    ///
+    /// let plan = DeletionPlan::new(
+    ///     vec![PathBuf::from("/Users/user")],
+    ///     false,
+    ///     true,
+    ///     vec![PlanItem {
+    ///         path: PathBuf::from("/Users/user/dev/project/target"),
+    ///         kind: PlanItemKind::Dir,
+    ///         reason: "rust target".to_string(),
+    ///         bytes: 0,
+    ///     }],
+    ///     vec![],
+    /// );
+    ///
+    /// // Positive: hash is deterministic for identical content.
+    /// assert_eq!(plan.content_hash(), plan.content_hash());
+    ///
+    /// // Negative: appending an item (tampering) changes the hash.
+    /// let mut tampered = plan.clone();
+    /// tampered.items.push(PlanItem {
+    ///     path: PathBuf::from("/Users/user/injected"),
+    ///     kind: PlanItemKind::Dir,
+    ///     reason: "injected".to_string(),
+    ///     bytes: 0,
+    /// });
+    /// assert_ne!(plan.content_hash(), tampered.content_hash());
+    /// ```
+    pub fn content_hash(&self) -> String {
+        let mut unsigned = self.clone();
+        unsigned.approval = None;
+        let bytes = serde_json::to_vec(&unsigned).unwrap_or_default();
+        hash_bytes(&bytes)
+    }
+
+    /// Verifies that this plan carries an approval whose recorded
+    /// `plan_hash` matches the plan's current content hash.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::plan::{DeletionPlan, PlanApproval, PlanItem, PlanItemKind};
+    /// use std::path::PathBuf;
+    ///
+    /// let mut plan = DeletionPlan::new(
+    ///     vec![PathBuf::from("/Users/user")],
+    ///     false,
+    ///     true,
+    ///     vec![PlanItem {
+    ///         path: PathBuf::from("/Users/user/dev/project/target"),
+    ///         kind: PlanItemKind::Dir,
+    ///         reason: "rust target".to_string(),
+    ///         bytes: 0,
+    ///     }],
+    ///     vec![],
+    /// );
+    ///
+    /// // Refusal: unapproved plan (no approval field at all) is rejected.
+    /// assert!(plan.verify_approval().is_err());
+    ///
+    /// let plan_hash = plan.content_hash();
+    /// plan.approval = Some(PlanApproval {
+    ///     approver: "alice".to_string(),
+    ///     approval_reason: "cleanup".to_string(),
+    ///     approved_at_unix: 0,
+    ///     plan_hash,
+    /// });
+    ///
+    /// // Positive: freshly approved, untampered plan verifies.
+    /// assert!(plan.verify_approval().is_ok());
+    ///
+    /// // Refusal: mutating the plan after approval invalidates the signature,
+    /// // even if the approval field is left untouched (e.g. an attacker
+    /// // substituted an item's path after signing).
+    /// plan.items[0].path = PathBuf::from("/Users/user/totally-different-dir");
+    /// assert!(plan.verify_approval().is_err());
+    /// ```
+    pub fn verify_approval(&self) -> Result<(), String> {
+        match &self.approval {
+            None => Err("plan has not been approved via plan_approve".to_string()),
+            Some(approval) => {
+                let expected = self.content_hash();
+                if approval.plan_hash == expected {
+                    Ok(())
+                } else {
+                    Err("plan approval signature does not match plan content — the plan was \
+                         modified after approval and must be re-approved"
+                        .to_string())
+                }
+            }
+        }
     }
 }
 
