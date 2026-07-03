@@ -4,13 +4,14 @@ version = 4
 
 [[package]]
 name = "affidavit"
-version = "26.6.14"
-source = "git+https://github.com/seanchatmangpt/affidavit#4fee55f8e2499d59100c081f283212261a4d2cf5"
+version = "26.6.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e642793ef9dd697a720fd7e2d779a085c6c08cfa1087f9ece6c97e019757f72"
 dependencies = [
  "anyhow",
  "blake3",
- "clap-noun-verb 26.6.2",
- "clap-noun-verb-macros 26.6.2",
+ "clap-noun-verb",
+ "clap-noun-verb-macros",
  "linkme",
  "regex",
  "serde",
@@ -253,32 +254,7 @@ dependencies = [
  "atty",
  "chrono",
  "clap",
- "clap-noun-verb-macros 26.6.2",
- "jmespath",
- "lazy_static",
- "linkme",
- "notify 6.1.1",
- "once_cell",
- "parking_lot 0.12.5",
- "regex",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror 1.0.69",
- "tokio",
- "toml 0.8.23",
- "url",
-]
-
-[[package]]
-name = "clap-noun-verb"
-version = "26.6.14"
-dependencies = [
- "anyhow",
- "atty",
- "chrono",
- "clap",
- "clap-noun-verb-macros 26.6.14",
+ "clap-noun-verb-macros",
  "jmespath",
  "lazy_static",
  "linkme",
@@ -300,17 +276,6 @@ name = "clap-noun-verb-macros"
 version = "26.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b50d796926aed1d4c1c43c4fd7649d6b2ba244682cd773cf1b0e081fcef0f681"
-dependencies = [
- "linkme",
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "clap-noun-verb-macros"
-version = "26.6.14"
 dependencies = [
  "linkme",
  "proc-macro-error",
@@ -1282,8 +1247,8 @@ dependencies = [
  "blake3",
  "chrono",
  "clap",
- "clap-noun-verb 26.6.14",
- "clap-noun-verb-macros 26.6.14",
+ "clap-noun-verb",
+ "clap-noun-verb-macros",
  "clap_complete",
  "colored",
  "dashmap",

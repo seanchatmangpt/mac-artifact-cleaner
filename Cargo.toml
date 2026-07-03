@@ -49,14 +49,14 @@ sled = "0.34.7"
 once_cell = "1.21.4"
 toml = "1.1.2"
 libc = "0.2"
-clap-noun-verb = { path = "../clap-noun-verb" }
-clap-noun-verb-macros = { path = "../clap-noun-verb/clap-noun-verb-macros" }
+clap-noun-verb = "26.6.2"
+clap-noun-verb-macros = "26.6.2"
 linkme = "0.3"
 # `core` only: the `discovery`/`conformance` features pull `wasm4pm`, which
 # hard-pins `wasm-bindgen =0.2.100` and conflicts with chrono's transitive
 # `wasm-bindgen`. Core gives us chain assembly, the 7-stage verifier, and the
 # dual-court admission gate — everything Pentecost needs to seal deletions.
-affidavit = { git = "https://github.com/seanchatmangpt/affidavit", default-features = false, features = ["core"] }
+affidavit = { version = "26.6.22", default-features = false, features = ["core"] }
 # MCP server dependencies
 hmac = "0.12"
 sha2 = "0.10"
