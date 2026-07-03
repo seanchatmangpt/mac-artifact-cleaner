@@ -210,6 +210,12 @@ pub struct PlanBuildInput {
     pub include_global_caches: bool,
     #[serde(default)]
     pub max_reclaim_gb: Option<f64>,
+    /// Recency override for this plan build. When omitted, falls back to the
+    /// workflow context's audit_scan recency choice (and finally the CLI's
+    /// 168h default) so a plan stays consistent with the audit that produced
+    /// it, unless the caller explicitly overrides it.
+    #[serde(default)]
+    pub ignore_recent_hours: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]

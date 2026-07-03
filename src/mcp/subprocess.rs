@@ -64,6 +64,15 @@ impl OclnrRunner {
         Ok(Self { oclnr_path })
     }
 
+    /// Build a runner that invokes a specific binary rather than resolving
+    /// `oclnr` from `PATH`. Exists so integration tests can point the
+    /// runner at a stub executable and inspect the exact argv this wrapper
+    /// sends, without needing a real `oclnr` install or performing a live
+    /// deletion.
+    pub fn with_binary_path(oclnr_path: PathBuf) -> Self {
+        Self { oclnr_path }
+    }
+
     /// Run: oclnr audit run [roots...] [options]
     #[allow(clippy::result_large_err)]
     pub fn audit_run(
@@ -94,9 +103,11 @@ impl OclnrRunner {
         if include_aggressive {
             cmd.arg("--aggressive");
         }
-        if ignore_recent_hours > 0 {
-            cmd.arg("--ignore-recent-hours").arg(ignore_recent_hours.to_string());
-        }
+        // Always forward the value: 0 is a meaningful override ("disable the
+        // recency guard entirely"), not "unset". Gating this on `> 0` would
+        // silently fall back to the CLI's own 168h default whenever a caller
+        // asked to disable the guard.
+        cmd.arg("--ignore-recent-hours").arg(ignore_recent_hours.to_string());
         if tool_roots {
             cmd.arg("--tool-roots");
         }
@@ -119,6 +130,7 @@ impl OclnrRunner {
         deps: bool,
         aggressive: bool,
         include_global_caches: bool,
+        ignore_recent_hours: u32,
     ) -> Result<SubprocessResult, ErrorResponse> {
         let output = workspace.join("cleanup-plan.json");
         let mut cmd = Command::new(&self.oclnr_path);
@@ -142,6 +154,9 @@ impl OclnrRunner {
         if include_global_caches {
             cmd.arg("--include-global-caches");
         }
+        // Always forward: 0 is a meaningful override ("disable the recency
+        // guard"), not "unset". See audit_run for the same rationale.
+        cmd.arg("--ignore-recent-hours").arg(ignore_recent_hours.to_string());
 
         self.run_command(cmd, "oclnr plan build")
     }
