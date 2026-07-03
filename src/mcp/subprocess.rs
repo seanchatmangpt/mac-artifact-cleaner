@@ -29,37 +29,77 @@ impl SubprocessResult {
     }
 }
 
+/// Resolve the `oclnr` binary path used by [`OclnrRunner::new`].
+///
+/// Priority order:
+/// 1. `env_override` (from `OCLNR_BIN`), if it points at an existing file.
+/// 2. A file named `oclnr` next to `current_exe`'s parent directory, if it
+///    exists — i.e. co-located with the running `oclnr-mcp` binary.
+/// 3. Whatever `which_lookup("oclnr")` returns (a `PATH` search).
+///
+/// Co-located resolution is checked *before* `PATH` so that a stale `oclnr`
+/// earlier on `PATH` (e.g. an old install in `~/.cargo/bin`) can never
+/// shadow the binary that was built/installed alongside `oclnr-mcp` itself.
+fn resolve_oclnr_path(
+    env_override: Option<PathBuf>,
+    current_exe: Option<PathBuf>,
+    which_lookup: impl Fn(&str) -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(p) = env_override {
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    if let Some(colocated) = current_exe.and_then(|exe| exe.parent().map(|p| p.join("oclnr"))) {
+        if colocated.is_file() {
+            return Some(colocated);
+        }
+    }
+
+    which_lookup("oclnr")
+}
+
 /// Subprocess runner
 pub struct OclnrRunner {
     oclnr_path: PathBuf,
 }
 
 impl OclnrRunner {
-    /// Create new runner, attempting to locate oclnr binary
+    /// Create new runner, attempting to locate oclnr binary.
+    ///
+    /// Resolution order (most to least specific), so that a stale `oclnr`
+    /// earlier on `PATH` can never silently shadow a co-located, freshly
+    /// built binary:
+    ///
+    /// 1. `OCLNR_BIN` environment variable, if set — explicit pin for
+    ///    deployments that want to bypass discovery entirely.
+    /// 2. A binary named `oclnr` next to the currently running executable
+    ///    (`std::env::current_exe()?.parent()/oclnr`) — this is where the
+    ///    `oclnr-mcp` binary itself was built/installed, so it is the most
+    ///    likely to be in sync with the code that spawns it.
+    /// 3. `PATH` lookup via `which::which("oclnr")` — last resort, since a
+    ///    PATH entry may point at an older, independently installed copy.
     #[allow(clippy::result_large_err)]
     pub fn new() -> Result<Self, ErrorResponse> {
-        let oclnr_path = which::which("oclnr")
-            .or_else(|_| {
-                // Try relative path for development
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-                    .map(|mut p| {
-                        p.push("oclnr");
-                        p
-                    })
-                    .ok_or_else(|| "oclnr not found")
-            })
-            .map_err(|e| {
-                ErrorResponse::new(
-                    ErrorCode::SubprocessFailed,
-                    format!("Could not locate oclnr binary: {}", e),
-                )
-                .with_suggestions(vec![
-                    "Install oclnr: cargo install --path .".to_string(),
-                    "Or ensure oclnr is in PATH".to_string(),
-                ])
-            })?;
+        let oclnr_path = resolve_oclnr_path(
+            std::env::var_os("OCLNR_BIN").map(PathBuf::from),
+            std::env::current_exe().ok(),
+            |name| which::which(name).ok(),
+        )
+        .ok_or_else(|| {
+            ErrorResponse::new(
+                ErrorCode::SubprocessFailed,
+                "Could not locate oclnr binary: not found via OCLNR_BIN, co-located \
+                 with current executable, or PATH"
+                    .to_string(),
+            )
+            .with_suggestions(vec![
+                "Install oclnr: cargo install --path .".to_string(),
+                "Or ensure oclnr is in PATH".to_string(),
+                "Or set OCLNR_BIN to an explicit binary path".to_string(),
+            ])
+        })?;
 
         Ok(Self { oclnr_path })
     }
@@ -414,5 +454,116 @@ mod tests {
         let val = result.unwrap();
         assert_eq!(val["objects"].as_array().unwrap().len(), 1);
         assert_eq!(val["events"].as_array().unwrap().len(), 1);
+    }
+
+    /// Write a trivial executable stub at `path` that just echoes its own
+    /// path when run, so tests can tell which stub actually got resolved.
+    fn write_stub(path: &std::path::Path) {
+        use std::io::Write;
+        let mut f = std::fs::File::create(path).unwrap();
+        writeln!(f, "#!/bin/sh").unwrap();
+        writeln!(f, "echo STUB:{}", path.display()).unwrap();
+        drop(f);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    /// Regression test for the PATH-shadows-co-located-binary bug: when a
+    /// stub exists both on a fake `PATH` directory and co-located with a
+    /// fake `current_exe`, the co-located one must win.
+    #[test]
+    fn test_resolve_prefers_colocated_binary_over_path() {
+        let tmp = std::env::temp_dir().join(format!(
+            "oclnr_subprocess_resolve_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let exe_dir = tmp.join("exe_dir");
+        let path_dir = tmp.join("path_dir");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::create_dir_all(&path_dir).unwrap();
+
+        let colocated = exe_dir.join("oclnr");
+        let on_path = path_dir.join("oclnr");
+        write_stub(&colocated);
+        write_stub(&on_path);
+
+        // Fake `current_exe`: a file living in exe_dir (its parent is what
+        // matters for co-location, the file itself need not be executable).
+        let fake_current_exe = exe_dir.join("oclnr-mcp");
+        std::fs::write(&fake_current_exe, b"fake").unwrap();
+
+        let on_path_clone = on_path.clone();
+        let resolved = resolve_oclnr_path(None, Some(fake_current_exe), move |name| {
+            assert_eq!(name, "oclnr");
+            Some(on_path_clone.clone())
+        });
+
+        assert_eq!(
+            resolved,
+            Some(colocated),
+            "co-located binary must be preferred over a PATH (which::which) hit"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_resolve_falls_back_to_path_when_no_colocated_binary() {
+        let tmp = std::env::temp_dir().join(format!(
+            "oclnr_subprocess_resolve_test_fallback_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let exe_dir = tmp.join("exe_dir_empty");
+        let path_dir = tmp.join("path_dir");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::create_dir_all(&path_dir).unwrap();
+
+        let on_path = path_dir.join("oclnr");
+        write_stub(&on_path);
+
+        let fake_current_exe = exe_dir.join("oclnr-mcp");
+        std::fs::write(&fake_current_exe, b"fake").unwrap();
+
+        let on_path_clone = on_path.clone();
+        let resolved =
+            resolve_oclnr_path(None, Some(fake_current_exe), move |_| Some(on_path_clone.clone()));
+
+        assert_eq!(resolved, Some(on_path));
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_resolve_env_override_wins_over_everything() {
+        let tmp = std::env::temp_dir().join(format!(
+            "oclnr_subprocess_resolve_test_override_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let exe_dir = tmp.join("exe_dir");
+        let override_dir = tmp.join("override_dir");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::create_dir_all(&override_dir).unwrap();
+
+        let colocated = exe_dir.join("oclnr");
+        let overridden = override_dir.join("oclnr-custom");
+        write_stub(&colocated);
+        write_stub(&overridden);
+
+        let fake_current_exe = exe_dir.join("oclnr-mcp");
+        std::fs::write(&fake_current_exe, b"fake").unwrap();
+
+        let resolved = resolve_oclnr_path(Some(overridden.clone()), Some(fake_current_exe), |_| {
+            panic!("which_lookup should not be called when OCLNR_BIN override is valid")
+        });
+
+        assert_eq!(resolved, Some(overridden));
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }
