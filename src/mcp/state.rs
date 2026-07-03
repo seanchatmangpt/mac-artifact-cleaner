@@ -87,6 +87,18 @@ pub struct WorkflowContext {
     pub workspace: PathBuf,
     /// Path to disk-audit.jsonocel
     pub audit_file: Option<PathBuf>,
+    /// Roots the most recent audit_scan was actually run against. plan_build
+    /// must inherit these when the caller does not pass explicit roots, so a
+    /// plan can never silently diverge in scope from the audit it was built
+    /// from (e.g. audit scoped to a test dir, plan falling back to broad
+    /// defaults like /Users/<user> and /tmp).
+    pub audit_roots: Option<Vec<PathBuf>>,
+    /// Recency window (hours) the most recent audit_scan was actually run
+    /// with (0 means the recency guard was disabled). plan_build inherits
+    /// this when the caller does not pass an explicit override, so a plan's
+    /// recency decision never silently diverges from the audit it was built
+    /// from.
+    pub audit_ignore_recent_hours: Option<u32>,
     /// Path to cleanup-plan.json
     pub plan_file: Option<PathBuf>,
     /// Path to deletion-receipt.jsonocel
@@ -116,6 +128,8 @@ impl WorkflowContext {
             state: WorkflowState::Unstarted,
             workspace,
             audit_file: None,
+            audit_roots: None,
+            audit_ignore_recent_hours: None,
             plan_file: None,
             receipt_file: None,
             affidavit_file: None,
@@ -134,6 +148,10 @@ impl WorkflowContext {
             // Can start audit from unstarted or after completion
             (WorkflowState::Unstarted, WorkflowState::AuditNeeded) => Ok(()),
             (WorkflowState::CleanupComplete, WorkflowState::AuditNeeded) => Ok(()),
+            // A failed delete should not be a dead end: allow re-scanning
+            // directly instead of forcing clear_artifacts as an undocumented
+            // mandatory recovery step.
+            (WorkflowState::DeleteFailed, WorkflowState::AuditNeeded) => Ok(()),
             (WorkflowState::AuditNeeded, WorkflowState::AuditInProgress) => Ok(()),
             (WorkflowState::AuditInProgress, WorkflowState::AuditComplete) => Ok(()),
 
@@ -320,6 +338,7 @@ mod tests {
         let explicit_valid: &[(WorkflowState, WorkflowState)] = &[
             (Unstarted, AuditNeeded),
             (CleanupComplete, AuditNeeded),
+            (DeleteFailed, AuditNeeded),
             (AuditNeeded, AuditInProgress),
             (AuditInProgress, AuditComplete),
             (AuditComplete, PlanNeeded),
