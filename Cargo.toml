@@ -1,6 +1,6 @@
 [package]
 name = "osx-clnr"
-version = "26.7.0"
+version = "26.7.3"
 edition = "2021"
 # House standard is 1.82; osx-clnr uses io::ErrorKind::StorageFull (stable 1.83).
 rust-version = "1.83"
@@ -11,8 +11,6 @@ homepage = "https://github.com/seanchatmangpt/mac-artifact-cleaner"
 readme = "README.md"
 keywords = ["macos", "disk", "cleanup", "receipts", "praxis"]
 categories = ["command-line-utilities", "filesystem", "development-tools"]
-# Path deps on the sibling clap-noun-verb repo preclude crates.io publishing.
-publish = false
 default-run = "oclnr"
 
 [lints]
