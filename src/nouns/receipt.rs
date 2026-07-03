@@ -60,9 +60,25 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
             // complementary to the filesystem-consistency report above.
             let affidavit_receipt = affidavit::build_deletion_affidavit(&receipt_data);
             let verdict = affidavit::certify(&affidavit_receipt);
+
+            // If a sealed affidavit file was persisted alongside this receipt
+            // (by `receipt certify`), compare its stored chain_hash against
+            // the one we just recomputed. A prior hand-edit of that file
+            // (or the receipt it was sealed from) must surface as a
+            // chain_integrity failure rather than being silently ignored.
+            let affidavit_path = receipt.with_extension("affidavit.json");
+            let stored_chain_hash = std::fs::read_to_string(&affidavit_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| v.get("chain_hash").and_then(|h| h.as_str().map(str::to_string)));
+            let verdict = affidavit::verify_chain_hash(
+                verdict,
+                affidavit_receipt.chain_hash.as_hex(),
+                stored_chain_hash.as_deref(),
+            );
             print_verdict(&verdict);
 
-            if report.is_consistent {
+            if report.is_consistent && verdict.accepted {
                 println!(
                     "✅ Receipt verification passed: all records are consistent with disk state."
                 );
@@ -80,6 +96,12 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
                     );
                 }
                 println!("==================================================");
+                if !verdict.accepted {
+                    anyhow::bail!(
+                        "Receipt verification failed: affidavit chain_integrity rejected — {}\n\nSuggestions:\n  - Review the issues listed above for details\n  - Do not treat this receipt as certified\n  - Re-run `oclnr delete execute` from a fresh plan if the receipt is unrecoverable",
+                        verdict.reason
+                    );
+                }
                 anyhow::bail!(
                     "Receipt verification failed with {} consistency issues.\n\nSuggestions:\n  - Review the issues listed above for details\n  - Verify no external process modified the filesystem during deletion\n  - Re-run `oclnr delete execute` from a fresh plan if the receipt is unrecoverable",
                     report.issues.len()
@@ -162,6 +184,23 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
 
             let affidavit_receipt = affidavit::build_deletion_affidavit(&receipt_data);
             let verdict = affidavit::certify(&affidavit_receipt);
+
+            // If a sealed affidavit file already exists at the canonical
+            // location (from a prior `receipt certify` run), treat its
+            // chain_hash as the provenance claim and compare it against what
+            // we just recomputed. A mismatch means the receipt or the
+            // affidavit file was hand-edited after the original seal, and
+            // must reject rather than silently re-certifying the tamper.
+            let canonical_affidavit_path = receipt.with_extension("affidavit.json");
+            let stored_chain_hash = std::fs::read_to_string(&canonical_affidavit_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| v.get("chain_hash").and_then(|h| h.as_str().map(str::to_string)));
+            let verdict = affidavit::verify_chain_hash(
+                verdict,
+                affidavit_receipt.chain_hash.as_hex(),
+                stored_chain_hash.as_deref(),
+            );
 
             println!("Certifying affidavit provenance for: {}", receipt.display());
             println!("  Chain hash (core/v1):  {}", affidavit_receipt.chain_hash);

@@ -116,6 +116,66 @@ pub fn certify(receipt: &Receipt) -> Verdict {
     affidavit::verifier::verify(receipt)
 }
 
+/// Fold a `chain_integrity` stage into a [`Verdict`], comparing a freshly
+/// recomputed `chain_hash` against a `stored_chain_hash` read back from a
+/// previously persisted affidavit file.
+///
+/// [`certify`] only checks that a *freshly built* [`Receipt`] is internally
+/// consistent — it has no notion of "the file on disk was hand-edited after
+/// the fact". This function is the seam that closes that gap: callers in the
+/// integration layer read the on-disk `chain_hash` (I/O) and pass it here so
+/// the comparison itself stays pure and testable.
+///
+/// If `stored_chain_hash` is `None` (no prior affidavit file to compare
+/// against), the verdict passes through unchanged.
+///
+/// ```
+/// use osx_clnr::domain::receipt::DeletionReceipt;
+/// use osx_clnr::domain::affidavit_integration::{build_deletion_affidavit, certify, verify_chain_hash};
+///
+/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None));
+/// let verdict = certify(&sealed);
+///
+/// // Positive — stored hash matches the recomputed one.
+/// let matching = verify_chain_hash(verdict.clone(), sealed.chain_hash.as_hex(), Some(sealed.chain_hash.as_hex()));
+/// assert!(matching.accepted);
+///
+/// // Negative — a tampered stored hash must reject, even though the
+/// // freshly-recomputed receipt is internally consistent.
+/// let tampered = verify_chain_hash(verdict, sealed.chain_hash.as_hex(), Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"));
+/// assert!(!tampered.accepted);
+/// assert!(tampered.outcomes.iter().any(|o| o.stage == "chain_integrity" && !o.passed));
+/// ```
+pub fn verify_chain_hash(
+    mut verdict: Verdict,
+    recomputed_chain_hash: &str,
+    stored_chain_hash: Option<&str>,
+) -> Verdict {
+    let Some(stored) = stored_chain_hash else {
+        return verdict;
+    };
+
+    if stored == recomputed_chain_hash {
+        verdict.outcomes.push(affidavit::CheckOutcome {
+            stage: "chain_integrity".to_string(),
+            passed: true,
+            detail: "recomputed chain hash matches stored chain_hash".to_string(),
+        });
+    } else {
+        verdict.accepted = false;
+        verdict.reason = format!(
+            "chain_integrity: stored chain_hash '{stored}' does not match recomputed chain_hash '{recomputed_chain_hash}' — receipt or affidavit file was modified after sealing"
+        );
+        verdict.outcomes.push(affidavit::CheckOutcome {
+            stage: "chain_integrity".to_string(),
+            passed: false,
+            detail: verdict.reason.clone(),
+        });
+    }
+
+    verdict
+}
+
 /// Content address (BLAKE3 over the canonical receipt bytes) of a sealed receipt.
 ///
 /// The address is a 64-character lowercase hex digest and is stable across
