@@ -102,7 +102,7 @@ Most software documents what it does. Pentecost's domain layer additionally docu
 
 ## 2.4 Privacy as a property of evidence
 
-Evidence that must be shared (bug reports, research corpora, this thesis) must not leak the observed machine. Pentecost's answer is structural: receipts identify filesystem objects by `BLAKE3(path)`, not by path; the redaction domain rewrites `/Users/<name>` and credential-shaped content before evidence leaves the machine; the doctor's privacy diagnostic scans the repository itself for unredacted real paths. The principle: *provenance must survive redaction*. A hash-identified receipt proves the same chain of custody whether or not you can read the paths.
+Evidence that must be shared (bug reports, research corpora, this thesis) must not leak the observed machine. Pentecost's answer is structural: receipts identify filesystem objects by `BLAKE3(path)`, not by path; the redaction domain rewrites `/Users/user` and credential-shaped content before evidence leaves the machine; the doctor's privacy diagnostic scans the repository itself for unredacted real paths. The principle: *provenance must survive redaction*. A hash-identified receipt proves the same chain of custody whether or not you can read the paths.
 
 ## 2.5 The ethics of delegated destruction
 

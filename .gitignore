@@ -51,3 +51,13 @@ fixtures/private/
 # cargo-cicd local state
 cicd.toml
 .cargo-cicd/
+
+# Local MCP client config (machine-specific paths)
+.mcp.json
+
+# Legacy maintenance plan/receipt artifacts (superseded by cleanup-plan*/deletion-*)
+maintenance-plan.json
+maintenance-receipt.json
+
+# Claude Code session/worktree state (never published or tracked)
+.claude/

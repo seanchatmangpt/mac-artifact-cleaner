@@ -34,6 +34,6 @@ As a system evolves (per Gall's Law), the entropy of technical debt inevitably i
 This is the role of the **G9 Checkpoint: The Doctor**.
 The Doctor is not a user-facing disk cleaner; it is a repository governance tool built into the CLI.
 - `doctor architecture` scans the codebase to ensure no `std::fs` calls have leaked into `src/domain/`.
-- `doctor privacy` scans `docs/` and `tests/` to ensure no real local developer paths (e.g., `/Users/sac/`) have bypassed the redaction gate.
+- `doctor privacy` scans `docs/` and `tests/` to ensure no real local developer paths (e.g., `/Users/user/`) have bypassed the redaction gate.
 
 By formalizing the Doctor, the system enforces its own operating laws automatically, ensuring that the complex system maintains the structural integrity of the simple system from which it evolved.

@@ -4,7 +4,7 @@
 
 Restructure and fully implement the Gall Checkpoints (G0 to G9) for the `osx-clnr` Rust project using module documentation and unit/doctests.
 
-Working directory: /Users/sac/osx-clnr
+Working directory: /Users/user/osx-clnr
 Integrity mode: development
 
 ## Requirements
@@ -31,7 +31,7 @@ Every checkpoint transition must be verified using unit tests, doctests, and/or 
 
 # Antigravity Prompt — Phase 1 Adversarial Proof Pass
 
-Working directory: `/Users/sac/osx-clnr`
+Working directory: `/Users/user/osx-clnr`
 
 Status: Phase 1 Architectural Purity is reported complete.
 
@@ -305,7 +305,7 @@ Run or simulate a privacy scan.
 Search docs, examples, fixtures, and committed files for real local paths:
 
 ```text
-/Users/sac
+/Users/user
 /Users/
 ```
 
@@ -337,7 +337,7 @@ rg "std::fs::read_dir|std::fs::metadata|std::fs::symlink_metadata|std::fs::remov
 
 rg "remove_file|remove_dir_all|Command::new|read_dir|symlink_metadata|metadata" src || true
 
-rg "/Users/sac|/Users/" docs examples tests src README.md AGENTS.md .gitignore || true
+rg "/Users/user|/Users/" docs examples tests src README.md AGENTS.md .gitignore || true
 ```
 
 Capture and summarize outputs.
@@ -346,7 +346,7 @@ Capture and summarize outputs.
 
 Evolve the `osx-clnr` tool to add a command-line wrapper around the `gh` CLI to inspect, plan, and clean up GitHub repositories. The tool must follow the project's strict `clap-noun-verb` design and non-negotiable operating laws (dry-run, plan, receipt, verification).
 
-Working directory: `/Users/sac/osx-clnr`
+Working directory: `/Users/user/osx-clnr`
 Integrity mode: benchmark
 
 ## Requirements
@@ -390,7 +390,7 @@ Adhere strictly to the `osx-clnr` safety laws in `AGENTS.md`:
 
 Evolve the `osx-clnr` GitHub cleanup capabilities to support actions cache deletion, stale issues/PRs management, release assets cleanup, and pagination/interaction optimizations. The additions must follow the project's strict `clap-noun-verb` design and non-destructive plan-bound operating laws.
 
-Working directory: `/Users/sac/osx-clnr`
+Working directory: `/Users/user/osx-clnr`
 Integrity mode: benchmark
 
 ## Requirements
@@ -425,7 +425,7 @@ The companion tool must support the following new targets:
 
 Implement a new standalone library crate `cfab-surface` in the `osx-clnr` workspace that formalizes Sean Chatman's "Chatman Fabric" thesis by representing digital resources as **Surfaces** and modeling their relationships as a **Fabric** graph, enabling formal lifecycle and provenance tracking.
 
-Working directory: `/Users/sac/osx-clnr`
+Working directory: `/Users/user/osx-clnr`
 Integrity mode: benchmark
 
 ## Requirements

@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn test_surface_creation_and_validation() {
-        let url = Url::parse("file:///Users/sac/osx-clnr/src").unwrap();
+        let url = Url::parse("file:///Users/user/osx-clnr/src").unwrap();
         let s = Surface::from_url("s1".to_string(), url, "Source".to_string()).unwrap();
         assert_eq!(s.kind, SurfaceKind::LocalDirectory);
 
@@ -718,15 +718,15 @@ mod tests {
         let s = Surface::from_url("s2".to_string(), url, "GH Repo".to_string()).unwrap();
         assert_eq!(s.kind, SurfaceKind::GitHubRepository);
 
-        let url = Url::parse("plan:///Users/sac/osx-clnr/plan.json").unwrap();
+        let url = Url::parse("plan:///Users/user/osx-clnr/plan.json").unwrap();
         let s = Surface::from_url("s3".to_string(), url, "Plan".to_string()).unwrap();
         assert_eq!(s.kind, SurfaceKind::Plan);
 
-        let url = Url::parse("receipt:///Users/sac/osx-clnr/receipt.json").unwrap();
+        let url = Url::parse("receipt:///Users/user/osx-clnr/receipt.json").unwrap();
         let s = Surface::from_url("s4".to_string(), url, "Receipt".to_string()).unwrap();
         assert_eq!(s.kind, SurfaceKind::Receipt);
 
-        let url = Url::parse("doc:///Users/sac/osx-clnr/README.md").unwrap();
+        let url = Url::parse("doc:///Users/user/osx-clnr/README.md").unwrap();
         let s = Surface::from_url("s5".to_string(), url, "Readme".to_string()).unwrap();
         assert_eq!(s.kind, SurfaceKind::Document);
     }

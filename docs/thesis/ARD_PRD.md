@@ -33,11 +33,11 @@ In the `cfab-surface` crate, the category $\mathbf{Fab}$ is constructed as a dir
 
 ### 2.1 Surfaces ($S$)
 A `Surface` is uniquely identified by a URI (`url::Url`). The scheme of the URI dictates the resource type:
-- `file:///Users/sac/osx-clnr/...` $\rightarrow$ `SurfaceKind::LocalDirectory` (Local POSIX disk directories scanned for artifacts).
+- `file:///Users/user/osx-clnr/...` $\rightarrow$ `SurfaceKind::LocalDirectory` (Local POSIX disk directories scanned for artifacts).
 - `github://owner/repo` $\rightarrow$ `SurfaceKind::GitHubRepository` (Remote developer VCS states scanned for branches, runs, releases).
-- `plan:///Users/sac/osx-clnr/maintenance-plan.json` $\rightarrow$ `SurfaceKind::Plan` (Ineffective dry-run deletion plans).
-- `receipt:///Users/sac/osx-clnr/maintenance-receipt.json` $\rightarrow$ `SurfaceKind::Receipt` (Unforgeable post-execution evidence).
-- `doc:///Users/sac/osx-clnr/docs/thesis/...` $\rightarrow$ `SurfaceKind::Document` (Explanatory logs and publications).
+- `plan:///Users/user/osx-clnr/maintenance-plan.json` $\rightarrow$ `SurfaceKind::Plan` (Ineffective dry-run deletion plans).
+- `receipt:///Users/user/osx-clnr/maintenance-receipt.json` $\rightarrow$ `SurfaceKind::Receipt` (Unforgeable post-execution evidence).
+- `doc:///Users/user/osx-clnr/docs/thesis/...` $\rightarrow$ `SurfaceKind::Document` (Explanatory logs and publications).
 
 ### 2.2 Relations (Morphisms $f$)
 Morphisms connect surfaces and are enforced via directional rules:

@@ -5,7 +5,7 @@ Because `osx-clnr` logs trace events and creates plans detailing exact local pat
 
 ## 19.2 The Privacy Redaction Gate
 We implement a Privacy Redaction Gate to sanitize raw logs before they are exported or committed to public version control. The sanitization process applies regular expression replacements:
-* Matches home paths `/Users/username/` and replaces them with `/Users/<user>/`.
+* Matches home paths `/Users/user/` and replaces them with `/Users/<user>/`.
 * Redacts credentials, tokens, and secrets from configurations.
 * Obfuscates sensitive repository names in `github://` URIs.
 

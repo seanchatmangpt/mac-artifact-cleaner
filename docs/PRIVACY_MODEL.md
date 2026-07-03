@@ -13,7 +13,7 @@ Developer machines contain highly sensitive data: usernames, private repository 
 All output files (like `.json` or `.jsonocel` reports) that are checked into the repository as examples or test fixtures must go through a **Privacy & Redaction Gate** (Gall Checkpoint G8) to strip identifying characteristics.
 
 ```text
-Local Path:    /Users/sac/dev/company-x/auth-service/node_modules
+Local Path:    /Users/user/dev/company-x/auth-service/node_modules
 Redacted Path: /Users/<user>/dev/company-x/auth-service/node_modules
 ```
 

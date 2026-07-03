@@ -40,7 +40,7 @@ Before this phase change, an artifact is merely an addressable directory contain
 
 ## 3. CLI Command Structures and the Equation Mapping
 
-The CLI of `osx-clnr` is built on a strict **noun-verb grammar** (as defined in [mod.rs](file:///Users/sac/osx-clnr/src/nouns/mod.rs)). The nouns represent governed objects, and the verbs represent allowed state transitions. Each command maps to a component of the Chatman Equation:
+The CLI of `osx-clnr` is built on a strict **noun-verb grammar** (as defined in [mod.rs](file:///Users/user/osx-clnr/src/nouns/mod.rs)). The nouns represent governed objects, and the verbs represent allowed state transitions. Each command maps to a component of the Chatman Equation:
 
 ```mermaid
 graph TD
@@ -55,16 +55,16 @@ graph TD
 
 | Command Noun | Primary Verbs | Mathematical Role | Code Reference |
 |---|---|---|---|
-| **`audit`** | `run`, `summarize` | Collects raw observations $\mathcal{O}^*_{\text{fs}}$ and estimates free-space capacities. | [audit.rs](file:///Users/sac/osx-clnr/src/nouns/audit.rs) |
-| **`artifact`** | `scan`, `summarize` | Categorizes candidates, applying G2 traversal barriers to isolate subtrees. | [artifact.rs](file:///Users/sac/osx-clnr/src/nouns/artifact.rs) |
-| **`plan`** | `build`, `inspect`, `validate` | Materializes the $\mu_{\text{fs}}$ mapping. Validates type transitions from `Raw` to `Admitted`. | [plan.rs](file:///Users/sac/osx-clnr/src/nouns/plan.rs) |
-| **`delete`** | `execute`, `dry-run` | Actuates plan-bound state changes. Refuses execution without an approved plan. | [delete.rs](file:///Users/sac/osx-clnr/src/nouns/delete.rs) |
-| **`receipt`** | `verify`, `summarize` | Solidifies terminal evidence $\mathcal{A}_{\text{fs}}$ using unforgeable BLAKE3 receipt envelopes. | [receipt.rs](file:///Users/sac/osx-clnr/src/nouns/receipt.rs) |
-| **`snapshot`** | `audit`, `thin`, `delete` | Reclaims storage blocked by APFS snapshots to ensure measurement matches reality. | [snapshot.rs](file:///Users/sac/osx-clnr/src/nouns/snapshot.rs) |
-| **`exclusion`** | `plan`, `apply` | Interfaces with `tmutil` to ensure Time Machine does not backup transient junk. | [exclusion.rs](file:///Users/sac/osx-clnr/src/nouns/exclusion.rs) |
-| **`ocel`** | `validate`, `summarize` | Computes referential integrity of Object-Centric Event Logs. | [ocel.rs](file:///Users/sac/osx-clnr/src/nouns/ocel.rs) |
-| **`privacy`** | `scan`, `redact` | Redacts usernames and local development paths for repository safety. | [privacy.rs](file:///Users/sac/osx-clnr/src/nouns/privacy.rs) |
-| **`doctor`** | `architecture`, `doctests` | Self-audits the codebase to guarantee that domain logic remains side-effect free. | [doctor.rs](file:///Users/sac/osx-clnr/src/nouns/doctor.rs) |
+| **`audit`** | `run`, `summarize` | Collects raw observations $\mathcal{O}^*_{\text{fs}}$ and estimates free-space capacities. | [audit.rs](file:///Users/user/osx-clnr/src/nouns/audit.rs) |
+| **`artifact`** | `scan`, `summarize` | Categorizes candidates, applying G2 traversal barriers to isolate subtrees. | [artifact.rs](file:///Users/user/osx-clnr/src/nouns/artifact.rs) |
+| **`plan`** | `build`, `inspect`, `validate` | Materializes the $\mu_{\text{fs}}$ mapping. Validates type transitions from `Raw` to `Admitted`. | [plan.rs](file:///Users/user/osx-clnr/src/nouns/plan.rs) |
+| **`delete`** | `execute`, `dry-run` | Actuates plan-bound state changes. Refuses execution without an approved plan. | [delete.rs](file:///Users/user/osx-clnr/src/nouns/delete.rs) |
+| **`receipt`** | `verify`, `summarize` | Solidifies terminal evidence $\mathcal{A}_{\text{fs}}$ using unforgeable BLAKE3 receipt envelopes. | [receipt.rs](file:///Users/user/osx-clnr/src/nouns/receipt.rs) |
+| **`snapshot`** | `audit`, `thin`, `delete` | Reclaims storage blocked by APFS snapshots to ensure measurement matches reality. | [snapshot.rs](file:///Users/user/osx-clnr/src/nouns/snapshot.rs) |
+| **`exclusion`** | `plan`, `apply` | Interfaces with `tmutil` to ensure Time Machine does not backup transient junk. | [exclusion.rs](file:///Users/user/osx-clnr/src/nouns/exclusion.rs) |
+| **`ocel`** | `validate`, `summarize` | Computes referential integrity of Object-Centric Event Logs. | [ocel.rs](file:///Users/user/osx-clnr/src/nouns/ocel.rs) |
+| **`privacy`** | `scan`, `redact` | Redacts usernames and local development paths for repository safety. | [privacy.rs](file:///Users/user/osx-clnr/src/nouns/privacy.rs) |
+| **`doctor`** | `architecture`, `doctests` | Self-audits the codebase to guarantee that domain logic remains side-effect free. | [doctor.rs](file:///Users/user/osx-clnr/src/nouns/doctor.rs) |
 
 ---
 
@@ -140,7 +140,7 @@ By extracting the general noun-verb routing grammar to a sibling repo, the syste
 
 ### 6.2 The `linkme` Functor: Link-Time Registration
 
-The auto-discovery of verbs (e.g., the `github` subcommands in [github.rs](file:///Users/sac/osx-clnr/src/nouns/github.rs)) relies on the `linkme` crate's distributed slices:
+The auto-discovery of verbs (e.g., the `github` subcommands in [github.rs](file:///Users/user/osx-clnr/src/nouns/github.rs)) relies on the `linkme` crate's distributed slices:
 
 ```rust
 use linkme::distributed_slice;
@@ -191,16 +191,16 @@ To implement this without breaking the existing `DeletionPlan` data structures, 
     *   `github://issue/{owner}/{repo}/{number}`
     *   `github://pr/{owner}/{repo}/{number}`
     *   `github://release-asset/{owner}/{repo}/{asset_id}/{asset_name}`
-2.  **Morphisms:** State transitions on the GitHub platform (such as branch deletion or workflow run cancellation) are mapped to standard plan-bound actuation steps in [github.rs](file:///Users/sac/osx-clnr/src/nouns/github.rs#L254-L329).
+2.  **Morphisms:** State transitions on the GitHub platform (such as branch deletion or workflow run cancellation) are mapped to standard plan-bound actuation steps in [github.rs](file:///Users/user/osx-clnr/src/nouns/github.rs#L254-L329).
 
 This functorial mapping allows the `DeletionPlanAdjudicator` (our typestate boundary) to validate and execute remote deletions under the exact same $h_I$ safety constraints as local file deletions:
-*   Remote candidates are scanned and written to a plan file (`github plan` / [github_plan](file:///Users/sac/osx-clnr/src/nouns/github.rs#L153)).
-*   Deletions are forbidden from running dynamically; they can only be executed strictly from an admitted plan file (`github delete` / [github_delete](file:///Users/sac/osx-clnr/src/nouns/github.rs#L204)).
+*   Remote candidates are scanned and written to a plan file (`github plan` / [github_plan](file:///Users/user/osx-clnr/src/nouns/github.rs#L153)).
+*   Deletions are forbidden from running dynamically; they can only be executed strictly from an admitted plan file (`github delete` / [github_delete](file:///Users/user/osx-clnr/src/nouns/github.rs#L204)).
 *   All results are recorded in a cryptographically committed receipt (`github-deletion-chain-001`).
 
 ### 7.2 Forensic Audit & Verification (Auditor / Victory Auditor Synthesis)
 The implementation was audited under strict **Benchmark Mode** constraints to ensure the integrity of the $\mu_{\text{fed}}$ mapping:
-*   **No Mock Facades:** Rather than using pre-stubbed mocks that hardcode success paths, the test suite verifies dynamic behavior. Tests in [github_tests.rs](file:///Users/sac/osx-clnr/tests/github_tests.rs) employ a dynamic `MockCommandExecutor` to simulate CLI interactions, verifying date calculations and candidate discovery on the fly.
+*   **No Mock Facades:** Rather than using pre-stubbed mocks that hardcode success paths, the test suite verifies dynamic behavior. Tests in [github_tests.rs](file:///Users/user/osx-clnr/tests/github_tests.rs) employ a dynamic `MockCommandExecutor` to simulate CLI interactions, verifying date calculations and candidate discovery on the fly.
 *   **Pure Dependency Decoupling:** The integration utilizes the system's native `gh` CLI directly via `RealCommandExecutor` rather than introducing third-party client libraries (e.g., `octocrab`), preserving the purity of the domain and keeping the dependency footprint minimal.
 *   **Concept / Interface Drift:** The Victory Audit identified a minor discrepancy regarding the `gh run list --json` command across various CLI versions. Requesting the field `"id"` causes failures in environments where the CLI expects `"databaseId"`. This is documented as a case of **Concept Drift**—where the physical system's schema drifts from the internal model—which the wrapper resolves through fallback mechanisms to prevent scan crashes.
 
@@ -208,7 +208,7 @@ The implementation was audited under strict **Benchmark Mode** constraints to en
 To stress-test the limits of the federated standing boundary, the challenger subagent analyzed potential failure modes and parameter degenerations:
 
 *   **Validation Bypass via Degenerate Thresholds:** 
-    If a user specifies a threshold of 0 days (e.g., `--repo-days 0`), the semantic filter [is_repo_stale_or_empty](file:///Users/sac/osx-clnr/src/domain/github.rs#L440) classifies all repositories as candidates. This collapses the standing boundary: every active repo is marked for deletion.
+    If a user specifies a threshold of 0 days (e.g., `--repo-days 0`), the semantic filter [is_repo_stale_or_empty](file:///Users/user/osx-clnr/src/domain/github.rs#L440) classifies all repositories as candidates. This collapses the standing boundary: every active repo is marked for deletion.
     > [!WARNING]
     > High-volume cleanup tools must enforce non-zero/non-negative thresholds or require explicit `--force` overrides to prevent catastrophic feedback loops that wipe active remote repositories.
   

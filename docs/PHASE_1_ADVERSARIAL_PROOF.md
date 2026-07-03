@@ -69,7 +69,7 @@ The integration test suite was extended with a new test: `test_traversal_barrier
 
 ## Privacy Findings
 
-- All absolute URLs referencing `/Users/sac` in markdown documentation have been updated to relative markdown links.
+- All absolute URLs referencing `/Users/user` in markdown documentation have been updated to relative markdown links.
 - The hardcoded bypass allowlist containing `"sac"` has been deleted from `src/domain/doctor.rs`. Privacy scans now run environment-neutrally.
 
 ## Promotion Decision

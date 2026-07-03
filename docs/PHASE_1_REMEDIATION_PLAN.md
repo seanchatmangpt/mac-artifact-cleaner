@@ -33,14 +33,14 @@ This document outlines the actions that were taken and completed to fix all arch
 ## 3. Privacy Leaks: Absolute URL References
 
 ### Problem
-Absolute markdown links referencing local filesystem paths (containing the absolute home path `file:///Users/sac/`) are hardcoded in documentation:
+Absolute markdown links referencing local filesystem paths (containing the absolute home path `file:///Users/user/`) are hardcoded in documentation:
 - `docs/PRIVACY_MODEL.md`
 - `docs/TIME_MACHINE_MODEL.md`
 - `docs/OCEL_MODEL.md`
 
 ### Remediation
 1. Rewrite all absolute links to relative markdown links:
-   - For example, `[tmutil.rs](file:///Users/sac/osx-clnr/src/integration/tmutil.rs)` becomes `[tmutil.rs](../src/integration/tmutil.rs)`.
+   - For example, `[tmutil.rs](file:///Users/user/osx-clnr/src/integration/tmutil.rs)` becomes `[tmutil.rs](../src/integration/tmutil.rs)`.
    - Replace absolute links to the `.gitignore` or other sources with relative workspace paths.
 
 ---
