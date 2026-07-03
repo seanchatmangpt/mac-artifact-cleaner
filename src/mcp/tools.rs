@@ -441,6 +441,9 @@ pub struct ClearArtifactsOutput {
     pub archived_files: Vec<ArchivedFile>,
     pub archive_location: String,
     pub timestamp: String,
+    /// True when this response describes a preview only: no filesystem
+    /// writes were performed and no workflow state was reset.
+    pub dry_run: bool,
 }
 
 // ============================================================================
