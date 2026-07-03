@@ -255,14 +255,16 @@ impl OsxClnrMcpServer {
             }),
             json!({
                 "name": "emergency_reclaim",
-                "description": "Aggressively reclaim disk space when low",
+                "description": "Aggressively reclaim disk space when low. NOT scoped to `workspace`: sweeps real APFS snapshots and home-directory caches on the given `mount`. Never call against a real mount without explicit user intent.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "workspace": { "type": "string" },
+                        "mount": { "type": "string", "description": "Real volume mount point to reclaim, e.g. \"/\". Required — no default." },
                         "target_free_gb": { "type": "number" },
                         "confirm": { "type": "boolean", "default": false }
-                    }
+                    },
+                    "required": ["mount", "target_free_gb"]
                 }
             }),
         ];
@@ -1407,7 +1409,8 @@ impl OsxClnrMcpServer {
         // with a future CLI flag but not yet wired through.
         let _ = input.target_free_gb;
 
-        let result = self.runner.emergency_reclaim(&workspace, "/", true, Some(&receipt_file))?;
+        let result =
+            self.runner.emergency_reclaim(&workspace, &input.mount, true, Some(&receipt_file))?;
         if !result.success() {
             return Err(result.to_error("oclnr emergency"));
         }

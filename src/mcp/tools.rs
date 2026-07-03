@@ -475,6 +475,11 @@ pub struct SnapshotAuditOutput {
 pub struct EmergencyReclaimInput {
     #[serde(default)]
     pub workspace: Option<PathBuf>,
+    /// Real volume mount point to reclaim space on (e.g. "/"). This operation
+    /// is NOT scoped to `workspace` — it sweeps real home-directory caches
+    /// and real APFS snapshots on the given mount. Callers must name the
+    /// mount explicitly; there is no silent default.
+    pub mount: String,
     pub target_free_gb: f64,
     #[serde(default)]
     pub confirm: bool,
