@@ -525,6 +525,9 @@ pub fn is_artifact_leaf_name(name: &str) -> bool {
         name,
         "node_modules"
             | "target"
+            | "Binaries"
+            | "Intermediate"
+            | "DerivedDataCache"
             | ".next"
             | ".nuxt"
             | ".output"
@@ -583,6 +586,9 @@ pub fn is_traversal_barrier_name(name: &str) -> bool {
 /// // Positive case
 /// assert!(barriers.contains(".git"));
 /// assert!(barriers.contains("node_modules"));
+/// assert!(barriers.contains("Binaries"));
+/// assert!(barriers.contains("Intermediate"));
+/// assert!(barriers.contains("DerivedDataCache"));
 ///
 /// // Negative case
 /// assert!(!barriers.contains("src"));
@@ -601,6 +607,9 @@ pub fn traversal_barrier_names() -> HashSet<&'static str> {
         ".vite",
         ".parcel-cache",
         "target",
+        "Binaries",
+        "Intermediate",
+        "DerivedDataCache",
         ".venv",
         "venv",
         "env",
@@ -655,6 +664,26 @@ pub fn traversal_barrier_names() -> HashSet<&'static str> {
 /// };
 /// let project = detect_project_from_snapshot(&snap).unwrap();
 /// assert!(project.names.contains(&"rust"));
+///
+/// // Positive case: a .uproject file marker → unreal project.
+/// let ue_snap = DirSnapshot {
+///     children: vec![
+///         EntrySnapshot::new(PathBuf::from("/p/MyGame.uproject"), "MyGame.uproject".into(), Some("uproject".into()), EntryKind::File),
+///     ],
+/// };
+/// let ue_project = detect_project_from_snapshot(&ue_snap).unwrap();
+/// assert!(ue_project.names.contains(&"unreal"));
+///
+/// // Positive case: an engine checkout's Engine/ dir (Source+Shaders+Build siblings) → unreal project.
+/// let engine_snap = DirSnapshot {
+///     children: vec![
+///         EntrySnapshot::new(PathBuf::from("/p/Engine/Source"), "Source".into(), None, EntryKind::Dir),
+///         EntrySnapshot::new(PathBuf::from("/p/Engine/Shaders"), "Shaders".into(), None, EntryKind::Dir),
+///         EntrySnapshot::new(PathBuf::from("/p/Engine/Build"), "Build".into(), None, EntryKind::Dir),
+///     ],
+/// };
+/// let engine_project = detect_project_from_snapshot(&engine_snap).unwrap();
+/// assert!(engine_project.names.contains(&"unreal"));
 ///
 /// // Negative case: no recognized markers → None.
 /// let empty = DirSnapshot::default();
@@ -757,6 +786,20 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
         names.push("dotnet");
     }
 
+    // `.uproject`/`.uplugin` mark a game project or plugin root, where
+    // `Binaries`/`Intermediate`/`Saved` are direct siblings. An engine
+    // checkout has no marker *file* of its own at the `Engine/` level, but
+    // its `Source`+`Shaders`+`Build` combination is a distinctive enough
+    // fingerprint of Epic's own directory layout (this fires on the
+    // `Engine/` directory itself, where `Binaries`/`Intermediate` are
+    // siblings of `Source`, rather than on the repo root above it).
+    if snap.has_file_ext("uproject")
+        || snap.has_file_ext("uplugin")
+        || (snap.has_dir("Source") && snap.has_dir("Shaders") && snap.has_dir("Build"))
+    {
+        names.push("unreal");
+    }
+
     if names.is_empty() {
         None
     } else {
@@ -796,6 +839,31 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
 /// let empty = DirSnapshot::default();
 /// let none = artifact_candidates_from_snapshot(root, &project, &args, &empty);
 /// assert!(none.is_empty());
+///
+/// // Positive case: unreal project → Intermediate/DerivedDataCache/Saved always,
+/// // Binaries only under `--aggressive` (it's a build output, like dist/build elsewhere).
+/// let unreal_project = ProjectKind { names: vec!["unreal"] };
+/// let unreal_snap = DirSnapshot {
+///     children: vec![
+///         EntrySnapshot::new(PathBuf::from("/project/Intermediate"), "Intermediate".into(), None, EntryKind::Dir),
+///         EntrySnapshot::new(PathBuf::from("/project/DerivedDataCache"), "DerivedDataCache".into(), None, EntryKind::Dir),
+///         EntrySnapshot::new(PathBuf::from("/project/Saved"), "Saved".into(), None, EntryKind::Dir),
+///         EntrySnapshot::new(PathBuf::from("/project/Binaries"), "Binaries".into(), None, EntryKind::Dir),
+///         EntrySnapshot::new(PathBuf::from("/project/Source"), "Source".into(), None, EntryKind::Dir),
+///     ],
+/// };
+/// let unreal_candidates = artifact_candidates_from_snapshot(root, &unreal_project, &args, &unreal_snap);
+/// assert!(unreal_candidates.iter().any(|c| c.path.ends_with("Intermediate")));
+/// assert!(unreal_candidates.iter().any(|c| c.path.ends_with("DerivedDataCache")));
+/// assert!(unreal_candidates.iter().any(|c| c.path.ends_with("Saved")));
+/// assert!(unreal_candidates.iter().any(|c| c.path.ends_with("Binaries")));
+///
+/// // Refusal case: Source is never nominated, aggressive or not.
+/// assert!(!unreal_candidates.iter().any(|c| c.path.ends_with("Source")));
+///
+/// let mild_args = ArgsSnapshot { deps: true, aggressive: false, verbose: false, tool_roots: false, ignore_recent_hours: 1 };
+/// let mild_candidates = artifact_candidates_from_snapshot(root, &unreal_project, &mild_args, &unreal_snap);
+/// assert!(!mild_candidates.iter().any(|c| c.path.ends_with("Binaries")));
 /// ```
 pub fn artifact_candidates_from_snapshot(
     root: &Path,
@@ -981,6 +1049,22 @@ pub fn artifact_candidates_from_snapshot(
             "dotnet" => {
                 add_dir(&mut out, root, "bin", "dotnet bin", snap);
                 add_dir(&mut out, root, "obj", "dotnet obj", snap);
+            }
+
+            "unreal" => {
+                add_dir(&mut out, root, "Intermediate", "unreal intermediate build cache", snap);
+                add_dir(
+                    &mut out,
+                    root,
+                    "DerivedDataCache",
+                    "unreal shader derived data cache",
+                    snap,
+                );
+                add_dir(&mut out, root, "Saved", "unreal saved logs/config", snap);
+
+                if args.aggressive {
+                    add_dir(&mut out, root, "Binaries", "unreal compiled binaries", snap);
+                }
             }
 
             _ => {}
