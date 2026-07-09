@@ -56,7 +56,7 @@ linkme = "0.3"
 # dual-court admission gate — everything Pentecost needs to seal deletions.
 affidavit = { version = "26.6.22", default-features = false, features = ["core"] }
 # MCP server dependencies
-hmac = "0.12"
+hmac = "0.13"
 sha2 = "0.10"
 hex = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
