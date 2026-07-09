@@ -57,7 +57,7 @@ linkme = "0.3"
 affidavit = { version = "26.6.22", default-features = false, features = ["core"] }
 # MCP server dependencies
 hmac = "0.12"
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
 star-toml = "26.6.30"
