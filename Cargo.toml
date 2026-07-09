@@ -1,6 +1,6 @@
 [package]
 name = "osx-clnr"
-version = "26.7.3"
+version = "26.7.9"
 edition = "2021"
 # House standard is 1.82; osx-clnr uses io::ErrorKind::StorageFull (stable 1.83).
 rust-version = "1.83"

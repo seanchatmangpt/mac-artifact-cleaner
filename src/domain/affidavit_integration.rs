@@ -15,7 +15,7 @@
 use affidavit::{chain::ChainAssembler, Blake3Hash, ObjectRef, OperationEvent};
 pub use affidavit::{types::AdmittedReceipt, Receipt, Verdict};
 
-use crate::domain::receipt::DeletionReceipt;
+use crate::domain::{receipt::DeletionReceipt, time::SnapshotThinReceipt};
 
 /// Project a [`DeletionReceipt`] into a sealed affidavit [`Receipt`].
 ///
@@ -96,6 +96,101 @@ pub fn build_deletion_affidavit(receipt: &DeletionReceipt) -> Receipt {
     }
 
     assembler.finalize()
+}
+
+/// Shared projection for [`SnapshotThinReceipt`], parameterized by the
+/// truthful event/object-type vocabulary of the operation that produced it.
+/// Thinning and selective deletion are distinct operations (byte-driven vs
+/// name/date-driven — see [`crate::domain::ocel::build_snapshot_thin_ocel`]
+/// and [`crate::domain::ocel::build_snapshot_delete_ocel`]) and must not be
+/// conflated in the sealed provenance any more than in the OCEL log.
+fn build_snapshot_affidavit(
+    receipt: &SnapshotThinReceipt,
+    event_type: &str,
+    plan_obj_type: &str,
+) -> Receipt {
+    let mut assembler = ChainAssembler::new();
+
+    let header_event = OperationEvent {
+        id: format!("{}-header", event_type),
+        seq: 0,
+        event_type: event_type.to_string(),
+        objects: vec![ObjectRef {
+            id: format!("{}-{}", receipt.volume, receipt.timestamp_unix),
+            obj_type: plan_obj_type.to_string(),
+            qualifier: None,
+        }],
+        payload_commitment: Blake3Hash::from_bytes(
+            serde_json::to_string(receipt).unwrap_or_default().as_bytes(),
+        ),
+    };
+    assembler.append(header_event).expect("header event canonicalizes");
+
+    for (i, name) in receipt.snapshots_thinned.iter().enumerate() {
+        let event = OperationEvent {
+            id: format!("{}-{}", event_type, i),
+            seq: (i + 1) as u64,
+            event_type: event_type.to_string(),
+            objects: vec![ObjectRef {
+                id: Blake3Hash::from_bytes(name.as_bytes()).as_hex().to_string(),
+                obj_type: "snapshot_state".to_string(),
+                qualifier: Some("removed".to_string()),
+            }],
+            payload_commitment: Blake3Hash::from_bytes(name.as_bytes()),
+        };
+        assembler.append(event).expect("result event canonicalizes");
+    }
+
+    assembler.finalize()
+}
+
+/// Project a [`SnapshotThinReceipt`] produced by a byte-driven thin operation
+/// into a sealed affidavit [`Receipt`].
+///
+/// ```
+/// use osx_clnr::domain::time::SnapshotThinReceipt;
+/// use osx_clnr::domain::affidavit_integration::build_snapshot_thin_affidavit;
+///
+/// let receipt = SnapshotThinReceipt::new(
+///     "/".to_string(), 1_000_000, 1_716_768_000,
+///     vec!["snap1".to_string(), "snap2".to_string()],
+///     vec!["snap2".to_string()],
+/// );
+/// let sealed = build_snapshot_thin_affidavit(&receipt);
+/// assert_eq!(sealed.events.len(), 2); // header + 1 thinned snapshot
+///
+/// // Negative — nothing thinned still seals into a lone header event.
+/// let empty = SnapshotThinReceipt::new(
+///     "/".to_string(), 1_000_000, 1_716_768_000,
+///     vec!["snap1".to_string()], vec!["snap1".to_string()],
+/// );
+/// assert_eq!(build_snapshot_thin_affidavit(&empty).events.len(), 1);
+/// ```
+pub fn build_snapshot_thin_affidavit(receipt: &SnapshotThinReceipt) -> Receipt {
+    build_snapshot_affidavit(receipt, "snapshot_thin_requested", "snapshot_thin_plan")
+}
+
+/// Project a [`SnapshotThinReceipt`] produced by a name/date-driven selective
+/// delete into a sealed affidavit [`Receipt`].
+///
+/// Uses the distinct `snapshot_delete_requested` event type so a delete is
+/// never mistakable for a thin in the sealed provenance chain.
+///
+/// ```
+/// use osx_clnr::domain::time::SnapshotThinReceipt;
+/// use osx_clnr::domain::affidavit_integration::build_snapshot_delete_affidavit;
+///
+/// let receipt = SnapshotThinReceipt::new(
+///     "/".to_string(), 0, 1_716_768_000,
+///     vec!["snap1".to_string(), "snap2".to_string()],
+///     vec!["snap2".to_string()],
+/// );
+/// let sealed = build_snapshot_delete_affidavit(&receipt);
+/// assert_eq!(sealed.events.len(), 2); // header + 1 deleted snapshot
+/// assert_eq!(sealed.events[0].event_type, "snapshot_delete_requested");
+/// ```
+pub fn build_snapshot_delete_affidavit(receipt: &SnapshotThinReceipt) -> Receipt {
+    build_snapshot_affidavit(receipt, "snapshot_delete_requested", "snapshot_delete_plan")
 }
 
 /// Run affidavit's 7-stage structural certification over a sealed receipt.

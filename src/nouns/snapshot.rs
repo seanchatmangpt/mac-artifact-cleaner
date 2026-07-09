@@ -10,11 +10,40 @@ use crate::{
         time::{parse_size_in_bytes, select_oldest_snapshots, SnapshotThinReceipt},
     },
     integration::{
-        fs::volume_space,
+        fs::{volume_space, write_or_dump_on_full},
         progress::human_bytes,
         tmutil::{delete_local_snapshot, list_local_snapshots, thin_local_snapshots},
     },
 };
+
+/// Seals a [`SnapshotThinReceipt`] into an affidavit core/v1 provenance chain
+/// alongside it, using `event_builder` to pick the truthful event type
+/// (`snapshot_thin_requested` vs `snapshot_delete_requested`) for the
+/// operation that produced it. Increasing destructive power (snapshots just
+/// thinned/deleted) must come with increased receipts, same as `delete
+/// execute`.
+fn seal_snapshot_receipt(
+    receipt_obj: &SnapshotThinReceipt,
+    receipt_path: &Path,
+    event_builder: fn(&SnapshotThinReceipt) -> crate::domain::affidavit_integration::Receipt,
+) -> anyhow::Result<()> {
+    let affidavit_receipt = event_builder(receipt_obj);
+    let verdict = crate::domain::affidavit_integration::certify(&affidavit_receipt);
+    let affidavit_path = receipt_path.with_extension("affidavit.json");
+    let affidavit_json = String::from_utf8(
+        crate::domain::affidavit_integration::serialize_receipt(&affidavit_receipt),
+    )
+    .unwrap_or_default();
+    write_or_dump_on_full(&affidavit_path, &affidavit_json, "affidavit receipt")?;
+
+    println!(
+        "Affidavit receipt written to: {} (core/v1 chain {}, certify: {})",
+        affidavit_path.display(),
+        affidavit_receipt.chain_hash,
+        if verdict.accepted { "✅ ACCEPTED" } else { "❌ REJECTED" }
+    );
+    Ok(())
+}
 
 /// Prints the volume's available space, returning it for before/after deltas.
 fn report_space(mount: &str) -> Option<u64> {
@@ -132,6 +161,12 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
                 let serialized = serde_json::to_string_pretty(&receipt_obj)?;
                 std::fs::write(&r_path, serialized)?;
                 println!("Wrote thinning receipt to: {}", r_path.display());
+
+                seal_snapshot_receipt(
+                    &receipt_obj,
+                    &r_path,
+                    crate::domain::affidavit_integration::build_snapshot_thin_affidavit,
+                )?;
             }
 
             if let Some(o_path) = ocel {
@@ -201,6 +236,12 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
                 let serialized = serde_json::to_string_pretty(&receipt_obj)?;
                 std::fs::write(&r_path, serialized)?;
                 println!("Wrote deletion receipt to: {}", r_path.display());
+
+                seal_snapshot_receipt(
+                    &receipt_obj,
+                    &r_path,
+                    crate::domain::affidavit_integration::build_snapshot_delete_affidavit,
+                )?;
             }
 
             if let Some(o_path) = ocel {

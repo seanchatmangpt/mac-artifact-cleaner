@@ -356,6 +356,8 @@ pub struct DeleteExecuteOutput {
     pub execution_record: ExecutionRecord,
     pub receipt_file: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_verification_warning: Option<String>,
 }
 
 // ============================================================================
@@ -473,6 +475,65 @@ pub struct SnapshotAuditOutput {
     pub total_snapshots: usize,
     pub total_bytes: u64,
     pub snapshots: Vec<SnapshotInfo>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SnapshotThinInput {
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
+    /// Real volume mount point to thin snapshots on (e.g. "/"). Callers must
+    /// name the mount explicitly; there is no silent default.
+    pub mount: String,
+    /// Target bytes to reclaim, human-readable (e.g. "10GB", "500MB") or raw digits.
+    pub bytes: String,
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotThinOutput {
+    pub state: String,
+    pub mount: String,
+    pub requested_bytes: u64,
+    pub snapshots_before: usize,
+    pub snapshots_after: usize,
+    pub snapshots_thinned: Vec<String>,
+    pub receipt_file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub affidavit_file: Option<String>,
+    pub message: String,
+}
+
+fn default_oldest_n() -> usize {
+    1
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SnapshotDeleteInput {
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
+    /// Real volume mount point to delete snapshots on (e.g. "/"). Callers must
+    /// name the mount explicitly; there is no silent default.
+    pub mount: String,
+    /// "oldest" (see `oldest_n`), "all", or an explicit snapshot name/date.
+    pub which: String,
+    #[serde(default = "default_oldest_n")]
+    pub oldest_n: usize,
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotDeleteOutput {
+    pub state: String,
+    pub mount: String,
+    pub snapshots_before: usize,
+    pub snapshots_after: usize,
+    pub snapshots_deleted: Vec<String>,
+    pub receipt_file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub affidavit_file: Option<String>,
     pub message: String,
 }
 

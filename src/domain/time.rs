@@ -69,6 +69,29 @@ pub fn parse_snapshot_date(name: &str) -> Option<String> {
     None
 }
 
+/// Extracts the Unix timestamp encoded in a local snapshot name, if present.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::time::snapshot_unix_timestamp;
+///
+/// // Positive case
+/// assert_eq!(
+///     snapshot_unix_timestamp("com.apple.TimeMachine.2026-05-26-135630.local"),
+///     Some(1779803790)
+/// );
+///
+/// // Refusal case: no date suffix to parse
+/// assert_eq!(snapshot_unix_timestamp("invalid-snapshot-name"), None);
+/// ```
+pub fn snapshot_unix_timestamp(name: &str) -> Option<i64> {
+    let date = parse_snapshot_date(name)?;
+    chrono::NaiveDateTime::parse_from_str(&date, "%Y-%m-%d-%H%M%S")
+        .ok()
+        .map(|dt| dt.and_utc().timestamp())
+}
+
 /// Compares two lists of snapshot names to identify which ones were thinned (removed).
 ///
 /// # Examples

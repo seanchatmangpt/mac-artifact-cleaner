@@ -332,6 +332,59 @@ impl OclnrRunner {
         self.run_command(cmd, "oclnr snapshot audit")
     }
 
+    /// Run: oclnr snapshot thin --mount <mount> --bytes <bytes> --receipt <receipt_file>
+    #[allow(clippy::result_large_err)]
+    pub fn snapshot_thin(
+        &self,
+        workspace: &PathBuf,
+        mount: &str,
+        bytes: &str,
+        receipt_file: &PathBuf,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        let mut cmd = Command::new(&self.oclnr_path);
+        cmd.arg("snapshot")
+            .arg("thin")
+            .arg("--mount")
+            .arg(mount)
+            .arg("--bytes")
+            .arg(bytes)
+            .arg("--receipt")
+            .arg(receipt_file)
+            .current_dir(workspace)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        self.run_command(cmd, "oclnr snapshot thin")
+    }
+
+    /// Run: oclnr snapshot delete --mount <mount> --which <which> --oldest-n <oldest_n> --receipt <receipt_file>
+    #[allow(clippy::result_large_err)]
+    pub fn snapshot_delete(
+        &self,
+        workspace: &PathBuf,
+        mount: &str,
+        which: &str,
+        oldest_n: usize,
+        receipt_file: &PathBuf,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        let mut cmd = Command::new(&self.oclnr_path);
+        cmd.arg("snapshot")
+            .arg("delete")
+            .arg("--mount")
+            .arg(mount)
+            .arg("--which")
+            .arg(which)
+            .arg("--oldest-n")
+            .arg(oldest_n.to_string())
+            .arg("--receipt")
+            .arg(receipt_file)
+            .current_dir(workspace)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        self.run_command(cmd, "oclnr snapshot delete")
+    }
+
     /// Run: oclnr doctor architecture
     #[allow(clippy::result_large_err)]
     pub fn doctor_check(
