@@ -14,7 +14,7 @@ use crate::{
     domain::{
         delete::{require_plan_approved, DeletionPlanAdjudicator, PlanSafetyWitness},
         plan::{DeletionPlan, PlanItemKind},
-        receipt::{DeletionReceipt, DeletionResult, DeletionStatus},
+        receipt::{check_reclaim, DeletionReceipt, DeletionResult, DeletionStatus, ReclaimCheck},
     },
     integration::{
         fs::{delete_dir_all, delete_file, generate_manifest, volume_space, write_or_dump_on_full},
@@ -302,6 +302,18 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 affidavit_receipt.chain_hash,
                 if verdict.accepted { "✅ ACCEPTED" } else { "❌ REJECTED" }
             );
+
+            if let ReclaimCheck::Shortfall { claimed, measured } =
+                check_reclaim(bytes_freed_total, space_before.map(|v| v.available), available_after)
+            {
+                let measured_unsigned = if measured < 0 { 0 } else { measured as u64 };
+                anyhow::bail!(
+                    "Space verification shortfall: Receipt claims {} bytes freed but volume free-space delta measured only {} bytes (floor={:.0}%).",
+                    human_bytes(claimed),
+                    human_bytes(measured_unsigned),
+                    crate::domain::receipt::RECLAIM_TOLERANCE * 100.0
+                );
+            }
         }
     }
     Ok(())
