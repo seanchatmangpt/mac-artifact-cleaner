@@ -188,6 +188,52 @@ pub struct AuditScanOutput {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuditBreakdownInput {
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
+    /// Root to scan (defaults to the user's home directory).
+    #[serde(default)]
+    pub root: Option<PathBuf>,
+    /// How many path components below `root` to bucket by. 1 = immediate
+    /// children only; 2+ splits large catch-all directories (e.g. Library)
+    /// into their own children.
+    #[serde(default = "default_breakdown_depth")]
+    pub depth: u32,
+    #[serde(default = "default_breakdown_top")]
+    pub top: usize,
+    #[serde(default)]
+    pub min_mb: u64,
+}
+
+fn default_breakdown_depth() -> u32 {
+    2
+}
+fn default_breakdown_top() -> usize {
+    40
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BreakdownEntryOutput {
+    pub path: String,
+    pub bytes: u64,
+    pub percent_of_total: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AuditBreakdownOutput {
+    pub state: String,
+    pub root: String,
+    pub depth: u32,
+    pub disk_total_bytes: u64,
+    pub disk_available_bytes: u64,
+    pub disk_percent_used: u8,
+    pub total_bytes: u64,
+    pub entry_count: usize,
+    pub entries: Vec<BreakdownEntryOutput>,
+    pub message: String,
+}
+
 // ============================================================================
 // PLAN INPUTS/OUTPUTS
 // ============================================================================
@@ -370,6 +416,13 @@ pub struct ReceiptVerifyInput {
     pub workspace: Option<PathBuf>,
     #[serde(default)]
     pub receipt_file: Option<PathBuf>,
+    /// Also seal the receipt with an affidavit cryptographic proof chain
+    /// (absorbs the former standalone `receipt_certify` tool). Requires
+    /// `confirm: true` since it writes a `.affidavit.json` file.
+    #[serde(default)]
+    pub seal: bool,
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -377,7 +430,20 @@ pub struct ReceiptVerifyOutput {
     pub state: String,
     pub receipt_file: String,
     pub verification_summary: VerificationSummary,
+    /// Present only when `seal: true` was requested and sealing succeeded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seal: Option<ReceiptSealOutput>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReceiptSealOutput {
+    pub certified: bool,
+    pub chain_hash: String,
+    pub content_address: String,
+    pub affidavit_file: String,
+    pub verdict_reason: String,
+    pub profile: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

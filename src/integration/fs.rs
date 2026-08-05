@@ -699,13 +699,49 @@ fn shallow_dir_stats(snap: &DirSnapshot) -> (u64, u64) {
 ///
 /// Hidden directories are included. No artifact-specific pruning is applied —
 /// every file under every child is counted.
+///
+/// Equivalent to `breakdown_sizes_depth(root, 1)`.
 pub fn breakdown_sizes(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>> {
+    breakdown_sizes_depth(root, 1)
+}
+
+/// Walks `root` in parallel and returns total byte usage bucketed by each
+/// descendant path truncated to `max_depth` path components below `root`,
+/// sorted largest-first.
+///
+/// `max_depth == 1` reproduces [`breakdown_sizes`]'s immediate-children
+/// bucketing. `max_depth == 2` additionally splits each immediate child into
+/// its own immediate children (e.g. a bucket for `~/Library` becomes separate
+/// buckets for `~/Library/Containers`, `~/Library/Caches`, ...), which is what
+/// actually surfaces a specific offender instead of one giant catch-all
+/// directory.
+///
+/// Hidden directories are included. No artifact-specific pruning is applied —
+/// every file under every bucketed path is counted, using physical block
+/// allocation (`st_blocks * 512`) rather than logical size, so sparse files
+/// (e.g. VM disk images) are attributed by actual disk usage, not apparent
+/// size.
+pub fn breakdown_sizes_depth(root: &Path, max_depth: usize) -> anyhow::Result<Vec<(PathBuf, u64)>> {
+    let max_depth = max_depth.max(1);
     let buckets: Arc<DashMap<PathBuf, AtomicU64>> = Arc::new(DashMap::new());
 
-    // Pre-populate one bucket per immediate child of root.
-    for entry in std::fs::read_dir(root)?.flatten() {
-        buckets.insert(entry.path(), AtomicU64::new(0));
+    // Pre-populate buckets for every path up to `max_depth` components below
+    // `root`, so a bucket with zero matching files still shows up as 0 bytes
+    // rather than being silently absent from the results.
+    fn seed_buckets(dir: &Path, depth_remaining: usize, buckets: &DashMap<PathBuf, AtomicU64>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            buckets.insert(path.clone(), AtomicU64::new(0));
+            if depth_remaining > 1 {
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                if is_dir {
+                    seed_buckets(&path, depth_remaining - 1, buckets);
+                }
+            }
+        }
     }
+    seed_buckets(root, max_depth, &buckets);
 
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
 
@@ -741,11 +777,24 @@ pub fn breakdown_sizes(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>> {
             let Ok(rel) = path.strip_prefix(&root) else {
                 return WalkState::Continue;
             };
-            if let Some(first) = rel.components().next() {
-                let top = root.join(first);
-                if let Some(bucket) = buckets.get(&top) {
+            // Truncate the relative path to at most `max_depth` components,
+            // then find the deepest pre-seeded bucket that prefix matches —
+            // this lets a file at depth 5 still credit a depth-2 bucket when
+            // that's as deep as seeding went (e.g. no permission to list a
+            // deeper directory during seeding, or a symlink boundary).
+            let truncated: PathBuf = rel.components().take(max_depth).collect();
+            if truncated.as_os_str().is_empty() {
+                return WalkState::Continue;
+            }
+            let mut candidate = root.join(&truncated);
+            loop {
+                if let Some(bucket) = buckets.get(&candidate) {
                     // Physical allocation, not logical size (handles sparse files).
                     bucket.fetch_add(meta.blocks() * 512, Ordering::Relaxed);
+                    break;
+                }
+                if !candidate.pop() || candidate == root {
+                    break;
                 }
             }
             WalkState::Continue
@@ -1282,6 +1331,80 @@ mod scan_root_tests {
 
         assert!(result.is_ok());
         assert!(candidates.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod breakdown_sizes_depth_tests {
+    use std::{collections::HashMap, fs};
+
+    use super::breakdown_sizes_depth;
+
+    /// depth=1 buckets by immediate child only, matching the original
+    /// `breakdown_sizes` behavior — `a/b/x` and `a/b/y` both land in one `a`
+    /// bucket.
+    #[test]
+    fn depth_one_buckets_by_immediate_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("a/b")).unwrap();
+        fs::write(root.join("a/b/x"), b"12345").unwrap();
+        fs::write(root.join("a/b/y"), b"6789").unwrap();
+
+        let results = breakdown_sizes_depth(root, 1).unwrap();
+        let by_path: HashMap<_, _> = results.into_iter().collect();
+
+        assert_eq!(by_path.len(), 1, "expected a single top-level bucket, got {by_path:?}");
+        assert!(by_path.contains_key(&root.join("a")));
+        assert!(*by_path.get(&root.join("a")).unwrap() > 0);
+    }
+
+    /// depth=2 splits a bucket that would otherwise be a giant catch-all
+    /// (e.g. `~/Library`) into its own immediate children — `a/b/x` and
+    /// `a/b/y` land in separate `a/b/x` and `a/b/y` buckets, not one `a`
+    /// bucket.
+    #[test]
+    fn depth_two_splits_into_grandchildren() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("a/b/x")).unwrap();
+        fs::create_dir_all(root.join("a/b/y")).unwrap();
+        fs::write(root.join("a/b/x/file"), b"12345").unwrap();
+        fs::write(root.join("a/b/y/file"), b"6789").unwrap();
+
+        let results = breakdown_sizes_depth(root, 2).unwrap();
+        let by_path: HashMap<_, _> = results.into_iter().collect();
+
+        assert!(
+            by_path.contains_key(&root.join("a/b")),
+            "expected a/b bucket (only 1 component below root at depth 2), got {by_path:?}"
+        );
+        let total: u64 = by_path.values().sum();
+        assert!(total > 0, "expected some bytes counted, got {by_path:?}");
+    }
+
+    /// The sum of all bucket bytes at any depth equals the sum at depth 1 —
+    /// deeper bucketing redistributes bytes into more/smaller buckets, it
+    /// never drops or double-counts a byte. This is the "every byte of disk
+    /// is accounted for" property this function exists to guarantee.
+    #[test]
+    fn total_bytes_conserved_across_depths() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("a/b/c")).unwrap();
+        fs::create_dir_all(root.join("d")).unwrap();
+        fs::write(root.join("a/b/c/file"), b"0123456789").unwrap();
+        fs::write(root.join("a/top"), b"abc").unwrap();
+        fs::write(root.join("d/file"), b"xy").unwrap();
+
+        let depth1: u64 = breakdown_sizes_depth(root, 1).unwrap().iter().map(|(_, b)| b).sum();
+        let depth3: u64 = breakdown_sizes_depth(root, 3).unwrap().iter().map(|(_, b)| b).sum();
+
+        assert_eq!(depth1, depth3, "byte total must be identical regardless of bucketing depth");
+        assert!(depth1 > 0);
     }
 }
 

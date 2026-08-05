@@ -17,7 +17,7 @@ use crate::{
     },
     integration::{
         fs::{
-            breakdown_sizes, find_cargo_target_dirs, find_large_files, force_remove_dir_all,
+            breakdown_sizes_depth, find_cargo_target_dirs, find_large_files, force_remove_dir_all,
             scan_root, volume_space,
         },
         progress::{human_bytes, ProgressReporter},
@@ -96,7 +96,9 @@ pub enum AuditAction {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
     },
-    /// Show disk usage broken down by top-level directory (includes hidden dirs)
+    /// Show disk usage broken down by directory (includes hidden dirs, no
+    /// artifact-specific pruning — every byte under `root` is accounted for
+    /// in some bucket).
     Breakdown {
         /// Root to scan (defaults to home directory)
         #[arg(long)]
@@ -107,6 +109,15 @@ pub enum AuditAction {
         /// Hide entries smaller than this many MB (default: 0)
         #[arg(long, default_value = "0")]
         min_mb: u64,
+        /// How many path components below `root` to bucket by (default: 1 —
+        /// immediate children only). Use 2+ to split large catch-all
+        /// directories (e.g. ~/Library) into their own children.
+        #[arg(long, default_value = "1")]
+        depth: usize,
+        /// Emit a single JSON object to stdout instead of a formatted table
+        /// (for machine consumers, e.g. the MCP server).
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -312,18 +323,54 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 }
             }
         }
-        AuditAction::Breakdown { root, top, min_mb } => {
+        AuditAction::Breakdown { root, top, min_mb, depth, json } => {
             let scan_root_path = match root {
                 Some(p) => p,
                 None => dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home dir not found"))?,
             };
-            eprintln!(
-                "Scanning {} for disk usage (including hidden dirs)…",
-                scan_root_path.display()
-            );
-            let results = breakdown_sizes(&scan_root_path)?;
-            print_disk_header();
-            print_breakdown(&scan_root_path, &results, top, min_mb);
+            if !json {
+                eprintln!(
+                    "Scanning {} for disk usage (including hidden dirs)…",
+                    scan_root_path.display()
+                );
+            }
+            let results = breakdown_sizes_depth(&scan_root_path, depth)?;
+
+            if json {
+                let min_bytes = min_mb * 1024 * 1024;
+                let total_bytes: u64 = results.iter().map(|(_, b)| b).sum();
+                let disk = volume_space(std::path::Path::new("/")).ok();
+                let entries: Vec<serde_json::Value> = results
+                    .iter()
+                    .filter(|(_, b)| *b >= min_bytes)
+                    .take(top)
+                    .map(|(path, bytes)| {
+                        let pct = if total_bytes > 0 {
+                            (*bytes as f64 / total_bytes as f64) * 100.0
+                        } else {
+                            0.0
+                        };
+                        serde_json::json!({
+                            "path": path.display().to_string(),
+                            "bytes": bytes,
+                            "percent_of_total": pct,
+                        })
+                    })
+                    .collect();
+                let output = serde_json::json!({
+                    "root": scan_root_path.display().to_string(),
+                    "depth": depth,
+                    "disk_total_bytes": disk.map(|d| d.total).unwrap_or(0),
+                    "disk_available_bytes": disk.map(|d| d.available).unwrap_or(0),
+                    "total_bytes": total_bytes,
+                    "entry_count": results.len(),
+                    "entries": entries,
+                });
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else {
+                print_disk_header();
+                print_breakdown(&scan_root_path, &results, top, min_mb);
+            }
         }
         AuditAction::Summarize { root, deps, aggressive, ignore_recent_hours, tool_roots } => {
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };

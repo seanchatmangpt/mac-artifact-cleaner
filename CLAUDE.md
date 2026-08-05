@@ -16,7 +16,7 @@ cargo test <name> -- --nocapture
 cargo clippy --all-targets -- -D warnings
 cargo fmt -- --check
 cargo run --bin oclnr -- <noun> <verb>
-cargo run --bin oclnr-mcp         # MCP server (17 tools)
+cargo run --bin oclnr-mcp         # MCP server (7 resource-grouped tools)
 
 # Aliases (.cargo/config.toml)
 cargo dx        # all tests
@@ -35,7 +35,7 @@ src/
   domain/      — Pure Rust. Zero std::fs, std::process, or OS calls. Business logic only.
   integration/ — All filesystem, OS, tmutil, Docker, GitHub I/O lives here.
   nouns/       — CLI subcommand handlers. Bridges integration ↔ domain.
-  mcp/         — MCP server (oclnr-mcp): 17 tools exposing the full workflow over JSON-RPC.
+  mcp/         — MCP server (oclnr-mcp): 7 resource-grouped tools exposing the full workflow over JSON-RPC.
 ```
 
 **Workspace members:** `osx-clnr` (root), `cfab-surface` (visualization)  
@@ -67,32 +67,62 @@ src/
 
 ### MCP server (`src/mcp/`)
 
-`oclnr-mcp` exposes 17 tools over JSON-RPC for Claude to drive the full workflow:  
-`audit_scan`, `audit_parse`, `plan_build`, `plan_inspect`, `plan_validate`, `plan_approve`,  
-`delete_dry_run`, `delete_execute`, `receipt_parse`, `receipt_verify`, `receipt_certify`,  
-`safety_audit`, `snapshot_audit`, `emergency_reclaim`, `plan_rollback`, `clear_artifacts`, `query_workflow_state`
+`oclnr-mcp` exposes 7 resource-grouped tools over JSON-RPC, each dispatched by an `action`
+parameter, for Claude to drive the full workflow:
+
+| Tool | Actions |
+|---|---|
+| `workflow` | `query` \| `clear` \| `rollback` |
+| `audit` | `scan` \| `parse` \| `breakdown` |
+| `plan` | `build` \| `inspect` \| `validate` \| `approve` |
+| `delete` | `dry_run` \| `execute` |
+| `receipt` | `parse` \| `verify` (pass `seal: true` to also seal with an affidavit proof chain) |
+| `snapshot` | `audit` \| `thin` \| `delete` |
+| `emergency_reclaim` | *(no actions — standalone; scans and deletes in one call, kept separate from `delete` deliberately)* |
 
 **When using Claude to clean disk: use MCP tools — not raw `cargo run` or shell commands.**
+This is enforced, not just advisory: `.claude/settings.json` has a `PreToolUse` hook on `Bash`
+that inspects every shell command for two categories:
+- **Destructive cleanup-shaped commands** (`rm -rf .../target`, `find ... -delete`,
+  `docker system/container/image prune`, `colima delete`, `tmutil deletelocalsnapshots`,
+  `cargo clean`) — blocked behind an explicit confirmation prompt naming the MCP tool that
+  should have been used instead. Covers the failure mode from a prior session where
+  Docker/Colima cleanup happened via raw `Bash` (`docker system prune`, `colima delete`) with
+  no receipt, entirely outside this audit trail — Time Machine/APFS snapshot work has an MCP
+  tool (`snapshot`) and stayed inside the trail; Docker/Colima do not yet, so that specific gap
+  can still recur until an MCP tool exists for them.
+- **Read-only disk-usage inspection commands** (`df`, `du`, `diskutil list`/`apfs list`/`info`,
+  `tmutil listlocalsnapshots`) — allowed to run (no confirmation needed, nothing destructive),
+  but the hook injects a note recommending `audit(action: "breakdown")` instead: it walks
+  hidden dirs and non-artifact data (Library, caches, VM disk images) with physical block
+  allocation and returns structured JSON, where `df`/`du`/`diskutil` return text that has to be
+  parsed and — as happened in the same prior session — is easy to reach for reactively instead
+  of reaching for the MCP tool built for exactly this. `tmutil listlocalsnapshots` gets pointed
+  at `snapshot(action: "audit")` the same way.
 
 ### Disk cleanup protocol (mandatory)
 
 Always drive cleanup through the MCP server. Never use `rm -rf`, `find -delete`, or raw `cargo run` for deletion — those bypass the audit trail and leave no receipt.
 
 **Correct sequence:**
-1. `query_workflow_state` — check if a prior scan/plan exists
-2. `audit_scan` — scan filesystem, discover candidates
-3. `plan_build` — build deletion plan (supports `aggressive` and `deps` flags for `target/`, `node_modules`, caches)
-4. `plan_inspect` / `plan_validate` — review what will be deleted
-5. `delete_dry_run` — preview without deleting
-6. `delete_execute` — execute with `confirm: true`
-7. `receipt_verify` — verify claimed vs actual free-space delta
-8. `receipt_certify` — seal with cryptographic proof
+1. `workflow(action: "query")` — check if a prior scan/plan exists
+2. `audit(action: "scan")` — scan filesystem, discover candidates (`tool_roots: true` for
+   dev-tool caches); `audit(action: "breakdown")` for a full byte-accounted usage picture
+   (includes hidden dirs and non-artifact data) when the question is "where did the space go"
+   rather than "what's safe to delete"
+3. `plan(action: "build")` — build deletion plan (supports `aggressive` and `deps` flags for
+   `target/`, `node_modules`, caches)
+4. `plan(action: "inspect")` / `plan(action: "validate")` — review what will be deleted
+5. `delete(action: "dry_run")` — preview without deleting
+6. `delete(action: "execute")` — execute with `confirm: true`
+7. `receipt(action: "verify")` — verify claimed vs actual free-space delta; pass `seal: true`
+   (with `confirm: true`) to also seal with a cryptographic proof chain
 
 **Never do:**
 - `rm -rf ~/*/target` or any direct shell deletion
 - `find ~ -name target -exec rm -rf` 
 - `cargo clean` as a substitute for the MCP workflow
-- Skip straight to `delete_execute` without `plan_inspect` first
+- Skip straight to `delete(action: "execute")` without `plan(action: "inspect")` first
 
 ### CLI noun → domain mapping
 

@@ -158,6 +158,40 @@ impl OclnrRunner {
         self.run_command(cmd, "oclnr audit run")
     }
 
+    /// Run: oclnr audit breakdown --root <root> --depth <depth> --top <top> --min-mb <min_mb> --json
+    ///
+    /// Unlike `audit_run`, this walks every byte under `root` (hidden dirs
+    /// included, no artifact-specific pruning) instead of only surfacing
+    /// deletion candidates — it's the tool for "where did the disk space
+    /// actually go", not "what can I delete".
+    #[allow(clippy::result_large_err)]
+    pub fn audit_breakdown(
+        &self,
+        workspace: &PathBuf,
+        root: &PathBuf,
+        depth: u32,
+        top: usize,
+        min_mb: u64,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        let mut cmd = Command::new(&self.oclnr_path);
+        cmd.arg("audit")
+            .arg("breakdown")
+            .arg("--root")
+            .arg(root)
+            .arg("--depth")
+            .arg(depth.to_string())
+            .arg("--top")
+            .arg(top.to_string())
+            .arg("--min-mb")
+            .arg(min_mb.to_string())
+            .arg("--json")
+            .current_dir(workspace)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        self.run_command(cmd, "oclnr audit breakdown")
+    }
+
     /// Run: oclnr plan build --root ... --output cleanup-plan.json [options]
     ///
     /// `plan build` re-scans (it does not read a saved audit file); the audit

@@ -84,11 +84,12 @@ fn audit_scan_total_candidates(ignore_recent_hours: u64) -> usize {
     let mut server = OsxClnrMcpServer::new(workspace.clone()).expect("server construction");
 
     let params = json!({
+        "action": "scan",
         "workspace": workspace.to_string_lossy(),
         "roots": [project.to_string_lossy()],
         "ignore_recent_hours": ignore_recent_hours,
     });
-    let envelope = server.call_tool("audit_scan", Some(params)).expect("audit_scan should succeed");
+    let envelope = server.call_tool("audit", Some(params)).expect("audit_scan should succeed");
     let output = unwrap_tool_json(&envelope);
 
     output["summary"]["total_candidates"].as_u64().expect("total_candidates present") as usize
@@ -146,12 +147,13 @@ fn plan_build_inherits_audit_scans_ignore_recent_hours() {
     let mut server = OsxClnrMcpServer::new(workspace.clone()).expect("server construction");
 
     let audit_params = json!({
+        "action": "scan",
         "workspace": workspace.to_string_lossy(),
         "roots": [project.to_string_lossy()],
         "ignore_recent_hours": 0,
     });
     let audit_envelope = server
-        .call_tool("audit_scan", Some(audit_params))
+        .call_tool("audit", Some(audit_params))
         .expect("audit_scan with ignore_recent_hours=0 should succeed");
     let audit_output = unwrap_tool_json(&audit_envelope);
     assert_eq!(
@@ -164,8 +166,8 @@ fn plan_build_inherits_audit_scans_ignore_recent_hours() {
     // inherit the audit's override (0) rather than falling back to the
     // CLI's own 168h default, which would silently drop the candidate
     // again and produce an empty, inconsistent plan.
-    let plan_params = json!({ "workspace": workspace.to_string_lossy() });
-    server.call_tool("plan_build", Some(plan_params)).expect("plan_build should succeed");
+    let plan_params = json!({ "action": "build", "workspace": workspace.to_string_lossy() });
+    server.call_tool("plan", Some(plan_params)).expect("plan_build should succeed");
 
     let plan_file = workspace.join("cleanup-plan.json");
     let contents = std::fs::read_to_string(&plan_file).expect("cleanup-plan.json should exist");

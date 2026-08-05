@@ -47,245 +47,155 @@ impl OsxClnrMcpServer {
     }
 
     /// List available tools
+    ///
+    /// The surface is 7 resource-grouped tools, each dispatched by an
+    /// `action` enum, rather than one tool per verb. `call_tool` routes
+    /// `(name, action)` to the same per-verb handler methods below — this
+    /// is a routing-layer consolidation only, no handler logic changed.
     pub fn list_tools(&self) -> Result<Value, ErrorResponse> {
         let tools = vec![
-            // Workflow
             json!({
-                "name": "query_workflow_state",
-                "description": "Query current state of cleanup workflow",
+                "name": "workflow",
+                "description": "Cleanup workflow state management: query current state, archive \
+                                 evidence and reset, or restore from snapshots.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "workspace": { "type": "string", "description": "Workspace directory (default: current)" }
-                    }
-                }
-            }),
-            json!({
-                "name": "clear_artifacts",
-                "description": "Archive old evidence and reset to UNSTARTED state",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "workspace": { "type": "string" },
-                        "archive_to": { "type": "string" },
-                        "dry_run": { "type": "boolean", "default": true },
-                        "confirm": { "type": "boolean", "default": false }
-                    }
-                }
-            }),
-            // Audit
-            json!({
-                "name": "audit_scan",
-                "description": "Scan filesystem and generate audit evidence",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "workspace": { "type": "string" },
-                        "roots": { "type": "array", "items": { "type": "string" } },
-                        "include_deps": { "type": "boolean" },
-                        "include_aggressive": { "type": "boolean" },
-                        "ignore_recent_hours": { "type": "integer", "default": 168 },
-                        "tool_roots": { "type": "boolean", "default": false }
-                    }
-                }
-            }),
-            json!({
-                "name": "audit_parse",
-                "description": "Parse existing audit evidence file",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "audit_file": { "type": "string" },
-                        "top_n": { "type": "integer", "default": 50 },
-                        "filter_reason": { "type": "string" }
-                    }
-                }
-            }),
-            // Plan
-            json!({
-                "name": "plan_build",
-                "description": "Build a deletion plan from audit results",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "workspace": { "type": "string" },
-                        "audit_file": { "type": "string" },
-                        "roots": { "type": "array", "items": { "type": "string" } },
-                        "deps": { "type": "boolean" },
-                        "aggressive": { "type": "boolean" },
-                        "include_global_caches": { "type": "boolean" },
-                        "max_reclaim_gb": { "type": "number" },
-                        "ignore_recent_hours": { "type": "integer" }
-                    }
-                }
-            }),
-            json!({
-                "name": "plan_inspect",
-                "description": "Read and inspect generated plan",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "plan_file": { "type": "string" },
-                        "top_n": { "type": "integer", "default": 20 }
-                    }
-                }
-            }),
-            json!({
-                "name": "plan_validate",
-                "description": "Validate plan safety (no OS dirs, proper signatures)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "workspace": { "type": "string" },
-                        "plan_file": { "type": "string" }
-                    }
-                }
-            }),
-            json!({
-                "name": "plan_approve",
-                "description": "Approve plan with HMAC-SHA256 signature",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "plan_file": { "type": "string" },
-                        "approver_name": { "type": "string" },
-                        "approval_reason": { "type": "string" },
-                        "confirm": { "type": "boolean", "default": false }
+                        "action": { "type": "string", "enum": ["query", "clear", "rollback"] },
+                        "workspace": { "type": "string", "description": "Workspace directory (default: current)" },
+                        "archive_to": { "type": "string", "description": "(clear only)" },
+                        "dry_run": { "type": "boolean", "default": true, "description": "(clear only)" },
+                        "receipt_file": { "type": "string", "description": "(rollback only)" },
+                        "confirm": { "type": "boolean", "default": false, "description": "(clear/rollback only)" }
                     },
-                    "required": ["plan_file", "approver_name", "approval_reason"]
+                    "required": ["action"]
                 }
             }),
-            // Delete
             json!({
-                "name": "delete_dry_run",
-                "description": "Preview deletion without modifying filesystem",
+                "name": "audit",
+                "description": "Scan the filesystem: `scan` for deletion-candidate evidence \
+                                 (build artifacts, dependency dirs, tool caches — feeds `plan`), \
+                                 `parse` to re-read a saved scan without rescanning, or \
+                                 `breakdown` for a full byte-accounted usage breakdown including \
+                                 hidden dirs and non-artifact data (Library, caches, VM disk \
+                                 images) — use breakdown to find where disk space actually went, \
+                                 scan to find what's safe to delete.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "action": { "type": "string", "enum": ["scan", "parse", "breakdown"] },
                         "workspace": { "type": "string" },
-                        "plan_file": { "type": "string" }
+                        "roots": { "type": "array", "items": { "type": "string" }, "description": "(scan only)" },
+                        "include_deps": { "type": "boolean", "description": "(scan only)" },
+                        "include_aggressive": { "type": "boolean", "description": "(scan only)" },
+                        "ignore_recent_hours": { "type": "integer", "default": 168, "description": "(scan only)" },
+                        "tool_roots": { "type": "boolean", "default": false, "description": "(scan only)" },
+                        "audit_file": { "type": "string", "description": "(parse only)" },
+                        "top_n": { "type": "integer", "default": 50, "description": "(parse only)" },
+                        "filter_reason": { "type": "string", "description": "(parse only)" },
+                        "root": { "type": "string", "description": "(breakdown only) Root to scan (default: home directory)" },
+                        "depth": { "type": "integer", "default": 2, "description": "(breakdown only) Path components below root to bucket by; 2+ splits catch-all dirs like Library into children" },
+                        "top": { "type": "integer", "default": 40, "description": "(breakdown only)" },
+                        "min_mb": { "type": "integer", "default": 0, "description": "(breakdown only)" }
                     },
-                    "required": ["plan_file"]
+                    "required": ["action"]
                 }
             }),
             json!({
-                "name": "delete_execute",
-                "description": "Execute deletion from approved plan",
+                "name": "plan",
+                "description": "Build and review a deletion plan: `build` from audit results, \
+                                 `inspect` an existing plan file, `validate` its safety (no OS \
+                                 dirs, no dotfiles in home, proper signatures — path protection \
+                                 and symlink checks), or `approve` it with an HMAC-SHA256 \
+                                 signature before deletion is allowed.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "action": { "type": "string", "enum": ["build", "inspect", "validate", "approve"] },
+                        "workspace": { "type": "string" },
+                        "audit_file": { "type": "string", "description": "(build only)" },
+                        "roots": { "type": "array", "items": { "type": "string" }, "description": "(build only)" },
+                        "deps": { "type": "boolean", "description": "(build only)" },
+                        "aggressive": { "type": "boolean", "description": "(build only)" },
+                        "include_global_caches": { "type": "boolean", "description": "(build only)" },
+                        "max_reclaim_gb": { "type": "number", "description": "(build only)" },
+                        "ignore_recent_hours": { "type": "integer", "description": "(build only)" },
+                        "plan_file": { "type": "string", "description": "(inspect/validate/approve)" },
+                        "top_n": { "type": "integer", "default": 20, "description": "(inspect only)" },
+                        "approver_name": { "type": "string", "description": "(approve only)" },
+                        "approval_reason": { "type": "string", "description": "(approve only)" },
+                        "confirm": { "type": "boolean", "default": false, "description": "(approve only)" }
+                    },
+                    "required": ["action"]
+                }
+            }),
+            json!({
+                "name": "delete",
+                "description": "Plan-bound deletion: `dry_run` previews without modifying the \
+                                 filesystem, `execute` performs the deletion from an approved \
+                                 plan. Both read exclusively from a saved plan file — never a \
+                                 live scan.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["dry_run", "execute"] },
                         "workspace": { "type": "string" },
                         "plan_file": { "type": "string" },
-                        "receipt_file": { "type": "string" },
-                        "confirm": { "type": "boolean", "default": false },
-                        "max_concurrent": { "type": "integer", "default": 4 },
-                        "timeout_secs": { "type": "integer", "default": 30 }
+                        "receipt_file": { "type": "string", "description": "(execute only)" },
+                        "confirm": { "type": "boolean", "default": false, "description": "(execute only)" },
+                        "max_concurrent": { "type": "integer", "default": 4, "description": "(execute only)" },
+                        "timeout_secs": { "type": "integer", "default": 30, "description": "(execute only)" }
                     },
-                    "required": ["plan_file"]
-                }
-            }),
-            // Receipt
-            json!({
-                "name": "receipt_parse",
-                "description": "Parse deletion receipt file",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "receipt_file": { "type": "string" }
-                    },
-                    "required": ["receipt_file"]
+                    "required": ["action", "plan_file"]
                 }
             }),
             json!({
-                "name": "receipt_verify",
-                "description": "Verify deletion receipt and check actual free space",
+                "name": "receipt",
+                "description": "Inspect and verify a deletion receipt: `parse` reads it raw, \
+                                 `verify` checks claimed vs. actual free-space delta and \
+                                 validates OCEL referential integrity, optionally sealing it \
+                                 with an affidavit cryptographic proof chain via `seal: true`.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "workspace": { "type": "string" },
-                        "receipt_file": { "type": "string" }
-                    }
-                }
-            }),
-            json!({
-                "name": "receipt_certify",
-                "description": "Seal receipt with affidavit cryptographic proof chain",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
+                        "action": { "type": "string", "enum": ["parse", "verify"] },
                         "workspace": { "type": "string" },
                         "receipt_file": { "type": "string" },
-                        "confirm": { "type": "boolean", "default": false }
-                    }
-                }
-            }),
-            // Safety
-            json!({
-                "name": "safety_audit",
-                "description": "Run safety checks (path protection, symlink detection)",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "plan_file": { "type": "string" }
-                    }
-                }
-            }),
-            json!({
-                "name": "plan_rollback",
-                "description": "Restore from snapshots if available",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "workspace": { "type": "string" },
-                        "receipt_file": { "type": "string" },
-                        "confirm": { "type": "boolean", "default": false }
-                    }
-                }
-            }),
-            // Snapshots
-            json!({
-                "name": "snapshot_audit",
-                "description": "List and analyze APFS snapshots",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "workspace": { "type": "string" },
-                        "roots": { "type": "array", "items": { "type": "string" } }
-                    }
-                }
-            }),
-            json!({
-                "name": "snapshot_thin",
-                "description": "Thin local APFS snapshots on a mount to reclaim a target number of bytes. Receipt is sealed via affidavit core/v1.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "workspace": { "type": "string" },
-                        "mount": { "type": "string", "description": "Real volume mount point to thin, e.g. \"/\". Required — no default." },
-                        "bytes": { "type": "string", "description": "Target bytes to reclaim, e.g. \"10GB\" or raw digits." },
-                        "confirm": { "type": "boolean", "default": false }
+                        "seal": { "type": "boolean", "default": false, "description": "(verify only) Also seal the receipt with an affidavit proof chain; requires confirm: true." },
+                        "confirm": { "type": "boolean", "default": false, "description": "(verify only, required when seal: true)" }
                     },
-                    "required": ["mount", "bytes"]
+                    "required": ["action"]
                 }
             }),
             json!({
-                "name": "snapshot_delete",
-                "description": "Delete specific local APFS snapshots by name/date, or the oldest N, or all. Mirrors the CLI 1:1 (no retain-count floor) — gated only by mount validity and confirm. Receipt is sealed via affidavit core/v1.",
+                "name": "snapshot",
+                "description": "Local APFS snapshot management: `audit` lists and analyzes \
+                                 snapshots, `thin` reclaims a target number of bytes, `delete` \
+                                 removes specific snapshots by name/date, oldest-N, or all. \
+                                 `thin` and `delete` both seal their receipt via affidavit core/v1.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "action": { "type": "string", "enum": ["audit", "thin", "delete"] },
                         "workspace": { "type": "string" },
-                        "mount": { "type": "string", "description": "Real volume mount point, e.g. \"/\". Required — no default." },
-                        "which": { "type": "string", "description": "\"oldest\", \"all\", or an explicit snapshot name/date." },
-                        "oldest_n": { "type": "integer", "default": 1, "description": "Used only when which == \"oldest\"." },
-                        "confirm": { "type": "boolean", "default": false }
+                        "roots": { "type": "array", "items": { "type": "string" }, "description": "(audit only)" },
+                        "mount": { "type": "string", "description": "(thin/delete) Real volume mount point, e.g. \"/\". Required — no default." },
+                        "bytes": { "type": "string", "description": "(thin only) Target bytes to reclaim, e.g. \"10GB\" or raw digits." },
+                        "which": { "type": "string", "description": "(delete only) \"oldest\", \"all\", or an explicit snapshot name/date." },
+                        "oldest_n": { "type": "integer", "default": 1, "description": "(delete only) Used only when which == \"oldest\"." },
+                        "confirm": { "type": "boolean", "default": false, "description": "(thin/delete only)" }
                     },
-                    "required": ["mount", "which"]
+                    "required": ["action"]
                 }
             }),
             json!({
                 "name": "emergency_reclaim",
-                "description": "Aggressively reclaim disk space when low. NOT scoped to `workspace`: sweeps real APFS snapshots and home-directory caches on the given `mount`. Never call against a real mount without explicit user intent.",
+                "description": "Aggressively reclaim disk space when low. Kept as its own tool, \
+                                 deliberately not folded into `delete`: unlike every `delete` \
+                                 action, this scans and deletes in one call with no separate \
+                                 plan-review step. NOT scoped to `workspace`: sweeps real APFS \
+                                 snapshots and home-directory caches on the given `mount`. Never \
+                                 call against a real mount without explicit user intent.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -317,41 +227,66 @@ impl OsxClnrMcpServer {
         })
     }
 
+    /// Extract the required `action` string from a tool call's params.
+    fn require_action<'a>(name: &str, params: &'a Value) -> Result<&'a str, ErrorResponse> {
+        params.get("action").and_then(|v| v.as_str()).ok_or_else(|| {
+            ErrorResponse::new(
+                ErrorCode::InvalidInput,
+                format!("`action` is required for tool `{name}`"),
+            )
+        })
+    }
+
+    fn unknown_action(tool: &str, action: &str) -> ErrorResponse {
+        ErrorResponse::new(
+            ErrorCode::InvalidInput,
+            format!("unknown action `{action}` for tool `{tool}`"),
+        )
+    }
+
     pub fn call_tool(&mut self, name: &str, params: Option<Value>) -> Result<Value, ErrorResponse> {
         let params = params.unwrap_or(Value::Object(Default::default()));
 
+        // Every tool but `emergency_reclaim` is a resource dispatched by an
+        // `action` enum; the same per-verb handler methods below (unchanged
+        // from the pre-consolidation 1-tool-per-verb surface) do the work —
+        // this match only routes `(name, action)` to them.
         let inner = match name {
-            // Workflow
-            "query_workflow_state" => self.query_workflow_state(params),
-            "clear_artifacts" => self.clear_artifacts(params),
-
-            // Audit
-            "audit_scan" => self.audit_scan(params),
-            "audit_parse" => self.audit_parse(params),
-
-            // Plan
-            "plan_build" => self.plan_build(params),
-            "plan_inspect" => self.plan_inspect(params),
-            "plan_validate" => self.plan_validate(params),
-            "plan_approve" => self.plan_approve(params),
-
-            // Delete
-            "delete_dry_run" => self.delete_dry_run(params),
-            "delete_execute" => self.delete_execute(params),
-
-            // Receipt
-            "receipt_parse" => self.receipt_parse(params),
-            "receipt_verify" => self.receipt_verify(params),
-            "receipt_certify" => self.receipt_certify(params),
-
-            // Safety
-            "safety_audit" => self.safety_audit(params),
-            "plan_rollback" => self.plan_rollback(params),
-
-            // Snapshots
-            "snapshot_audit" => self.snapshot_audit(params),
-            "snapshot_thin" => self.snapshot_thin(params),
-            "snapshot_delete" => self.snapshot_delete(params),
+            "workflow" => match Self::require_action(name, &params)? {
+                "query" => self.query_workflow_state(params),
+                "clear" => self.clear_artifacts(params),
+                "rollback" => self.plan_rollback(params),
+                other => Err(Self::unknown_action(name, other)),
+            },
+            "audit" => match Self::require_action(name, &params)? {
+                "scan" => self.audit_scan(params),
+                "parse" => self.audit_parse(params),
+                "breakdown" => self.audit_breakdown(params),
+                other => Err(Self::unknown_action(name, other)),
+            },
+            "plan" => match Self::require_action(name, &params)? {
+                "build" => self.plan_build(params),
+                "inspect" => self.plan_inspect(params),
+                "validate" => self.plan_validate(params),
+                "approve" => self.plan_approve(params),
+                other => Err(Self::unknown_action(name, other)),
+            },
+            "delete" => match Self::require_action(name, &params)? {
+                "dry_run" => self.delete_dry_run(params),
+                "execute" => self.delete_execute(params),
+                other => Err(Self::unknown_action(name, other)),
+            },
+            "receipt" => match Self::require_action(name, &params)? {
+                "parse" => self.receipt_parse(params),
+                "verify" => self.receipt_verify(params),
+                other => Err(Self::unknown_action(name, other)),
+            },
+            "snapshot" => match Self::require_action(name, &params)? {
+                "audit" => self.snapshot_audit(params),
+                "thin" => self.snapshot_thin(params),
+                "delete" => self.snapshot_delete(params),
+                other => Err(Self::unknown_action(name, other)),
+            },
             "emergency_reclaim" => self.emergency_reclaim(params),
 
             _ => Err(ErrorResponse::new(
@@ -724,6 +659,84 @@ impl OsxClnrMcpServer {
         }))
     }
 
+    /// Full byte-accounted disk usage breakdown. Read-only — unlike
+    /// `audit_scan`/`plan_build` this doesn't gate on or advance
+    /// `WorkflowContext` state, matching `snapshot_audit`.
+    fn audit_breakdown(&self, params: Value) -> Result<Value, ErrorResponse> {
+        let input: AuditBreakdownInput = serde_json::from_value(params)
+            .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
+
+        let workspace = input.workspace.clone().unwrap_or_else(|| self.default_workspace.clone());
+        let root = match input.root.clone() {
+            Some(r) => r,
+            None => dirs::home_dir().ok_or_else(|| {
+                ErrorResponse::new(
+                    ErrorCode::InvalidInput,
+                    "could not resolve home directory; \
+                    pass `root` explicitly"
+                        .to_string(),
+                )
+            })?,
+        };
+
+        let result =
+            self.runner.audit_breakdown(&workspace, &root, input.depth, input.top, input.min_mb)?;
+
+        if !result.success() {
+            return Err(result.to_error("oclnr audit breakdown"));
+        }
+
+        let parsed: Value = serde_json::from_str(result.stdout.trim()).map_err(|e| {
+            ErrorResponse::new(
+                ErrorCode::IoError,
+                format!("failed to parse `oclnr audit breakdown --json` output: {e}"),
+            )
+        })?;
+
+        let disk_total = parsed.get("disk_total_bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+        let disk_available =
+            parsed.get("disk_available_bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+        let disk_percent_used = if disk_total > 0 {
+            (((disk_total.saturating_sub(disk_available)) as f64 / disk_total as f64) * 100.0)
+                .round() as u8
+        } else {
+            0
+        };
+
+        let entries: Vec<BreakdownEntryOutput> = parsed
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| {
+                        Some(BreakdownEntryOutput {
+                            path: e.get("path")?.as_str()?.to_string(),
+                            bytes: e.get("bytes")?.as_u64()?,
+                            percent_of_total: e
+                                .get("percent_of_total")
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(0.0),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(serde_json::to_value(AuditBreakdownOutput {
+            state: "BREAKDOWN_COMPLETE".to_string(),
+            root: root.display().to_string(),
+            depth: input.depth,
+            disk_total_bytes: disk_total,
+            disk_available_bytes: disk_available,
+            disk_percent_used,
+            total_bytes: parsed.get("total_bytes").and_then(|v| v.as_u64()).unwrap_or(0),
+            entry_count: parsed.get("entry_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+            entries,
+            message: "Disk breakdown complete".to_string(),
+        })
+        .unwrap())
+    }
+
     fn plan_build(&mut self, params: Value) -> Result<Value, ErrorResponse> {
         let input: PlanBuildInput = serde_json::from_value(params)
             .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
@@ -914,7 +927,8 @@ impl OsxClnrMcpServer {
             ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid plan JSON: {}", e))
         })?;
 
-        // Reuse the exact same safety-check logic as `safety_audit` instead of
+        // Reuse the shared `compute_safety_issues` (formerly also used by a
+        // standalone `safety_audit` tool, since folded in here) instead of
         // re-implementing (or, as before, skipping) it.
         let issues = Self::compute_safety_issues(&plan);
         let os_directory_protection = !issues.iter().any(|i| i["kind"] == "protected_os_path");
@@ -1341,6 +1355,41 @@ impl OsxClnrMcpServer {
 
         let all_targets_gone = report.is_consistent && cli_result.success() && verdict.accepted;
 
+        // `seal: true` absorbs the former standalone `receipt_certify` tool:
+        // write the sealed `.affidavit.json` alongside the receipt, using
+        // the exact same CLI certification path `receipt_certify` used to
+        // drive (`oclnr receipt certify`), gated the same way it was
+        // (`confirm: true` required, since this writes a file).
+        let seal_output = if input.seal {
+            if !input.confirm {
+                return Err(ErrorResponse::confirmation_required(
+                    "receipt(action: verify, seal: true)",
+                ));
+            }
+
+            let out_path = receipt_file.with_extension("affidavit.json");
+            let seal_result =
+                self.runner.receipt_certify(&workspace, &receipt_file, Some(&out_path))?;
+            if !seal_result.success() {
+                return Err(seal_result.to_error("oclnr receipt certify"));
+            }
+
+            let mut ctx = self.get_or_create_context(Some(workspace.clone()));
+            ctx.affidavit_file = Some(out_path.clone());
+            self.workflows.insert(workspace.display().to_string(), ctx);
+
+            Some(ReceiptSealOutput {
+                certified: verdict.accepted,
+                chain_hash: affidavit_receipt.chain_hash.to_string(),
+                content_address: affidavit_integration::content_address(&affidavit_receipt),
+                affidavit_file: out_path.display().to_string(),
+                verdict_reason: verdict.reason.clone(),
+                profile: verdict.profile.as_str().to_string(),
+            })
+        } else {
+            None
+        };
+
         Ok(serde_json::to_value(ReceiptVerifyOutput {
             state: if all_targets_gone {
                 "RECEIPT_VERIFIED".to_string()
@@ -1357,6 +1406,7 @@ impl OsxClnrMcpServer {
                 all_targets_gone,
                 affidavit_verified: verdict.accepted,
             },
+            seal: seal_output,
             message: if all_targets_gone {
                 "Receipt verified".to_string()
             } else {
@@ -1366,73 +1416,10 @@ impl OsxClnrMcpServer {
         .unwrap())
     }
 
-    fn receipt_certify(&mut self, params: Value) -> Result<Value, ErrorResponse> {
-        use crate::domain::{affidavit_integration, receipt::DeletionReceipt};
-
-        let input: serde_json::Map<String, Value> = serde_json::from_value(params)
-            .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
-
-        let confirm = input.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
-        if !confirm {
-            return Err(ErrorResponse::confirmation_required("receipt_certify"));
-        }
-
-        let workspace = input
-            .get("workspace")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.default_workspace.clone());
-        let mut ctx = self.get_or_create_context(Some(workspace.clone()));
-
-        let receipt_file = input
-            .get("receipt_file")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from)
-            .or_else(|| ctx.receipt_file.clone())
-            .ok_or_else(|| {
-                ErrorResponse::new(
-                    ErrorCode::InvalidInput,
-                    "receipt_file required (no prior delete_execute recorded for this workspace)"
-                        .to_string(),
-                )
-            })?;
-
-        if !receipt_file.exists() {
-            return Err(ErrorResponse::file_not_found(&receipt_file, "delete_execute"));
-        }
-
-        let out_path = receipt_file.with_extension("affidavit.json");
-
-        // Drive the real CLI certification path (same code the standalone
-        // `oclnr receipt certify` command uses) rather than only checking `confirm`.
-        let result = self.runner.receipt_certify(&workspace, &receipt_file, Some(&out_path))?;
-        if !result.success() {
-            return Err(result.to_error("oclnr receipt certify"));
-        }
-
-        let content = std::fs::read_to_string(&receipt_file)
-            .map_err(|e| ErrorResponse::new(ErrorCode::IoError, e.to_string()))?;
-        let receipt: DeletionReceipt = serde_json::from_str(&content).map_err(|e| {
-            ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid receipt JSON: {}", e))
-        })?;
-        let affidavit_receipt = affidavit_integration::build_deletion_affidavit(&receipt);
-        let verdict = affidavit_integration::certify(&affidavit_receipt);
-
-        ctx.affidavit_file = Some(out_path.clone());
-        self.workflows.insert(workspace.display().to_string(), ctx);
-
-        Ok(json!({
-            "certified": verdict.accepted,
-            "chain_hash": affidavit_receipt.chain_hash,
-            "content_address": affidavit_integration::content_address(&affidavit_receipt),
-            "affidavit_file": out_path.display().to_string(),
-            "verdict_reason": verdict.reason,
-            "profile": verdict.profile.as_str(),
-        }))
-    }
-
-    /// Shared safety-check logic used by both `safety_audit` and `plan_validate`
-    /// so the two tools cannot silently drift out of sync.
+    /// Safety-check logic used by `plan`'s `validate` action. Previously
+    /// also used by a standalone `safety_audit` tool, which was folded into
+    /// `plan(action: "validate")` during the MCP surface consolidation —
+    /// it had no behavior `validate` didn't already produce.
     fn compute_safety_issues(plan: &crate::domain::plan::DeletionPlan) -> Vec<Value> {
         use crate::domain::artifact::is_macos_os_dir;
 
@@ -1466,42 +1453,6 @@ impl OsxClnrMcpServer {
         }
 
         issues
-    }
-
-    fn safety_audit(&self, params: Value) -> Result<Value, ErrorResponse> {
-        use crate::domain::plan::DeletionPlan;
-
-        let input: serde_json::Map<String, Value> = serde_json::from_value(params)
-            .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
-
-        let plan_file_str = input.get("plan_file").and_then(|v| v.as_str()).ok_or_else(|| {
-            ErrorResponse::new(ErrorCode::InvalidInput, "plan_file required".to_string())
-        })?;
-
-        let plan_file = std::path::Path::new(plan_file_str);
-        if !plan_file.exists() {
-            return Err(ErrorResponse::new(
-                ErrorCode::InvalidInput,
-                format!("plan file not found: {}", plan_file_str),
-            ));
-        }
-
-        let raw = std::fs::read_to_string(plan_file).map_err(|e| {
-            ErrorResponse::new(ErrorCode::SubprocessFailed, format!("cannot read plan: {}", e))
-        })?;
-
-        let plan: DeletionPlan = serde_json::from_str(&raw).map_err(|e| {
-            ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid plan JSON: {}", e))
-        })?;
-
-        let issues = Self::compute_safety_issues(&plan);
-
-        let safe = issues.iter().all(|i| i["severity"] != "critical");
-        Ok(json!({
-            "safe": safe,
-            "issues": issues,
-            "candidates_checked": plan.items.len()
-        }))
     }
 
     fn plan_rollback(&self, params: Value) -> Result<Value, ErrorResponse> {

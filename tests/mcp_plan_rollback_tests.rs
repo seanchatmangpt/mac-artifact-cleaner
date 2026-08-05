@@ -29,7 +29,9 @@ enum ReceiptFileState {
 /// Build the `plan_rollback` params for a given receipt-file state,
 /// materializing any on-disk fixture file needed.
 fn build_params(state: ReceiptFileState, dir: &std::path::Path) -> serde_json::Value {
-    let mut params = json!({ "confirm": true });
+    // `plan_rollback` is now `workflow(action: "rollback")` after the MCP
+    // surface consolidation.
+    let mut params = json!({ "action": "rollback", "confirm": true });
     match state {
         ReceiptFileState::Absent => {}
         ReceiptFileState::Nonexistent => {
@@ -57,7 +59,7 @@ fn build_params(state: ReceiptFileState, dir: &std::path::Path) -> serde_json::V
 fn call_plan_rollback_expect_error(params: serde_json::Value) -> String {
     let workspace = tempdir().unwrap().keep();
     let mut server = OsxClnrMcpServer::new(workspace).expect("server construction");
-    let result = server.call_tool("plan_rollback", Some(params)).expect("call_tool itself failed");
+    let result = server.call_tool("workflow", Some(params)).expect("call_tool itself failed");
 
     let is_error = result.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
     let text = result["content"][0]["text"].as_str().unwrap_or_default().to_string();

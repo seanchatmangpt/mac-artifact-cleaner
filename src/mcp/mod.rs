@@ -15,7 +15,8 @@
 //! # Features
 //!
 //! - Spawns oclnr as subprocess
-//! - Implements 19 MCP tools for complete cleanup workflow
+//! - Implements 7 resource-grouped MCP tools (each dispatched by an `action`
+//!   parameter) for the complete cleanup workflow
 //! - State machine enforcement (UNSTARTED → AUDIT_COMPLETE → PLAN_READY → etc.)
 //! - Plan approval gates with HMAC-SHA256 signature verification
 //! - Immutable evidence trails (audit, plan, receipt files)

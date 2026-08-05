@@ -51,11 +51,12 @@ fn plan_build_roots_after(state: AuditState) -> Vec<PathBuf> {
     match state {
         AuditState::ScopedToSubdir => {
             let audit_params = json!({
+                "action": "scan",
                 "workspace": workspace.to_string_lossy(),
                 "roots": [scoped_root.to_string_lossy()],
             });
             server
-                .call_tool("audit_scan", Some(audit_params))
+                .call_tool("audit", Some(audit_params))
                 .expect("audit_scan should succeed when scoped to the subdir");
         }
     }
@@ -63,8 +64,8 @@ fn plan_build_roots_after(state: AuditState) -> Vec<PathBuf> {
     // plan_build called WITHOUT explicit roots -- this is the call that
     // must inherit the audit's scope rather than silently falling back to
     // default_scan_roots().
-    let plan_params = json!({ "workspace": workspace.to_string_lossy() });
-    let plan_result = server.call_tool("plan_build", Some(plan_params));
+    let plan_params = json!({ "action": "build", "workspace": workspace.to_string_lossy() });
+    let plan_result = server.call_tool("plan", Some(plan_params));
 
     match plan_result {
         Ok(_) => {
@@ -119,9 +120,9 @@ fn plan_build_without_any_audit_is_rejected_not_silently_broadened() {
     let workspace = tempdir().unwrap().keep();
     let mut server = OsxClnrMcpServer::new(workspace.clone()).expect("server construction");
 
-    let plan_params = json!({ "workspace": workspace.to_string_lossy() });
+    let plan_params = json!({ "action": "build", "workspace": workspace.to_string_lossy() });
     let result = server
-        .call_tool("plan_build", Some(plan_params))
+        .call_tool("plan", Some(plan_params))
         .expect("call_tool itself should not fail at the transport level");
 
     // `call_tool` reports tool-level failures as an `isError: true` payload

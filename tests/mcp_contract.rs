@@ -143,10 +143,16 @@ use serde_json::{json, Value};
 /// `tools/call` wire contract) rather than as `Result::Err`, so this
 /// unwraps that envelope into a plain `Result<Value, String>` for the
 /// tests below.
-fn call_audit_scan(workspace: &std::path::Path, args: Value) -> Result<Value, String> {
+fn call_audit_scan(workspace: &std::path::Path, mut args: Value) -> Result<Value, String> {
     let mut server = OsxClnrMcpServer::new(workspace.to_path_buf())
         .map_err(|e| format!("server init failed: {}", e.message))?;
-    let outer = server.call_tool("audit_scan", Some(args)).map_err(|e| e.message)?;
+    // The MCP surface was consolidated from 1-tool-per-verb to resource-
+    // grouped tools dispatched by an `action` field; `audit_scan` is now
+    // `audit(action: "scan")`.
+    args.as_object_mut()
+        .expect("args must be a JSON object")
+        .insert("action".to_string(), json!("scan"));
+    let outer = server.call_tool("audit", Some(args)).map_err(|e| e.message)?;
     let is_error = outer.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
     if is_error {
         let text = outer
@@ -329,7 +335,10 @@ fn server_with_optional_audit(workspace: &std::path::Path, seed_audit: bool) -> 
         let scoped_root = workspace.join("project");
         std::fs::create_dir_all(&scoped_root).unwrap();
         let result = server
-            .call_tool("audit_scan", Some(json!({ "roots": [scoped_root.display().to_string()] })))
+            .call_tool(
+                "audit",
+                Some(json!({ "action": "scan", "roots": [scoped_root.display().to_string()] })),
+            )
             .expect("call_tool itself should not fail at the transport level");
         assert_eq!(
             result["isError"],
@@ -353,7 +362,10 @@ fn clear_artifacts_on_unscanned_workspace_errors_and_creates_nothing() {
     // archive directory materializes and no fabricated success is
     // reported -- does not depend on the target being unwritable).
     let result = server
-        .call_tool("clear_artifacts", Some(json!({ "confirm": true, "dry_run": false })))
+        .call_tool(
+            "workflow",
+            Some(json!({ "action": "clear", "confirm": true, "dry_run": false })),
+        )
         .expect("call_tool itself should not fail at the transport level");
 
     // `call_tool` always returns `Ok`, embedding tool-level failures as
@@ -391,7 +403,10 @@ fn clear_artifacts_with_real_audit_evidence_actually_archives_it() {
     let mut server = server_with_optional_audit(&workspace, /* seed_audit */ true);
 
     let result = server
-        .call_tool("clear_artifacts", Some(json!({ "confirm": true, "dry_run": false })))
+        .call_tool(
+            "workflow",
+            Some(json!({ "action": "clear", "confirm": true, "dry_run": false })),
+        )
         .expect("clear_artifacts must succeed when real audit evidence exists");
 
     let archive_location = result
@@ -455,7 +470,7 @@ fn clear_artifacts_dry_run_true_previews_without_writing_or_resetting_state() {
 
     // dry_run: true, even with confirm: true -- dry_run must win.
     let result = server
-        .call_tool("clear_artifacts", Some(json!({ "confirm": true, "dry_run": true })))
+        .call_tool("workflow", Some(json!({ "action": "clear", "confirm": true, "dry_run": true })))
         .expect("call_tool itself should not fail at the transport level");
 
     assert_eq!(
@@ -501,8 +516,8 @@ fn clear_artifacts_dry_run_true_previews_without_writing_or_resetting_state() {
     // audit evidence is still tracked (not wiped back to UNSTARTED).
     let state_result = server
         .call_tool(
-            "query_workflow_state",
-            Some(json!({ "workspace": workspace.display().to_string() })),
+            "workflow",
+            Some(json!({ "action": "query", "workspace": workspace.display().to_string() })),
         )
         .expect("query_workflow_state must not fail");
     let state_text =
@@ -532,7 +547,10 @@ fn clear_artifacts_dry_run_false_confirm_true_still_archives_for_real() {
     let mut server = server_with_optional_audit(&workspace, /* seed_audit */ true);
 
     let result = server
-        .call_tool("clear_artifacts", Some(json!({ "confirm": true, "dry_run": false })))
+        .call_tool(
+            "workflow",
+            Some(json!({ "action": "clear", "confirm": true, "dry_run": false })),
+        )
         .expect("call_tool itself should not fail at the transport level");
     assert_eq!(result["isError"], json!(false), "expected success: {}", result);
 
@@ -550,8 +568,8 @@ fn clear_artifacts_dry_run_false_confirm_true_still_archives_for_real() {
     // State reset must have happened for the real run.
     let state_result = server
         .call_tool(
-            "query_workflow_state",
-            Some(json!({ "workspace": workspace.display().to_string() })),
+            "workflow",
+            Some(json!({ "action": "query", "workspace": workspace.display().to_string() })),
         )
         .expect("query_workflow_state must not fail");
     let state_text = state_result["content"][0]["text"].as_str().unwrap();
