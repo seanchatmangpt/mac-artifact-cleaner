@@ -71,8 +71,14 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
         } => {
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
-            let args =
-                ArgsSnapshot { deps, aggressive, verbose, tool_roots: false, ignore_recent_hours };
+            let args = ArgsSnapshot {
+                deps,
+                aggressive,
+                verbose,
+                tool_roots: false,
+                ignore_recent_hours,
+                all_filesystems: false,
+            };
 
             let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
             let stats = Arc::new(Stats::default());

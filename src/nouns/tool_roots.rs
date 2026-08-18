@@ -157,6 +157,7 @@ fn run_tool_roots_scan(
         verbose: false,
         tool_roots: true,
         ignore_recent_hours: 1,
+        all_filesystems: false,
     };
 
     let stats = Arc::new(Stats::default());

@@ -158,6 +158,14 @@ pub struct AuditScanInput {
     pub ignore_recent_hours: u32,
     #[serde(default)]
     pub tool_roots: bool,
+    /// Allow the walk to cross onto other filesystems/APFS volumes reachable
+    /// from a scan root (e.g. from `/` onto the System volume, or other
+    /// mounted volumes). Default false: the walk is pinned to each root's
+    /// own filesystem, so passing `roots: ["/"]` alone does NOT audit the
+    /// whole disk on macOS -- `/` and `/Users` are typically separate APFS
+    /// volumes joined by firmlinks. Set this true to actually cover them.
+    #[serde(default)]
+    pub all_filesystems: bool,
 }
 
 fn default_ignore_recent_hours() -> u32 {

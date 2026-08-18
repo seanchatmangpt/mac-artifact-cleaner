@@ -295,6 +295,12 @@ pub struct ArgsSnapshot {
     pub verbose: bool,
     pub tool_roots: bool,
     pub ignore_recent_hours: u64,
+    /// When true, the walk is allowed to cross onto other filesystems/APFS
+    /// volumes reachable from the scan root (e.g. from `/` onto the System
+    /// volume, or other mounted volumes). Default false: `scan_root` pins
+    /// `same_file_system(true)` so a home-directory or `/` scan never
+    /// silently wanders onto network mounts or other users' volumes.
+    pub all_filesystems: bool,
 }
 
 // ── Scan cache (pure) ──────────────────────────────────────────────────────────
@@ -738,15 +744,16 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
         names.push("rust");
     }
 
+    // Only genuine AI-tool marker directories are sufficient signal on their own.
+    // Bare, generic names like `tmp`/`logs`/`chats`/`agents` at a project root are
+    // NOT used here: any ordinary project can legitimately have a `logs/` dir (app
+    // logging) or an `agents/` dir (e.g. hand-authored multi-agent source), and using
+    // directory name alone as signal produced real false positives in production
+    // scans (mmdio/.agents, ferroplan/plugins/chatman-ecosystem/{agents,logs}).
+    // `.claude` is deliberately excluded too: it's also used by Claude Code itself
+    // for legitimate project config, so its mere presence should not be treated as
+    // "this project is AI-tool scratch space."
     if snap.has_dir(".agents") || snap.has_dir(".gemini") || snap.has_dir(".claude") {
-        names.push("ai_project");
-    }
-
-    if snap.has_dir("tmp")
-        || snap.has_dir("logs")
-        || snap.has_dir("chats")
-        || snap.has_dir("agents")
-    {
         names.push("ai_project");
     }
 
@@ -1021,13 +1028,16 @@ pub fn artifact_candidates_from_snapshot(
             }
 
             "ai_project" => {
+                // Only truly tool-internal paths are nominated here. Bare, generic
+                // root dirs (`agents`, `logs`, `tmp`, `chats`) are deliberately NOT
+                // nominated — they are too generic (any project can have a `logs/`
+                // or `agents/` dir holding real authored/log content) and directory
+                // name alone is not sufficient signal. See the false positives this
+                // caused in production scans (mmdio/.agents,
+                // ferroplan/plugins/chatman-ecosystem/{agents,logs}).
                 add_dir(&mut out, root, ".agents", "ai agents dir", snap);
-                add_dir(&mut out, root, "agents", "ai agents dir", snap);
                 add_dir(&mut out, root, ".gemini/tmp", "gemini temp artifacts", snap);
                 add_dir(&mut out, root, ".claude/tmp", "claude temp artifacts", snap);
-                add_dir(&mut out, root, "tmp", "ai temp artifacts", snap);
-                add_dir(&mut out, root, "logs", "ai tool logs", snap);
-                add_dir(&mut out, root, "chats", "ai chat history", snap);
             }
 
             "session_logs" if snap.has_dir("tmp") => {
@@ -1088,5 +1098,124 @@ fn add_dir(out: &mut Vec<Candidate>, root: &Path, rel: &str, reason: &str, snap:
 fn add_file(out: &mut Vec<Candidate>, root: &Path, rel: &str, reason: &str, snap: &DirSnapshot) {
     if snap.has_file(rel) {
         out.push(Candidate { path: root.join(rel), reason: reason.to_string() });
+    }
+}
+
+#[cfg(test)]
+mod ai_project_false_positive_tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    /// Negative case (regression for the false-positive bug): a plain Rust
+    /// project with a root-level `logs/` dir and no genuine AI-tool markers
+    /// (`.agents`, `.gemini`, `.claude`) must NOT be classified `ai_project`
+    /// and must NOT produce "ai tool logs" / "ai agents dir" candidates.
+    /// Mirrors real false positives seen on
+    /// `/Users/sac/ferroplan/plugins/chatman-ecosystem/{agents,logs}` and
+    /// `/Users/sac/mmdio/.agents` (that one *does* have `.agents`, see the
+    /// positive test below — the point is bare `logs`/`agents` alone must not
+    /// trigger it).
+    #[test]
+    fn bare_logs_and_agents_dirs_are_not_flagged_as_ai_project() {
+        let root = Path::new("/project");
+        let snap = DirSnapshot {
+            children: vec![
+                EntrySnapshot::new(
+                    PathBuf::from("/project/Cargo.toml"),
+                    "Cargo.toml".into(),
+                    None,
+                    EntryKind::File,
+                ),
+                EntrySnapshot::new(
+                    PathBuf::from("/project/logs"),
+                    "logs".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+                EntrySnapshot::new(
+                    PathBuf::from("/project/agents"),
+                    "agents".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+            ],
+        };
+
+        let project = detect_project_from_snapshot(&snap).expect("Cargo.toml detected as rust");
+        assert!(
+            !project.names.contains(&"ai_project"),
+            "bare logs/agents dirs must not classify project as ai_project: {:?}",
+            project.names
+        );
+
+        let args = ArgsSnapshot {
+            deps: true,
+            aggressive: true,
+            verbose: false,
+            tool_roots: false,
+            ignore_recent_hours: 1,
+            all_filesystems: false,
+        };
+        let candidates = artifact_candidates_from_snapshot(root, &project, &args, &snap);
+        assert!(
+            !candidates.iter().any(|c| c.reason == "ai tool logs"),
+            "must not nominate bare logs dir: {:?}",
+            candidates
+        );
+        assert!(
+            !candidates.iter().any(|c| c.reason == "ai agents dir"
+                && c.path.ends_with("agents")
+                && !c.path.ends_with(".agents")),
+            "must not nominate bare agents dir: {:?}",
+            candidates
+        );
+    }
+
+    /// Positive case: genuine AI-tool markers (`.agents`, `.claude/tmp`) still
+    /// get detected and nominated — the fix narrows false positives without
+    /// regressing real detection.
+    #[test]
+    fn genuine_ai_tool_markers_are_still_detected_and_nominated() {
+        let root = Path::new("/project");
+        let snap = DirSnapshot {
+            children: vec![
+                EntrySnapshot::new(
+                    PathBuf::from("/project/.agents"),
+                    ".agents".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+                EntrySnapshot::new(
+                    PathBuf::from("/project/.claude"),
+                    ".claude".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+            ],
+        };
+
+        let project = detect_project_from_snapshot(&snap).expect("ai markers detected");
+        assert!(project.names.contains(&"ai_project"));
+
+        let args = ArgsSnapshot {
+            deps: true,
+            aggressive: true,
+            verbose: false,
+            tool_roots: false,
+            ignore_recent_hours: 1,
+            all_filesystems: false,
+        };
+        let candidates = artifact_candidates_from_snapshot(root, &project, &args, &snap);
+        assert!(
+            candidates.iter().any(|c| c.path.ends_with(".agents") && c.reason == "ai agents dir"),
+            "genuine .agents dir must still be nominated: {:?}",
+            candidates
+        );
+        assert!(
+            candidates.iter().any(|c| c.path.ends_with(".claude/tmp")),
+            "claude tmp marker path must still be nominated: {:?}",
+            candidates
+        );
     }
 }

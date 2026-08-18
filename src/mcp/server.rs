@@ -90,6 +90,7 @@ impl OsxClnrMcpServer {
                         "include_aggressive": { "type": "boolean", "description": "(scan only)" },
                         "ignore_recent_hours": { "type": "integer", "default": 168, "description": "(scan only)" },
                         "tool_roots": { "type": "boolean", "default": false, "description": "(scan only)" },
+                        "all_filesystems": { "type": "boolean", "default": false, "description": "(scan only) Allow crossing onto other filesystems/APFS volumes reachable from a root (e.g. from \"/\" onto the System volume). Default false pins the walk to each root's own volume, so roots: [\"/\"] alone does NOT cover the whole disk on macOS -- \"/\" and \"/Users\" are typically separate volumes joined by firmlinks." },
                         "audit_file": { "type": "string", "description": "(parse only)" },
                         "top_n": { "type": "integer", "default": 50, "description": "(parse only)" },
                         "filter_reason": { "type": "string", "description": "(parse only)" },
@@ -495,6 +496,7 @@ impl OsxClnrMcpServer {
             input.include_aggressive,
             input.ignore_recent_hours,
             input.tool_roots,
+            input.all_filesystems,
         )?;
         let scan_duration_secs = start.elapsed().as_secs_f64();
 

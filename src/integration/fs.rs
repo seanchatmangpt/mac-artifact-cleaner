@@ -352,7 +352,7 @@ pub fn scan_root(
         .git_global(false)
         .git_exclude(false)
         .follow_links(false)
-        .same_file_system(true)
+        .same_file_system(!args.all_filesystems)
         .threads(threads);
 
     builder.filter_entry(move |entry| {
@@ -753,7 +753,7 @@ pub fn breakdown_sizes_depth(root: &Path, max_depth: usize) -> anyhow::Result<Ve
         .git_global(false)
         .git_exclude(false)
         .follow_links(false)
-        .same_file_system(true)
+        .same_file_system(false)
         .threads(threads);
 
     let root_pb = root.to_path_buf();
@@ -866,12 +866,49 @@ pub fn find_cargo_target_dirs(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>
 }
 
 /// Computes physical disk usage of a directory tree (blocks × 512).
+///
+/// Walks **serially** (`jwalk::Parallelism::Serial`) rather than spinning up
+/// its own rayon thread pool. This function is called from `plan::build`
+/// inside an outer `candidate_vec.par_iter()` across every plan candidate
+/// (up to 200+ on large runs). Previously each call used
+/// `Parallelism::RayonNewPool(0)`, which spins up a brand-new, all-CPU-sized
+/// rayon pool *per call* — with N candidates in flight concurrently under
+/// the outer `par_iter`, that meant N nested full-size thread pools
+/// contending for the same CPUs simultaneously. That nested-pool storm is
+/// the confirmed root cause of `plan build` taking 30-70+ minutes on large
+/// candidate sets (219+ candidates), versus running fine at ~119. The outer
+/// `par_iter` already provides parallelism *across* candidates, so each
+/// individual directory walk only needs to run on its own worker thread —
+/// serial jwalk traversal, no extra pool.
+///
+/// For a single directory walked outside any outer parallel context (e.g.
+/// `emergency::run`, which loops over a handful of cache paths on the main
+/// thread), see [`physical_dir_size_parallel`] instead — there, spinning up
+/// jwalk's own rayon pool for that one walk is a net win with no nesting
+/// hazard.
 pub fn physical_dir_size(path: &Path) -> u64 {
-    use jwalk::{Parallelism, WalkDir};
+    physical_dir_size_impl(path, jwalk::Parallelism::Serial)
+}
+
+/// Same as [`physical_dir_size`], but lets jwalk use its own rayon pool
+/// (`RayonNewPool(0)`, sized to all CPUs) to parallelize the walk itself.
+///
+/// Only use this for a **single** directory walked outside of any outer
+/// `par_iter`/rayon context — e.g. `emergency::run`'s cache sweep, which
+/// walks a handful of paths sequentially on the main thread and benefits
+/// from jwalk parallelizing each individual walk. Calling this from inside
+/// an outer parallel loop reintroduces the nested-pool-storm bug that
+/// [`physical_dir_size`]'s doc comment describes.
+pub fn physical_dir_size_parallel(path: &Path) -> u64 {
+    physical_dir_size_impl(path, jwalk::Parallelism::RayonNewPool(0))
+}
+
+fn physical_dir_size_impl(path: &Path, parallelism: jwalk::Parallelism) -> u64 {
+    use jwalk::WalkDir;
     WalkDir::new(path)
         .skip_hidden(false)
         .follow_links(false)
-        .parallelism(Parallelism::RayonNewPool(0))
+        .parallelism(parallelism)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter_map(|e| e.metadata().ok())
@@ -1178,7 +1215,7 @@ mod is_recently_active_tests {
 
 #[cfg(test)]
 mod physical_dir_size_tests {
-    use std::fs;
+    use std::{fs, path::PathBuf};
 
     use super::physical_dir_size;
 
@@ -1240,6 +1277,60 @@ mod physical_dir_size_tests {
     /// across filesystems/CI runners), and tests must not assume root vs.
     /// non-root CI execution. Documenting the gap here per the task brief
     /// rather than asserting unreliable behavior.
+    /// Regression guard for the nested-rayon-pool-storm bug: `plan::build`
+    /// calls `physical_dir_size` from *inside* an outer
+    /// `candidate_vec.par_iter()` across every plan candidate (up to 200+ on
+    /// large runs). Before this fix, `physical_dir_size` used
+    /// `Parallelism::RayonNewPool(0)`, spinning up a brand-new all-CPU-sized
+    /// rayon pool on every call — with many candidates in flight
+    /// concurrently under the outer `par_iter`, that meant many nested
+    /// full-size pools contending simultaneously, which was the confirmed
+    /// root cause of `plan build` stalling for 30-70+ minutes on large
+    /// candidate sets.
+    ///
+    /// This test reproduces that exact shape: 60 real temp directories
+    /// (simulating 60 plan candidates), each walked via `physical_dir_size`
+    /// from within a rayon `par_iter`, and asserts real wall-clock
+    /// completion well under a generous bound. With the bug present this
+    /// would take a very long time (pool-storm contention scaling with
+    /// candidate count); with `Parallelism::Serial` inside `par_iter`
+    /// providing the only parallelism, it should finish in a small fraction
+    /// of a second.
+    #[test]
+    fn many_calls_from_nested_par_iter_complete_quickly() {
+        use std::time::{Duration, Instant};
+
+        use rayon::prelude::*;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // 60 candidate directories, each with a handful of small files —
+        // mirrors the real plan-build shape (many candidates, each a small
+        // directory tree).
+        let dirs: Vec<PathBuf> = (0..60)
+            .map(|i| {
+                let d = root.join(format!("candidate_{i}"));
+                fs::create_dir(&d).unwrap();
+                for j in 0..5 {
+                    fs::write(d.join(format!("file_{j}.bin")), vec![0u8; 1024]).unwrap();
+                }
+                d
+            })
+            .collect();
+
+        let start = Instant::now();
+        let total: u64 = dirs.par_iter().map(|d| physical_dir_size(d)).sum();
+        let elapsed = start.elapsed();
+
+        assert!(total > 0, "expected nonzero total physical size across candidates");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "physical_dir_size from within a nested par_iter took {elapsed:?}, expected < 5s \
+             (pool-storm regression: each call must not spin up its own rayon pool)"
+        );
+    }
+
     #[test]
     fn permission_denied_subtree_silently_undercounts_documented_gap() {
         // Intentionally not exercised — see doc comment above. This test
@@ -1289,6 +1380,7 @@ mod scan_root_tests {
             verbose: false,
             tool_roots: false,
             ignore_recent_hours: 1,
+            all_filesystems: false,
         };
         let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
         let stats = Arc::new(Stats::default());
@@ -1322,6 +1414,7 @@ mod scan_root_tests {
             verbose: false,
             tool_roots: false,
             ignore_recent_hours: 0,
+            all_filesystems: false,
         };
         let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
         let stats = Arc::new(Stats::default());

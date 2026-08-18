@@ -44,6 +44,7 @@ fn test_project_detection_and_candidates() {
         verbose: false,
         tool_roots: false,
         ignore_recent_hours: 1,
+        all_filesystems: false,
     };
     let snap2 = read_dir_snapshot(&project_dir);
     let project = detect_project_from_snapshot(&snap2).unwrap();
@@ -124,6 +125,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
         verbose: true,
         tool_roots: false,
         ignore_recent_hours: 1,
+        all_filesystems: false,
     };
     let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
     let stats = Arc::new(Stats::default());
@@ -793,6 +795,7 @@ fn test_traversal_barriers() {
         verbose: false,
         tool_roots: false,
         ignore_recent_hours: 1,
+        all_filesystems: false,
     };
 
     let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
@@ -971,6 +974,7 @@ fn test_concurrent_root_scans_match_sequential_baseline() {
         verbose: false,
         tool_roots: false,
         ignore_recent_hours: 1,
+        all_filesystems: false,
     };
 
     let root_a_tmp = make_root("a");
@@ -1093,6 +1097,7 @@ fn test_repeat_scan_with_cache_matches_first_scan() {
         verbose: false,
         tool_roots: false,
         ignore_recent_hours: 1,
+        all_filesystems: false,
     };
 
     // First scan: populates the cache (cache-miss path).

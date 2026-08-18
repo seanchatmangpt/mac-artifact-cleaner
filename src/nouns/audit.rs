@@ -50,6 +50,13 @@ pub enum AuditAction {
         /// Path to write OCEL v2 event log
         #[arg(long)]
         ocel_output: Option<PathBuf>,
+        /// Allow the walk to cross onto other filesystems/APFS volumes
+        /// reachable from a scan root (e.g. from `/` onto the System volume,
+        /// or other mounted volumes). Default: pinned to the root's own
+        /// filesystem, so a home-directory or `/` scan never wanders onto
+        /// network mounts or other users' volumes.
+        #[arg(long)]
+        all_filesystems: bool,
     },
     /// Run a full disk audit and present a premium user-friendly analytics summary
     Summarize {
@@ -68,6 +75,9 @@ pub enum AuditAction {
         /// Include major tool-root analysis
         #[arg(long)]
         tool_roots: bool,
+        /// See `Run`'s `--all-filesystems`.
+        #[arg(long)]
+        all_filesystems: bool,
     },
     /// Run cargo clean on all Rust target/ directories under a root
     CargoClean {
@@ -131,11 +141,19 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             tool_roots,
             verbose,
             ocel_output,
+            all_filesystems,
         } => {
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
-            let (stats, candidates, tool_reports) =
-                run_audit_scan(&roots, deps, aggressive, ignore_recent_hours, tool_roots, verbose)?;
+            let (stats, candidates, tool_reports) = run_audit_scan(
+                &roots,
+                deps,
+                aggressive,
+                ignore_recent_hours,
+                tool_roots,
+                verbose,
+                all_filesystems,
+            )?;
 
             println!("\n==================================================");
             println!("               DISK AUDIT RUN                     ");
@@ -372,7 +390,14 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 print_breakdown(&scan_root_path, &results, top, min_mb);
             }
         }
-        AuditAction::Summarize { root, deps, aggressive, ignore_recent_hours, tool_roots } => {
+        AuditAction::Summarize {
+            root,
+            deps,
+            aggressive,
+            ignore_recent_hours,
+            tool_roots,
+            all_filesystems,
+        } => {
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
             let (stats, candidates, tool_reports) = run_audit_scan(
@@ -382,6 +407,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 ignore_recent_hours,
                 tool_roots,
                 false, // non-verbose for summary
+                all_filesystems,
             )?;
 
             print_disk_header();
@@ -414,6 +440,7 @@ fn run_audit_scan(
     ignore_recent_hours: u64,
     tool_roots_enabled: bool,
     verbose: bool,
+    all_filesystems: bool,
 ) -> anyhow::Result<(Arc<Stats>, Vec<Candidate>, Vec<ToolRootReport>)> {
     let args = ArgsSnapshot {
         deps,
@@ -421,6 +448,7 @@ fn run_audit_scan(
         verbose,
         tool_roots: tool_roots_enabled,
         ignore_recent_hours,
+        all_filesystems,
     };
 
     let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());

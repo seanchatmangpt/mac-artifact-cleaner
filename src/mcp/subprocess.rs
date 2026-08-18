@@ -123,6 +123,7 @@ impl OclnrRunner {
         include_aggressive: bool,
         ignore_recent_hours: u32,
         tool_roots: bool,
+        all_filesystems: bool,
     ) -> Result<SubprocessResult, ErrorResponse> {
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("audit")
@@ -150,6 +151,9 @@ impl OclnrRunner {
         cmd.arg("--ignore-recent-hours").arg(ignore_recent_hours.to_string());
         if tool_roots {
             cmd.arg("--tool-roots");
+        }
+        if all_filesystems {
+            cmd.arg("--all-filesystems");
         }
 
         // Write OCEL output to disk-audit.jsonocel
