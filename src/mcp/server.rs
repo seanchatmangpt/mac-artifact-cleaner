@@ -1008,7 +1008,17 @@ impl OsxClnrMcpServer {
                 format!("cannot source plan-approval secret: {}", e),
             )
         })?;
-        approval.sign(&plan_content, &secret).ok();
+        // Gating security lives entirely in `plan.sign_approval` below (the
+        // on-disk signature `delete execute` actually checks); this call only
+        // populates the RPC-response-only `approval_signature` field for
+        // convenience. Still, silently leaving it blank on failure would look
+        // identical to a successful, empty-by-design signature — surface it.
+        approval.sign(&plan_content, &secret).map_err(|e| {
+            ErrorResponse::new(
+                ErrorCode::IoError,
+                format!("cannot sign approval metadata: {}", e),
+            )
+        })?;
 
         // Persist the approval into the plan file itself, bound to a
         // content hash of the plan's substantive fields (computed excluding
@@ -1427,6 +1437,17 @@ impl OsxClnrMcpServer {
 
         let mut issues: Vec<Value> = Vec::new();
 
+        let home_dir = dirs::home_dir();
+        if home_dir.is_none() {
+            issues.push(json!({
+                "severity": "warning",
+                "kind": "home_directory_unknown",
+                "path": "",
+                "message": "Could not determine home directory (HOME unset/misconfigured); \
+                             the dotfile_in_home safety check is disabled for this run"
+            }));
+        }
+
         for item in &plan.items {
             if is_macos_os_dir(&item.path) {
                 issues.push(json!({
@@ -1441,7 +1462,7 @@ impl OsxClnrMcpServer {
             if let Some(name) = item.path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with('.') {
                     if let Some(parent) = item.path.parent() {
-                        if parent == dirs::home_dir().unwrap_or_default() {
+                        if Some(parent) == home_dir.as_deref() {
                             issues.push(json!({
                                 "severity": "warning",
                                 "kind": "dotfile_in_home",

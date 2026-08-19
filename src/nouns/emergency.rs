@@ -74,7 +74,13 @@ pub fn handle(mount: String, yes: bool, receipt: Option<PathBuf>) -> anyhow::Res
     // ── Step 1: APFS local snapshots ────────────────────────────────────────
     // On a snapshot-based boot volume this is the highest-leverage action and
     // needs no large temp writes — exactly what we want at ~0 bytes free.
-    let snaps = list_local_snapshots(&mount).unwrap_or_default();
+    let snaps = match list_local_snapshots(&mount) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("    warning: could not list local snapshots: {}", e);
+            Vec::new()
+        }
+    };
     println!("\n[1] Local APFS snapshots: {} present", snaps.len());
     if yes && !snaps.is_empty() {
         // Ask macOS to thin as much as it can (huge byte target, max urgency).
@@ -84,7 +90,13 @@ pub fn handle(mount: String, yes: bool, receipt: Option<PathBuf>) -> anyhow::Res
             Err(e) => eprintln!("    thin failed: {}", e),
         }
         // Then delete any that survived, oldest first.
-        let remaining = list_local_snapshots(&mount).unwrap_or_default();
+        let remaining = match list_local_snapshots(&mount) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("    warning: could not re-list local snapshots after thin: {}", e);
+                Vec::new()
+            }
+        };
         for date in select_oldest_snapshots(&remaining, remaining.len()) {
             match delete_local_snapshot(&date) {
                 Ok(_) => println!("    deleted snapshot {}", date),

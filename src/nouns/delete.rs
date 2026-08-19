@@ -149,21 +149,32 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                         // On success, the planned physical size is what was reclaimed.
                         match item.kind {
                             PlanItemKind::File => {
-                                // Generate cryptographic manifest before deletion
-                                let hash = generate_manifest(&item.path).ok();
+                                // Generate cryptographic manifest before deletion. A
+                                // failure here (permission error, race with another
+                                // process, unreadable file) must not be silently
+                                // conflated with "hashing was never attempted" — the
+                                // receipt's evidentiary value depends on knowing why
+                                // a hash is missing.
+                                let (hash, hash_err) = match generate_manifest(&item.path) {
+                                    Ok(h) => (Some(h), None),
+                                    Err(e) => (None, Some(format!("hash failed: {}", e))),
+                                };
 
                                 match delete_file(&item.path) {
                                     Ok(()) => DeletionResult {
                                         path: item.path.clone(),
                                         status: DeletionStatus::Deleted,
-                                        error: None,
+                                        error: hash_err,
                                         blake3_hash: hash,
                                         bytes_freed: item.bytes,
                                     },
                                     Err(e) => DeletionResult {
                                         path: item.path.clone(),
                                         status: DeletionStatus::Failed,
-                                        error: Some(e.to_string()),
+                                        error: Some(match hash_err {
+                                            Some(he) => format!("{}; {}", he, e),
+                                            None => e.to_string(),
+                                        }),
                                         blake3_hash: hash,
                                         bytes_freed: 0,
                                     },

@@ -91,15 +91,16 @@ pub fn npm_available() -> bool {
 pub fn list_npm_global_packages() -> Result<Vec<NpmGlobalPackage>> {
     let output = Command::new("npm").args(["list", "-g", "--depth", "0", "--json"]).output()?;
 
+    // `npm list` can exit non-zero even on success (e.g. peer dep warnings) but
+    // still emit valid JSON on stdout; only treat empty stdout as a hard failure.
     if !output.status.success() && output.stdout.is_empty() {
-        return Ok(vec![]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("npm list -g failed: {}", stderr.trim());
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
-    let v: serde_json::Value = match serde_json::from_str(&text) {
-        Ok(v) => v,
-        Err(_) => return Ok(vec![]),
-    };
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| anyhow::anyhow!("failed to parse npm list -g --json output: {}", e))?;
 
     let deps = match v.get("dependencies").and_then(|d| d.as_object()) {
         Some(d) => d,
@@ -131,20 +132,16 @@ pub fn list_pip_packages() -> Result<Vec<PipPackage>> {
         .output()
         .or_else(|_| Command::new("pip").args(["list", "--format", "json"]).output());
 
-    let output = match output {
-        Ok(o) => o,
-        Err(_) => return Ok(vec![]),
-    };
+    let output = output.map_err(|e| anyhow::anyhow!("failed to spawn pip3/pip: {}", e))?;
 
     if !output.status.success() && output.stdout.is_empty() {
-        return Ok(vec![]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("pip list failed: {}", stderr.trim());
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
-    let entries: Vec<serde_json::Value> = match serde_json::from_str(&text) {
-        Ok(v) => v,
-        Err(_) => return Ok(vec![]),
-    };
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&text)
+        .map_err(|e| anyhow::anyhow!("failed to parse pip list --format json output: {}", e))?;
 
     let packages = entries
         .into_iter()
