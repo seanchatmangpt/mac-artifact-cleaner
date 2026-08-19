@@ -685,6 +685,25 @@ pub struct DockerPruneOutput {
     pub message: String,
 }
 
+// DOCTOR
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DoctorCheckInput {
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
+    /// One of: architecture | substrate | doctests | privacy | domain-purity
+    /// | scan-delete-separation
+    pub check: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DoctorCheckOutput {
+    pub state: String,
+    pub check: String,
+    pub raw: String,
+    pub message: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

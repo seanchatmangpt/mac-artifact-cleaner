@@ -230,6 +230,32 @@ impl OsxClnrMcpServer {
                     "required": ["action"]
                 }
             }),
+            json!({
+                "name": "doctor",
+                "description": "Self-verification diagnostics: architecture layout, macOS \
+                                 substrate capabilities, doctest completeness, privacy/redaction \
+                                 rule compliance, domain purity (no std::fs/std::process in \
+                                 src/domain/**), and the scanner-cannot-delete / \
+                                 deleter-cannot-scan invariant. Read-only, non-destructive.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "check": {
+                            "type": "string",
+                            "enum": [
+                                "architecture",
+                                "substrate",
+                                "doctests",
+                                "privacy",
+                                "domain-purity",
+                                "scan-delete-separation"
+                            ]
+                        },
+                        "workspace": { "type": "string" }
+                    },
+                    "required": ["check"]
+                }
+            }),
         ];
 
         Ok(json!({ "tools": tools }))
@@ -317,6 +343,7 @@ impl OsxClnrMcpServer {
                 "prune" => self.docker_prune(params),
                 other => Err(Self::unknown_action(name, other)),
             },
+            "doctor" => self.doctor_check(params),
 
             _ => Err(ErrorResponse::new(
                 ErrorCode::MethodNotFound,
@@ -1042,10 +1069,7 @@ impl OsxClnrMcpServer {
         // convenience. Still, silently leaving it blank on failure would look
         // identical to a successful, empty-by-design signature — surface it.
         approval.sign(&plan_content, &secret).map_err(|e| {
-            ErrorResponse::new(
-                ErrorCode::IoError,
-                format!("cannot sign approval metadata: {}", e),
-            )
+            ErrorResponse::new(ErrorCode::IoError, format!("cannot sign approval metadata: {}", e))
         })?;
 
         // Persist the approval into the plan file itself, bound to a
@@ -1831,6 +1855,37 @@ impl OsxClnrMcpServer {
             state: "DOCKER_PRUNE_COMPLETE".to_string(),
             raw: result.stdout.trim().to_string(),
             message: "Docker (and Colima, unless skipped) prune complete".to_string(),
+        })
+        .unwrap())
+    }
+
+    fn doctor_check(&self, params: Value) -> Result<Value, ErrorResponse> {
+        let input: DoctorCheckInput = serde_json::from_value(params)
+            .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
+        let workspace = input.workspace.unwrap_or_else(|| self.default_workspace.clone());
+
+        const VALID_CHECKS: &[&str] = &[
+            "architecture",
+            "substrate",
+            "doctests",
+            "privacy",
+            "domain-purity",
+            "scan-delete-separation",
+        ];
+        if !VALID_CHECKS.contains(&input.check.as_str()) {
+            return Err(Self::unknown_action("doctor", &input.check));
+        }
+
+        let result = self.runner.doctor_check(&workspace, &input.check)?;
+        if !result.success() {
+            return Err(result.to_error("oclnr doctor"));
+        }
+
+        Ok(serde_json::to_value(DoctorCheckOutput {
+            state: "DOCTOR_CHECK_COMPLETE".to_string(),
+            check: input.check,
+            raw: result.stdout.trim().to_string(),
+            message: "Doctor check complete".to_string(),
         })
         .unwrap())
     }
