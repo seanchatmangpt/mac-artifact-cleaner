@@ -6,7 +6,10 @@
 use clap::Subcommand;
 
 use crate::integration::{
-    docker::{docker_disk_usage, docker_prune_preview, is_docker_available},
+    docker::{
+        colima_prune, docker_disk_usage, docker_prune_preview, docker_system_prune,
+        is_colima_available, is_docker_available,
+    },
     progress::human_bytes as fmt_bytes,
 };
 
@@ -18,6 +21,17 @@ pub enum DockerAction {
     Plan,
     /// Show Docker disk usage summary
     Summary,
+    /// Actually prune Docker (and, unless --skip-colima, Colima's cached VM
+    /// assets) to reclaim space. Destructive — requires --confirm.
+    Prune {
+        /// Required to actually run the prune; without it, this only prints
+        /// what would happen (same as `plan`).
+        #[arg(long)]
+        confirm: bool,
+        /// Skip `colima prune` even if Colima is available.
+        #[arg(long)]
+        skip_colima: bool,
+    },
 }
 
 /// Prints a Docker disk usage table and returns `Ok(())`.
@@ -61,8 +75,43 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
             println!("  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}");
             println!("  Total reclaimable:       {}", fmt_bytes(preview.total_reclaimable_bytes));
             println!();
-            println!("Run 'docker system prune -a --volumes' to actually reclaim this space.");
-            println!("(osx-clnr does not execute Docker prune \u{2014} use Docker directly)");
+            println!(
+                "Run 'oclnr docker prune --confirm' or 'docker system prune -a --volumes' to \
+                 actually reclaim this space."
+            );
+
+            Ok(())
+        }
+        DockerAction::Prune { confirm, skip_colima } => {
+            if !is_docker_available() {
+                println!("Docker not available or not running.");
+                return Ok(());
+            }
+
+            if !confirm {
+                println!("Refusing to prune without --confirm. Preview:");
+                return handle(DockerAction::Plan);
+            }
+
+            let result = docker_system_prune()?;
+            println!("Docker Prune");
+            println!("  Before: {}", fmt_bytes(result.before.total_bytes));
+            println!("  After:  {}", fmt_bytes(result.after.total_bytes));
+            println!("  Reclaimed: {}", fmt_bytes(result.reclaimed_bytes));
+
+            if !skip_colima && is_colima_available() {
+                match colima_prune() {
+                    Ok(out) => {
+                        println!("\nColima Prune");
+                        if out.is_empty() {
+                            println!("  (nothing to prune)");
+                        } else {
+                            println!("{out}");
+                        }
+                    }
+                    Err(e) => println!("\nColima prune skipped: {e}"),
+                }
+            }
 
             Ok(())
         }

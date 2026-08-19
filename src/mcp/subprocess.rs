@@ -342,6 +342,54 @@ impl OclnrRunner {
         self.run_command(cmd, "oclnr emergency")
     }
 
+    /// Run: oclnr docker scan
+    #[allow(clippy::result_large_err)]
+    pub fn docker_scan(&self, workspace: &PathBuf) -> Result<SubprocessResult, ErrorResponse> {
+        let mut cmd = Command::new(&self.oclnr_path);
+        cmd.arg("docker")
+            .arg("scan")
+            .current_dir(workspace)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        self.run_command(cmd, "oclnr docker scan")
+    }
+
+    /// Run: oclnr docker plan
+    #[allow(clippy::result_large_err)]
+    pub fn docker_plan(&self, workspace: &PathBuf) -> Result<SubprocessResult, ErrorResponse> {
+        let mut cmd = Command::new(&self.oclnr_path);
+        cmd.arg("docker")
+            .arg("plan")
+            .current_dir(workspace)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        self.run_command(cmd, "oclnr docker plan")
+    }
+
+    /// Run: oclnr docker prune --confirm [--skip-colima]
+    #[allow(clippy::result_large_err)]
+    pub fn docker_prune(
+        &self,
+        workspace: &PathBuf,
+        skip_colima: bool,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        let mut cmd = Command::new(&self.oclnr_path);
+        cmd.arg("docker")
+            .arg("prune")
+            .arg("--confirm")
+            .current_dir(workspace)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if skip_colima {
+            cmd.arg("--skip-colima");
+        }
+
+        self.run_command(cmd, "oclnr docker prune")
+    }
+
     /// Run: oclnr snapshot audit --mount <mount>
     ///
     /// `snapshot audit` takes a single `--mount` flag (default `/`), not a
