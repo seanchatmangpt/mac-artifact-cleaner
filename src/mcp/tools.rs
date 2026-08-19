@@ -638,6 +638,53 @@ pub struct EmergencyReclaimOutput {
     pub message: String,
 }
 
+// ============================================================================
+// DOCKER
+// ============================================================================
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DockerScanInput {
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DockerScanOutput {
+    pub state: String,
+    pub raw: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DockerPlanInput {
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DockerPlanOutput {
+    pub state: String,
+    pub raw: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DockerPruneInput {
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
+    #[serde(default)]
+    pub skip_colima: bool,
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DockerPruneOutput {
+    pub state: String,
+    pub raw: String,
+    pub message: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

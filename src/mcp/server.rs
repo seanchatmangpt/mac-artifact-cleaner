@@ -208,6 +208,28 @@ impl OsxClnrMcpServer {
                     "required": ["mount", "target_free_gb"]
                 }
             }),
+            json!({
+                "name": "docker",
+                "description": "Docker/Colima disk cleanup: `scan` shows current disk usage \
+                                 (images, containers, volumes, build cache), `plan` previews what \
+                                 a prune would reclaim without changing anything, `prune` actually \
+                                 runs `docker system prune -af --volumes` and (unless \
+                                 skip_colima) `colima prune` to reclaim it. `prune` is destructive \
+                                 (removes unused images, stopped containers, unused volumes, and \
+                                 build cache) and requires confirm: true; it has no dry-run receipt \
+                                 or affidavit seal — no MCP-tracked audit trail exists for Docker \
+                                 yet, unlike delete/snapshot.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["scan", "plan", "prune"] },
+                        "workspace": { "type": "string" },
+                        "skip_colima": { "type": "boolean", "default": false, "description": "(prune only) Skip `colima prune` even if Colima is available." },
+                        "confirm": { "type": "boolean", "default": false, "description": "(prune only) Required to actually prune." }
+                    },
+                    "required": ["action"]
+                }
+            }),
         ];
 
         Ok(json!({ "tools": tools }))
@@ -289,6 +311,12 @@ impl OsxClnrMcpServer {
                 other => Err(Self::unknown_action(name, other)),
             },
             "emergency_reclaim" => self.emergency_reclaim(params),
+            "docker" => match Self::require_action(name, &params)? {
+                "scan" => self.docker_scan(params),
+                "plan" => self.docker_plan(params),
+                "prune" => self.docker_prune(params),
+                other => Err(Self::unknown_action(name, other)),
+            },
 
             _ => Err(ErrorResponse::new(
                 ErrorCode::MethodNotFound,
@@ -1744,6 +1772,65 @@ impl OsxClnrMcpServer {
             snapshots_thinned,
             caches_cleared,
             message: "Emergency reclaim complete".to_string(),
+        })
+        .unwrap())
+    }
+
+    fn docker_scan(&self, params: Value) -> Result<Value, ErrorResponse> {
+        let input: DockerScanInput = serde_json::from_value(params)
+            .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
+        let workspace = input.workspace.unwrap_or_else(|| self.default_workspace.clone());
+
+        let result = self.runner.docker_scan(&workspace)?;
+        if !result.success() {
+            return Err(result.to_error("oclnr docker scan"));
+        }
+
+        Ok(serde_json::to_value(DockerScanOutput {
+            state: "DOCKER_SCAN_COMPLETE".to_string(),
+            raw: result.stdout.trim().to_string(),
+            message: "Docker disk usage scan complete".to_string(),
+        })
+        .unwrap())
+    }
+
+    fn docker_plan(&self, params: Value) -> Result<Value, ErrorResponse> {
+        let input: DockerPlanInput = serde_json::from_value(params)
+            .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
+        let workspace = input.workspace.unwrap_or_else(|| self.default_workspace.clone());
+
+        let result = self.runner.docker_plan(&workspace)?;
+        if !result.success() {
+            return Err(result.to_error("oclnr docker plan"));
+        }
+
+        Ok(serde_json::to_value(DockerPlanOutput {
+            state: "DOCKER_PLAN_COMPLETE".to_string(),
+            raw: result.stdout.trim().to_string(),
+            message: "Docker prune preview complete".to_string(),
+        })
+        .unwrap())
+    }
+
+    fn docker_prune(&self, params: Value) -> Result<Value, ErrorResponse> {
+        let input: DockerPruneInput = serde_json::from_value(params)
+            .map_err(|e| ErrorResponse::json_parse_error(&e.to_string()))?;
+
+        if !input.confirm {
+            return Err(ErrorResponse::confirmation_required("docker_prune"));
+        }
+
+        let workspace = input.workspace.unwrap_or_else(|| self.default_workspace.clone());
+
+        let result = self.runner.docker_prune(&workspace, input.skip_colima)?;
+        if !result.success() {
+            return Err(result.to_error("oclnr docker prune"));
+        }
+
+        Ok(serde_json::to_value(DockerPruneOutput {
+            state: "DOCKER_PRUNE_COMPLETE".to_string(),
+            raw: result.stdout.trim().to_string(),
+            message: "Docker (and Colima, unless skipped) prune complete".to_string(),
         })
         .unwrap())
     }

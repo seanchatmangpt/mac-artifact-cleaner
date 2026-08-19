@@ -25,16 +25,28 @@ pub struct DockerPrunePreview {
 }
 
 /// Raw line from `docker system df --format json`.
+///
+/// `TotalCount` (not `Total`) is what real `docker system df --format json`
+/// output actually names the field, and it is emitted as a JSON string (e.g.
+/// `"7"`), not a number — a prior version of this struct assumed `Total: u64`
+/// and silently failed `serde_json::from_str` on every real line, which
+/// `run_df` swallowed into a `Warning:` and an empty result.
 #[derive(Debug, Deserialize)]
 struct DfLine {
     #[serde(rename = "Type")]
     type_name: String,
-    #[serde(rename = "Total")]
-    total: u64,
+    #[serde(rename = "TotalCount")]
+    total_count: String,
     #[serde(rename = "Size")]
     size: String,
     #[serde(rename = "Reclaimable")]
     reclaimable: String,
+}
+
+impl DfLine {
+    fn total(&self) -> u64 {
+        self.total_count.parse().unwrap_or(0)
+    }
 }
 
 /// Returns `true` if `docker info` exits with status 0.
@@ -123,19 +135,19 @@ pub fn docker_disk_usage() -> Result<DockerDiskUsage> {
         let bytes = parse_size_str(&line.size);
         match line.type_name.as_str() {
             "Images" => {
-                usage.images_count = line.total;
+                usage.images_count = line.total();
                 usage.images_bytes = bytes;
             }
             "Containers" => {
-                usage.containers_count = line.total;
+                usage.containers_count = line.total();
                 usage.containers_bytes = bytes;
             }
             "Local Volumes" | "Volumes" => {
-                usage.volumes_count = line.total;
+                usage.volumes_count = line.total();
                 usage.volumes_bytes = bytes;
             }
             "Build Cache" => {
-                usage.build_cache_count = line.total;
+                usage.build_cache_count = line.total();
                 usage.build_cache_bytes = bytes;
             }
             _ => {}
@@ -182,6 +194,81 @@ pub fn docker_prune_preview() -> Result<DockerPrunePreview> {
         .saturating_add(preview.build_cache_reclaimable_bytes);
 
     Ok(preview)
+}
+
+/// Result of executing `docker system prune -af --volumes`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DockerPruneResult {
+    pub before: DockerDiskUsage,
+    pub after: DockerDiskUsage,
+    pub reclaimed_bytes: u64,
+    pub stdout: String,
+}
+
+/// Executes `docker system prune -af --volumes`, actually removing unused
+/// images, stopped containers, unused networks, dangling build cache, and
+/// (because `--volumes` is passed) unused local volumes. Destructive —
+/// callers must gate this behind their own confirmation, same as
+/// `delete::execute` and `snapshot::thin/delete` do at the CLI/MCP layer;
+/// this function performs no confirmation of its own.
+///
+/// Returns before/after disk usage plus the delta actually reclaimed.
+pub fn docker_system_prune() -> Result<DockerPruneResult> {
+    if !is_docker_available() {
+        anyhow::bail!("Docker not available");
+    }
+
+    let before = docker_disk_usage()?;
+
+    let output = std::process::Command::new("docker")
+        .args(["system", "prune", "-af", "--volumes"])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("docker system prune failed: {}", stderr.trim());
+    }
+
+    let after = docker_disk_usage()?;
+    let reclaimed_bytes = before.total_bytes.saturating_sub(after.total_bytes);
+
+    Ok(DockerPruneResult {
+        before,
+        after,
+        reclaimed_bytes,
+        stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+    })
+}
+
+/// Returns `true` if the `colima` CLI is on `PATH`.
+pub fn is_colima_available() -> bool {
+    std::process::Command::new("colima")
+        .arg("version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Runs `colima prune`, which removes cached downloaded VM assets (old
+/// Lima/QEMU images, stale layer downloads) without touching the running VM,
+/// its disk, or any containers inside it — unlike `colima delete`, which
+/// tears down the whole VM and is deliberately not exposed here. Returns raw
+/// stdout since `colima prune` has no machine-readable output format.
+pub fn colima_prune() -> Result<String> {
+    if !is_colima_available() {
+        anyhow::bail!("Colima not available");
+    }
+
+    let output = std::process::Command::new("colima").args(["prune", "--force"]).output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("colima prune failed: {}", stderr.trim());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 #[cfg(test)]
