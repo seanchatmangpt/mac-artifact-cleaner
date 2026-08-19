@@ -1,0 +1,1070 @@
+{
+  "version": 1,
+  "created_unix": 1785792219,
+  "roots": [
+    "/Users/sac",
+    "/tmp"
+  ],
+  "deps": true,
+  "aggressive": false,
+  "items": [
+    {
+      "path": "/Users/sac/bcinr/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 31050383360
+    },
+    {
+      "path": "/Users/sac/ggen/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 10886127616
+    },
+    {
+      "path": "/Users/sac/Library/Caches",
+      "kind": "dir",
+      "reason": "macOS/app user cache",
+      "bytes": 9466478592
+    },
+    {
+      "path": "/Users/sac/unibit-overnight-worktree/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 8923332608
+    },
+    {
+      "path": "/Users/sac/ferroplan/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 6512943104
+    },
+    {
+      "path": "/Users/sac/ggen/examples/praxis-core-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4466839552
+    },
+    {
+      "path": "/Users/sac/wasm4pm/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 3602063360
+    },
+    {
+      "path": "/Users/sac/ggen-mcp/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 2708258816
+    },
+    {
+      "path": "/Users/sac/mfw/runtime/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 2215251968
+    },
+    {
+      "path": "/Users/sac/wasm4pm/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 1793626112
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/r4pm/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 1711235072
+    },
+    {
+      "path": "/Users/sac/osx-clnr/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 1697587200
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/.build",
+      "kind": "dir",
+      "reason": "swift package build",
+      "bytes": 1641406464
+    },
+    {
+      "path": "/Users/sac/claude-code-config-lsp/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 1609220096
+    },
+    {
+      "path": "/Users/sac/ggen/examples/receiptctl/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 1530363904
+    },
+    {
+      "path": "/tmp/claude-501/-Users-sac-ggen/8cb7000f-04f3-421d-8b0d-c53708e7114b/scratchpad/shacl-cli-check/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 1199001600
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-rmcp/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 993710080
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/chatman-ecosystem/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 838508544
+    },
+    {
+      "path": "/Users/sac/ggen/examples/tcps-generated/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 742948864
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/.venv",
+      "kind": "dir",
+      "reason": "python virtualenv",
+      "bytes": 702390272
+    },
+    {
+      "path": "/Users/sac/ggen/crates/ggen-architecture/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 611569664
+    },
+    {
+      "path": "/Users/sac/ggen/examples/nextjs-ai-sdk/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 570847232
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src",
+      "kind": "dir",
+      "reason": "cargo registry unpacked sources",
+      "bytes": 553623552
+    },
+    {
+      "path": "/Users/sac/ggen/examples/interview-sandbox/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 502530048
+    },
+    {
+      "path": "/Users/sac/ferroplan/plugins/chatman-ecosystem/.venv",
+      "kind": "dir",
+      "reason": "python virtualenv",
+      "bytes": 466485248
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/.venv",
+      "kind": "dir",
+      "reason": "python virtualenv",
+      "bytes": 433254400
+    },
+    {
+      "path": "/Users/sac/mfw/.claude/worktrees/agent-abe39001a87a9d491/mfw-auto-select/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 424243200
+    },
+    {
+      "path": "/Users/sac/ggen/examples/clap-noun-verb-cli/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 421310464
+    },
+    {
+      "path": "/Users/sac/ggen/examples/interview-assist/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 418037760
+    },
+    {
+      "path": "/Users/sac/ggen/examples/rmcp-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 360058880
+    },
+    {
+      "path": "/Users/sac/ggen/examples/ggen-cli-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 348975104
+    },
+    {
+      "path": "/Users/sac/ggen/examples/star-toml-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 348200960
+    },
+    {
+      "path": "/Users/sac/bcinr/oracles/powl/runner/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 334393344
+    },
+    {
+      "path": "/Users/sac/ggen-legacy/tools/v26.8.1/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 333815808
+    },
+    {
+      "path": "/Users/sac/mfw/tools/mfw-repo-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 325066752
+    },
+    {
+      "path": "/Users/sac/ggen-legacy/tools/ggen-verifier-cli-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 311091200
+    },
+    {
+      "path": "/Users/sac/mmdio/.venv",
+      "kind": "dir",
+      "reason": "python virtualenv",
+      "bytes": 308211712
+    },
+    {
+      "path": "/Users/sac/mfw/.claude/worktrees/agent-a662975c290769ed5/tools/mfw-repo-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 246173696
+    },
+    {
+      "path": "/Users/sac/ggen/examples/interview-assist/.next",
+      "kind": "dir",
+      "reason": "next build output",
+      "bytes": 191037440
+    },
+    {
+      "path": "/Users/sac/ggen/examples/lsp-max-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 179752960
+    },
+    {
+      "path": "/Users/sac/mmdio/tests/oracle/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 173314048
+    },
+    {
+      "path": "/Users/sac/ggen/examples/affidavit-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 151146496
+    },
+    {
+      "path": "/Users/sac/.clawdbot/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 115744768
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/cache",
+      "kind": "dir",
+      "reason": "cargo registry cache (.crate)",
+      "bytes": 83841024
+    },
+    {
+      "path": "/Users/sac/ggen/examples/cargo-cicd-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 76316672
+    },
+    {
+      "path": "/Users/sac/ggen/examples/interview-sandbox/.next",
+      "kind": "dir",
+      "reason": "next build output",
+      "bytes": 73887744
+    },
+    {
+      "path": "/tmp/claude-501/-Users-sac-ggen/8cb7000f-04f3-421d-8b0d-c53708e7114b/scratchpad/tarcheck/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 47706112
+    },
+    {
+      "path": "/Users/sac/unibit-overnight-worktree/xtask/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 46665728
+    },
+    {
+      "path": "/Users/sac/ggen/examples/nextjs-ai-sdk/.next",
+      "kind": "dir",
+      "reason": "next build output",
+      "bytes": 33538048
+    },
+    {
+      "path": "/Users/sac/ggen/crates/chicago-tdd-tools/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 30765056
+    },
+    {
+      "path": "/Users/sac/.ollama/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 26370048
+    },
+    {
+      "path": "/tmp/spec-kit/.mypy_cache",
+      "kind": "dir",
+      "reason": "python mypy cache",
+      "bytes": 22315008
+    },
+    {
+      "path": "/tmp/claude-501/-Users-sac-ggen/8cb7000f-04f3-421d-8b0d-c53708e7114b/scratchpad/tera_probe/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 17637376
+    },
+    {
+      "path": "/Users/sac/ggen/examples/wasm4pm-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 17567744
+    },
+    {
+      "path": "/Users/sac/.npm/_cacache",
+      "kind": "dir",
+      "reason": "npm content cache",
+      "bytes": 7766016
+    },
+    {
+      "path": "/Users/sac/ggen/book/code/examples/canonical-level-five-consumer/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 6569984
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.apple.geod/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 5992448
+    },
+    {
+      "path": "/Users/sac/Library/Application Support/Cursor/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 4681728
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-planner/.vendor-aries/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4595712
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/563bcc26-4ba0-4d47-b150-aa4e6adb293c/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 2572288
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-planner/.vendor-ferroplan/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 2457600
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/fabd0d5b-a494-42b2-9553-35471a908d37/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 1904640
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/dae290bb-d6f4-4d15-bd96-16f366aee84f/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 1703936
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.apple.mobilephone/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 1486848
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/6de8ecac-903b-46e8-a7b9-a9fd81e64328/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 1224704
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/15315378-12d6-4acf-b15f-61659e1089c4/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 1179648
+    },
+    {
+      "path": "/Users/sac/.cache",
+      "kind": "dir",
+      "reason": "generic user cache",
+      "bytes": 1167360
+    },
+    {
+      "path": "/Users/sac/.cache/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 1163264
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/5ec836a6-9600-45e4-b443-7a8e6d651f19/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 1105920
+    },
+    {
+      "path": "/Users/sac/mmdio/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 1101824
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/5c99ffba-9af4-4bcf-8c9b-e53dc717f89b/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 1011712
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/b3692389-20b1-41aa-adee-12101647c97b/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 860160
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/61780bee-64b4-43c5-9b81-255716304a6e/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 856064
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/2dbb1615-e002-45ef-bc89-bb83a97eb59d/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 720896
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/9a5bea8d-dee5-49f0-bb46-7ccd5be60c17/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 696320
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/4725fbe3-ecf8-4c09-949b-7fad0e4f2b37/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 692224
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/34e77a46-7c39-48e3-a51a-651253a0be6c/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 647168
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/f1db8f63-daaf-4945-b73a-1731edfb189d/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 618496
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/70131be3-66e5-4f82-8106-a64aae337c08/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 598016
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/5c310e3c-6056-44e0-9872-88d9ba4df632/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 544768
+    },
+    {
+      "path": "/Users/sac/mfw/.claude/worktrees/agent-af01eacfa614a8ca6/pc-powl2/.lake/packages/procint/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 544768
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/20eaf332-28f6-41a8-b44c-379f187be586/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 540672
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/305d5e7e-431b-425b-ae97-158edb941c6d/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 520192
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/aed2ebd8-e6c9-44a8-821e-ef4be6aac591/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 520192
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/a10e0b40-72c3-401f-be9b-62e201b847af/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 507904
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/ac53112e-7feb-4804-9b42-0b061312747d/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 483328
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/3d3476ef-ff20-41c9-9893-95d3d5c2be36/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 479232
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/4fd33a21-3f37-4fe4-9024-f2bc41ae9a5e/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 446464
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/338fc77b-299c-483f-95f2-c2f1a3be3438/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 409600
+    },
+    {
+      "path": "/Users/sac/wasm4pm/packages/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 409600
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/18f8f4b4-3822-48ef-b65b-158323e12ce8/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 401408
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/03ec8abe-3f41-4e48-8d13-982a1113a0df/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 397312
+    },
+    {
+      "path": "/Users/sac/ferroplan/plugins/chatman-ecosystem/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 389120
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/1c7c2730-59bd-4f0a-9386-d26f9637322d/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 376832
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/3b6a2d10-4ec4-4d5b-a009-9396fcc48ec5/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 364544
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/a14eec92-d270-4f67-b163-daf654fd76b3/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 356352
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/5d7a8744-7804-4f04-b5c1-e0d5cfc425e7/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 352256
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/f210c320-43e2-4a49-a251-c03cfaccc86d/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 352256
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/706d6f35-da32-4e9c-8dd4-46934a413226/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 344064
+    },
+    {
+      "path": "/Users/sac/wasm4pm/wasm4pm/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 323584
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/a080f102-675c-4b75-821f-7403d8e38de2/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 319488
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/7763fc21-45c3-4d21-bf9f-846739099770/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 307200
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/c050a51b-414a-4a7e-9a7c-c8088f9ce03c/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 303104
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/0b306c45-1266-43dd-b02e-c93898888f31/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 294912
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/16346937-e708-46ab-8e21-bf76a389f1e0/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 294912
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/f00bb2ff-f329-4bb8-a1bf-88927f7d89ea/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 282624
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/626e8c5c-d1e7-4399-8bd5-1d926376cb34/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 278528
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/067ff7e7-3a62-46ff-828f-46de232372aa/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 274432
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/e9e1ca93-8844-4421-9486-659e0b26d15d/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 258048
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/f89c9959-bcf5-4030-b1b2-6d77fd1653eb/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 258048
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/3ab107ae-d678-4416-a02c-af3c6d9baeaf/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 253952
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/604e40b7-c612-4c98-ae3d-d69d3d09b8b3/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 253952
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/6f382369-707f-4a62-ad10-d379b9271274/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 241664
+    },
+    {
+      "path": "/Users/sac/Library/Application Support/Windsurf/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 225280
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/15cdd75a-007a-47ae-8a10-598638253e39/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 221184
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/4a4dc276-e937-4e95-8443-61019cf1b552/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 221184
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/13796820-bbe4-4277-adb7-61461adc7ed7/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 204800
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/dspy/docs/docs/tutorials/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 196608
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry_sdk-0.31.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 192512
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/47ba1989-cdfc-4b58-938f-0f8f997be386/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 176128
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/f9c35c4e-5547-4c29-8b81-8d3f5a592e59/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 167936
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/e2e08001-0eab-42cd-9d0f-dfa2f0386090/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 118784
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/d6245deb-7428-4dcf-a3d1-c252df32bb86/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 81920
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/c124cd77-b89e-4c3f-853d-bef4ecd9a974/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 77824
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/e91edb08-bac1-41a9-83e1-76aa816f36f2/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 77824
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/opql/OPQL.egg-info",
+      "kind": "dir",
+      "reason": "python egg-info",
+      "bytes": 77824
+    },
+    {
+      "path": "/tmp/spec-kit/.coverage",
+      "kind": "file",
+      "reason": "python coverage db",
+      "bytes": 69632
+    },
+    {
+      "path": "/Users/sac/ferroplan/plugins/chatman-ecosystem/.pytest_cache",
+      "kind": "dir",
+      "reason": "python pytest cache",
+      "bytes": 53248
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/claude-security/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 49152
+    },
+    {
+      "path": "/Users/sac/wasm4pm/examples/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 49152
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-modernization/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 45056
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/pr-review-toolkit/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 45056
+    },
+    {
+      "path": "/Users/sac/wasm4pm/wasm4pm/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 45056
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/b0ee6b60-f6b1-48ad-9eae-7d55bad1b2b4/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 40960
+    },
+    {
+      "path": "/Users/sac/mmdio/.pytest_cache",
+      "kind": "dir",
+      "reason": "python pytest cache",
+      "bytes": 36864
+    },
+    {
+      "path": "/Users/sac/wasm4pm/apps/wasm4pm/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 36864
+    },
+    {
+      "path": "/tmp/mmdio_venv/lib/python3.14/site-packages/fastapi/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 36864
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/chatman-ecosystem/chatman-ecosystem/0.17.0/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/chatman-ecosystem/chatman-ecosystem/4a01d996f3ca/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/chatman-ecosystem/chatman-ecosystem/56db19fcc300/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/chatman-ecosystem/chatman-ecosystem/9838454146bd/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/chatman-ecosystem/chatman-ecosystem/b90bebff83e8/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/claude-plugins-official/skill-creator/unknown/skills/skill-creator/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/chatman-ecosystem/plugins/chatman-ecosystem/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/skill-creator/skills/skill-creator/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/404302a7-7aff-44cc-8444-b92d4f38b471/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.gemini/antigravity-cli/brain/fbc43a9b-2605-4857-af3c-ddea9dff8e20/.system_generated/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/ferroplan/plugins/chatman-ecosystem/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-planner/.vendor-ferroplan/plugins/chatman-ecosystem/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/dspy/dspy.egg-info",
+      "kind": "dir",
+      "reason": "python egg-info",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pddl-0.2.0/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 28672
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/temp_github_1785307094510_qwyh3t/.claude/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 28672
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/scikit_decide/.pytest_cache",
+      "kind": "dir",
+      "reason": "python pytest cache",
+      "bytes": 28672
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/tpot2/TPOT.egg-info",
+      "kind": "dir",
+      "reason": "python egg-info",
+      "bytes": 28672
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/plugin-dev/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 24576
+    },
+    {
+      "path": "/Users/sac/ggen/crates/praxis-graphlaw/tests/chatman_engine_acceptance/fixtures/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 24576
+    },
+    {
+      "path": "/Users/sac/wasm4pm/packages/cognition/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 24576
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry-0.31.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/.pytest_cache",
+      "kind": "dir",
+      "reason": "python pytest cache",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/agent-sdk-dev/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 16384
+    },
+    {
+      "path": "/Users/sac/bcinr/crates/bcinr-powl/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 16384
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/testcontainers-0.27.3/src/core/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/feature-dev/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/mmdio/.ruff_cache",
+      "kind": "dir",
+      "reason": "python ruff cache",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/wasm4pm/examples/web-dashboard/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/claude-plugins-official/hookify/unknown/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 8192
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/hookify/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 8192
+    },
+    {
+      "path": "/Users/sac/.cursor/extensions/vue.volar-3.3.9-universal/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 8192
+    },
+    {
+      "path": "/Users/sac/.windsurf/extensions/vue.volar-3.3.9-universal/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 8192
+    },
+    {
+      "path": "/tmp/mmdio_venv/lib/python3.14/site-packages/typer/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 8192
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 4096
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-simplifier/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 4096
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.microsoft.teams2.agent/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 4096
+    },
+    {
+      "path": "/Users/sac/bcinr/crates/bcinr-cmca/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4096
+    },
+    {
+      "path": "/Users/sac/bcinr/crates/bcinr-pddl/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4096
+    },
+    {
+      "path": "/Users/sac/ggen/crates/bcinr-pddl/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4096
+    }
+  ],
+  "tool_roots": [],
+  "approval": null
+}

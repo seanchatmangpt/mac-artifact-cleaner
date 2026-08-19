@@ -1,0 +1,21 @@
+{
+  "volume": "/",
+  "requested_bytes": 100000000000,
+  "timestamp_unix": 1785278952,
+  "snapshots_before": [
+    "com.apple.TimeMachine.2026-07-28-140547.local",
+    "com.apple.TimeMachine.2026-07-28-150508.local",
+    "com.apple.os.update-6089F13356F8D483C8F0189F0FF5A85520E1C92B712A1A2D1223B299E42F1F57",
+    "com.apple.os.update-EFD16659CDA0D693B40184083552616A682D0FB9DB0CD12F1DA6F48FD2BAF12443C8298C94995FE518E9832D08CBE5E7",
+    "com.apple.os.update-MSUPrepareUpdate"
+  ],
+  "snapshots_after": [
+    "com.apple.os.update-6089F13356F8D483C8F0189F0FF5A85520E1C92B712A1A2D1223B299E42F1F57",
+    "com.apple.os.update-EFD16659CDA0D693B40184083552616A682D0FB9DB0CD12F1DA6F48FD2BAF12443C8298C94995FE518E9832D08CBE5E7",
+    "com.apple.os.update-MSUPrepareUpdate"
+  ],
+  "snapshots_thinned": [
+    "com.apple.TimeMachine.2026-07-28-140547.local",
+    "com.apple.TimeMachine.2026-07-28-150508.local"
+  ]
+}

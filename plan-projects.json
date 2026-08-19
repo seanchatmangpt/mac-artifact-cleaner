@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "created_unix": 1785792125,
+  "roots": [
+    "/Users/sac/turbo-fieldfare",
+    "/Users/sac/mfact",
+    "/Users/sac/bcinr",
+    "/Users/sac/mfw",
+    "/Users/sac/Library"
+  ],
+  "deps": true,
+  "aggressive": true,
+  "items": [
+    {
+      "path": "/Users/sac/bcinr/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 31050383360
+    },
+    {
+      "path": "/Users/sac/mfw/runtime/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 2215251968
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/r4pm/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 1711235072
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/.build",
+      "kind": "dir",
+      "reason": "swift package build",
+      "bytes": 1641406464
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-rmcp/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 993710080
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/.venv",
+      "kind": "dir",
+      "reason": "python virtualenv",
+      "bytes": 702390272
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/.venv",
+      "kind": "dir",
+      "reason": "python virtualenv",
+      "bytes": 433254400
+    },
+    {
+      "path": "/Users/sac/mfw/.claude/worktrees/agent-abe39001a87a9d491/mfw-auto-select/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 424243200
+    },
+    {
+      "path": "/Users/sac/bcinr/oracles/powl/runner/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 334393344
+    },
+    {
+      "path": "/Users/sac/mfw/tools/mfw-repo-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 325066752
+    },
+    {
+      "path": "/Users/sac/mfw/.claude/worktrees/agent-a662975c290769ed5/tools/mfw-repo-verify/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 246173696
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-planner/.vendor-val/build",
+      "kind": "dir",
+      "reason": "native build dir",
+      "bytes": 143769600
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/scikit_decide/build",
+      "kind": "dir",
+      "reason": "python build output",
+      "bytes": 91287552
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.apple.geod/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 5992448
+    },
+    {
+      "path": "/Users/sac/Library/Application Support/Cursor/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 4681728
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-planner/.vendor-aries/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4595712
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-planner/.vendor-ferroplan/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 2457600
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.apple.mobilephone/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 1486848
+    },
+    {
+      "path": "/Users/sac/mfw/.claude/worktrees/agent-af01eacfa614a8ca6/pc-powl2/.lake/packages/procint/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 544768
+    },
+    {
+      "path": "/Users/sac/Library/Application Support/Windsurf/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 225280
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/dspy/docs/docs/tutorials/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 196608
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/opql/OPQL.egg-info",
+      "kind": "dir",
+      "reason": "python egg-info",
+      "bytes": 77824
+    },
+    {
+      "path": "/Users/sac/mfw/mfw-planner/.vendor-ferroplan/plugins/chatman-ecosystem/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/dspy/dspy.egg-info",
+      "kind": "dir",
+      "reason": "python egg-info",
+      "bytes": 32768
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/scikit_decide/.pytest_cache",
+      "kind": "dir",
+      "reason": "python pytest cache",
+      "bytes": 28672
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/vendors/tpot2/TPOT.egg-info",
+      "kind": "dir",
+      "reason": "python egg-info",
+      "bytes": 28672
+    },
+    {
+      "path": "/Users/sac/turbo-fieldfare/kcj-mustar/.pytest_cache",
+      "kind": "dir",
+      "reason": "python pytest cache",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/bcinr/crates/bcinr-powl/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 16384
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.microsoft.teams2.agent/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 4096
+    },
+    {
+      "path": "/Users/sac/bcinr/crates/bcinr-cmca/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4096
+    },
+    {
+      "path": "/Users/sac/bcinr/crates/bcinr-pddl/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4096
+    }
+  ],
+  "tool_roots": [],
+  "approval": null
+}

@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "created_unix": 1783128987,
+  "roots": [
+    "/Users/sac",
+    "/tmp"
+  ],
+  "deps": true,
+  "aggressive": true,
+  "items": [
+    {
+      "path": "/Users/sac/Library/Caches",
+      "kind": "dir",
+      "reason": "macOS/app user cache",
+      "bytes": 7127470080
+    },
+    {
+      "path": "/Users/sac/.cache",
+      "kind": "dir",
+      "reason": "generic user cache",
+      "bytes": 2446409728
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src",
+      "kind": "dir",
+      "reason": "cargo registry unpacked sources",
+      "bytes": 1925025792
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/cache",
+      "kind": "dir",
+      "reason": "cargo registry cache (.crate)",
+      "bytes": 235204608
+    },
+    {
+      "path": "/Users/sac/.npm/_cacache",
+      "kind": "dir",
+      "reason": "npm content cache",
+      "bytes": 28114944
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.apple.mediaanalysisd/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 7548928
+    },
+    {
+      "path": "/tmp/claude-501/-Users-sac-osx-clnr/8981a591-bf26-4298-b351-adb81dcaad8a/scratchpad/rootcauseB/ws/proj1/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4194304
+    },
+    {
+      "path": "/tmp/claude-501/-Users-sac-osx-clnr/8981a591-bf26-4298-b351-adb81dcaad8a/scratchpad/rootcauseB/ws2/proj1/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4194304
+    },
+    {
+      "path": "/tmp/oclnr_final/proj/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 4194304
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/oxrocksdb-sys-0.5.9/lz4/build",
+      "kind": "dir",
+      "reason": "native build dir",
+      "bytes": 249856
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry_sdk-0.31.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 192512
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap-noun-verb-5.6.2/src/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 81920
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry-0.22.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 24576
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap-noun-verb-26.6.2/docs/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry-0.31.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lsp-max-26.6.24/.claude/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 16384
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/testcontainers-0.27.3/src/core/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 12288
+    }
+  ],
+  "tool_roots": [],
+  "approval": null
+}

@@ -22,7 +22,7 @@ use crate::{
         time::select_oldest_snapshots,
     },
     integration::{
-        fs::{delete_dir_all, physical_dir_size, volume_space},
+        fs::{delete_dir_all, physical_dir_size_parallel, volume_space},
         progress::human_bytes,
         tmutil::{delete_local_snapshot, list_local_snapshots, thin_local_snapshots},
     },
@@ -110,7 +110,7 @@ pub fn handle(mount: String, yes: bool, receipt: Option<PathBuf>) -> anyhow::Res
             eprintln!("    refused (system dir): {}", path.display());
             continue;
         }
-        let size = physical_dir_size(&path);
+        let size = physical_dir_size_parallel(&path);
         if yes {
             match delete_dir_all(&path) {
                 Ok(()) => {

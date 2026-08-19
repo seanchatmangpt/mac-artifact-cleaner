@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "created_unix": 1785772778,
+  "roots": [
+    "/Users/sac",
+    "/tmp"
+  ],
+  "deps": true,
+  "aggressive": false,
+  "items": [
+    {
+      "path": "/Users/sac/Library/Caches",
+      "kind": "dir",
+      "reason": "macOS/app user cache",
+      "bytes": 31211122688
+    },
+    {
+      "path": "/Users/sac/anti-llm-cheat-lsp/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 5437046784
+    },
+    {
+      "path": "/Users/sac/dteam/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 3769798656
+    },
+    {
+      "path": "/Users/sac/unibit/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 3302084608
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src",
+      "kind": "dir",
+      "reason": "cargo registry unpacked sources",
+      "bytes": 3271389184
+    },
+    {
+      "path": "/Users/sac/.cache",
+      "kind": "dir",
+      "reason": "generic user cache",
+      "bytes": 2686754816
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/agent-a83a540ad4d487dda/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 840732672
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/cache",
+      "kind": "dir",
+      "reason": "cargo registry cache (.crate)",
+      "bytes": 472821760
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/wf_7a8d0628-158-4/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 272588800
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/agent-a35a85aec63695f13/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 150347776
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/wf_7a8d0628-158-3/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 150347776
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/agent-ac65ac5e90a63c54c/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 150335488
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/wf_8bf87291-515-2/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 119267328
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/agent-a7eb75875dfb2d24c/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 119132160
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/wf_8bf87291-515-3/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 105914368
+    },
+    {
+      "path": "/Users/sac/.npm/_cacache",
+      "kind": "dir",
+      "reason": "npm content cache",
+      "bytes": 98955264
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/wf_7a8d0628-158-1/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 81682432
+    },
+    {
+      "path": "/Users/sac/.windsurf/extensions/svelte.svelte-vscode-110.3.0-universal/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 51937280
+    },
+    {
+      "path": "/Users/sac/unibit/xtask/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 39260160
+    },
+    {
+      "path": "/Users/sac/bcinr/.claude/worktrees/wf_8bf87291-515-1/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 21237760
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.apple.mediaanalysisd/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 7548928
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pxfm-0.1.29/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 708608
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry_sdk-0.31.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 192512
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry_sdk-0.22.1/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 40960
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry-0.22.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 24576
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry-0.31.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry-proto-0.5.0/src/proto/opentelemetry-proto/opentelemetry/proto/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry_sdk-0.22.1/src/testing/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/testcontainers-0.27.3/src/core/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry-proto-0.5.0/src/proto/opentelemetry-proto/opentelemetry/proto/collector/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 8192
+    },
+    {
+      "path": "/Users/sac/.windsurf/extensions/vue.volar-3.3.8-universal/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 8192
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry_sdk-0.22.1/src/export/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 4096
+    }
+  ],
+  "tool_roots": [],
+  "approval": null
+}

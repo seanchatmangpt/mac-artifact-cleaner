@@ -1,0 +1,272 @@
+{
+  "version": 1,
+  "created_unix": 1785278066,
+  "roots": [
+    "/Users/sac",
+    "/tmp"
+  ],
+  "deps": true,
+  "aggressive": true,
+  "items": [
+    {
+      "path": "/Users/sac/dteam/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 6251188224
+    },
+    {
+      "path": "/Users/sac/mcpp/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 2116362240
+    },
+    {
+      "path": "/Users/sac/chicago-tdd-tools/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 997404672
+    },
+    {
+      "path": "/Users/sac/.cache/tmp/chicago-claims-patch-overlay-7924-1784352732112566000-3/observatory-ui/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 698159104
+    },
+    {
+      "path": "/tmp/claude-501/-Users-sac-bcinr/6a0392af-2f1f-42cf-8fae-90e660d120bc/scratchpad/r6-before/tools/observatory-ui/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 652845056
+    },
+    {
+      "path": "/Users/sac/.cache/tmp/chicago-claims-patch-overlay-7924-1784352732112566000-3/tools/observatory-ui/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 584142848
+    },
+    {
+      "path": "/Users/sac/.npm/_npx/668c188756b835f3/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 422412288
+    },
+    {
+      "path": "/Users/sac/Library/Containers/com.apple.mediaanalysisd/Data/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 7548928
+    },
+    {
+      "path": "/Users/sac/.claude/jobs/8089721d/tmp",
+      "kind": "dir",
+      "reason": "ai temp artifacts",
+      "bytes": 2383872
+    },
+    {
+      "path": "/Users/sac/unibit/target",
+      "kind": "dir",
+      "reason": "rust target",
+      "bytes": 1671168
+    },
+    {
+      "path": "/Users/sac/.npm/_npx/1415fee72ff6294b/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 1642496
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap-noun-verb-26.6.2/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 880640
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pxfm-0.1.29/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 708608
+    },
+    {
+      "path": "/Users/sac/.cache/tmp/chicago-claims-patch-overlay-7924-1784352732112566000-3/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 454656
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/oxrocksdb-sys-0.4.11/lz4/build",
+      "kind": "dir",
+      "reason": "native build dir",
+      "bytes": 249856
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/oxrocksdb-sys-0.5.9/lz4/build",
+      "kind": "dir",
+      "reason": "native build dir",
+      "bytes": 249856
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry_sdk-0.31.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 192512
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap-noun-verb-5.6.2/src/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 81920
+    },
+    {
+      "path": "/Users/sac/wasm4pm/apps/playground-web/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 81920
+    },
+    {
+      "path": "/Users/sac/.cache/tmp/chicago-claims-patch-overlay-7924-1784352732112566000-3/.claude/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 61440
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pddl-0.2.0/.agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 28672
+    },
+    {
+      "path": "/Users/sac/wasm4pm/tests/proof/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 28672
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap-noun-verb-26.6.2/docs/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/opentelemetry-0.31.0/src/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/wasm4pm/lab/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/wasm4pm/playground/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 20480
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lsp-max-26.6.24/.claude/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 16384
+    },
+    {
+      "path": "/Users/sac/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/testcontainers-0.27.3/src/core/logs",
+      "kind": "dir",
+      "reason": "ai tool logs",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/wasm4pm/examples/breeds-ts-consumer/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/wasm4pm/examples/web-dashboard/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/wasm4pm/examples/zoe-la/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/wasm4pm/tests/archive/node_modules",
+      "kind": "dir",
+      "reason": "node dependencies",
+      "bytes": 12288
+    },
+    {
+      "path": "/Users/sac/.claude/plugins/cache/claude-plugins-official/hookify/ded0c09c1ff6/agents",
+      "kind": "dir",
+      "reason": "ai agents dir",
+      "bytes": 8192
+    },
+    {
+      "path": "/Users/sac/mfact/procint/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 13626408960
+    },
+    {
+      "path": "/Users/sac/praxis/tools/paper-factory/lean-lake/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 8198963200
+    },
+    {
+      "path": "/Users/sac/POWL/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 7923892224
+    },
+    {
+      "path": "/Users/sac/VAL/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 7854194688
+    },
+    {
+      "path": "/Users/sac/mfact/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 7631831040
+    },
+    {
+      "path": "/Users/sac/mfact/research-papers/_archive/hyperdimensional_cognitive/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 495984640
+    },
+    {
+      "path": "/Users/sac/mfact/research-papers/_archive/signal_criticality/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 490008576
+    },
+    {
+      "path": "/Users/sac/mfact/research-papers/_archive/mfsca/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 399081472
+    },
+    {
+      "path": "/Users/sac/mfact/mfact/.lake",
+      "kind": "dir",
+      "reason": "lean .lake build cache",
+      "bytes": 103497728
+    }
+  ],
+  "tool_roots": [],
+  "approval": {
+    "approver": "sac",
+    "approval_reason": "cleanup rust target + lean .lake caches, mfw/bcinr/ggen excluded",
+    "approved_at_unix": 1785278783,
+    "plan_hash": "3812c087ad93504eaa53a4203b9a0ef7b16ace4d42d9a21a8b86ef2165d79a5a",
+    "hmac_signature": "7820cc3a5802335f18dcafd18026ed8c2c763e0beed5079ae9e653893dfbf0fe"
+  }
+}
