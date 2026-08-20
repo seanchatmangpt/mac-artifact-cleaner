@@ -36,6 +36,7 @@
 use std::path::PathBuf;
 
 use osx_clnr::domain::{
+    dcm::Reversibility,
     delete::require_plan_approved,
     plan::{DeletionPlan, PlanApproval, PlanItem, PlanItemKind},
 };
@@ -94,6 +95,7 @@ fn plan_in_state(state: PlanApprovalState) -> DeletionPlan {
             kind: PlanItemKind::Dir,
             reason: "test fixture".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         }],
         vec![],
     );
@@ -122,6 +124,7 @@ fn plan_in_state(state: PlanApprovalState) -> DeletionPlan {
                 kind: PlanItemKind::Dir,
                 reason: "injected after approval".to_string(),
                 bytes: 0,
+                reversibility: Reversibility::Unknown,
             });
             plan
         }

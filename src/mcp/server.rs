@@ -1525,6 +1525,33 @@ impl OsxClnrMcpServer {
                     }
                 }
             }
+
+            // DCM §3/§5: an Irreversible or Unknown (fenced) classification
+            // is surfaced as a safety issue rather than silently pruned or
+            // silently treated as safe — see `domain::dcm`.
+            match item.reversibility {
+                crate::domain::dcm::Reversibility::Irreversible => {
+                    issues.push(json!({
+                        "severity": "critical",
+                        "kind": "irreversible_item",
+                        "path": item.path.to_string_lossy(),
+                        "message": "Item classified irreversible (no known regeneration or \
+                                     external-recovery path) — review carefully before approval"
+                    }));
+                }
+                crate::domain::dcm::Reversibility::Unknown => {
+                    issues.push(json!({
+                        "severity": "info",
+                        "kind": "unknown_reversibility",
+                        "path": item.path.to_string_lossy(),
+                        "message": "Reversibility could not be classified from the plan-build \
+                                     evidence (kind + reason) — this is a fence, not a safety \
+                                     clearance; verify recoverability manually"
+                    }));
+                }
+                crate::domain::dcm::Reversibility::Reversible
+                | crate::domain::dcm::Reversibility::Compensatable => {}
+            }
         }
 
         issues

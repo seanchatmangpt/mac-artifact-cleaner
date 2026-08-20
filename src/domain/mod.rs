@@ -4,6 +4,7 @@ pub mod affidavit_integration;
 pub mod artifact;
 pub mod audit;
 pub mod crypto;
+pub mod dcm;
 pub mod delete;
 pub mod doctor;
 pub mod github;

@@ -10,6 +10,7 @@ use crate::{
     domain::{
         artifact::{ArgsSnapshot, Candidate},
         audit::Stats,
+        dcm::{classify_reversibility, Reversibility},
         plan::{DeletionPlan, PlanItem, PlanItemKind},
         tool_roots::build_tool_root_defs,
     },
@@ -166,7 +167,14 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                         | PlanItemKind::GithubReleaseAsset => 0,
                     };
 
-                    PlanItem { path: c.path.clone(), kind, reason: c.reason.clone(), bytes }
+                    let reversibility = classify_reversibility(kind, &c.reason);
+                    PlanItem {
+                        path: c.path.clone(),
+                        kind,
+                        reason: c.reason.clone(),
+                        bytes,
+                        reversibility,
+                    }
                 })
                 .collect();
 
@@ -240,15 +248,37 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             } else {
                 for item in &plan_data.items {
                     println!(
-                        "  • [{:?}] {:>10}  {} - {}",
+                        "  • [{:?}] {:>10}  ({}) {} - {}",
                         item.kind,
                         human_bytes(item.bytes),
+                        item.reversibility.label(),
                         item.path.display(),
                         item.reason
                     );
                 }
                 let total: u64 = plan_data.items.iter().map(|i| i.bytes).sum();
                 println!("  ── Estimated reclaim: {}", human_bytes(total));
+
+                // DCM §5 ("silent pruning is forbidden"): unknown/irreversible
+                // items are never dropped from the plan, but they are surfaced
+                // explicitly here so a reviewer sees them before approving —
+                // per DCM §3, `Unknown` is a fence, not evidence of safety.
+                let irreversible = plan_data
+                    .items
+                    .iter()
+                    .filter(|i| i.reversibility == Reversibility::Irreversible)
+                    .count();
+                let unknown = plan_data
+                    .items
+                    .iter()
+                    .filter(|i| i.reversibility == Reversibility::Unknown)
+                    .count();
+                if irreversible > 0 || unknown > 0 {
+                    println!(
+                        "  ⚠ Reversibility review: {} irreversible, {} unknown (unclassifiable) — verify before approving",
+                        irreversible, unknown
+                    );
+                }
             }
             println!("==================================================");
         }

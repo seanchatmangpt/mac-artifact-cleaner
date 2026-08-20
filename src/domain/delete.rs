@@ -11,6 +11,7 @@ use crate::domain::{artifact::is_macos_os_dir, plan::DeletionPlan};
 /// ```
 /// use osx_clnr::domain::delete::validate_plan_item;
 /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
 /// use std::path::{Path, PathBuf};
 ///
 /// let plan = DeletionPlan::new(
@@ -22,6 +23,7 @@ use crate::domain::{artifact::is_macos_os_dir, plan::DeletionPlan};
 ///         kind: PlanItemKind::Dir,
 ///         reason: "rust target".to_string(),
 ///         bytes: 0,
+///         reversibility: Reversibility::Unknown,
 ///     }],
 ///     vec![],
 /// );
@@ -42,6 +44,7 @@ use crate::domain::{artifact::is_macos_os_dir, plan::DeletionPlan};
 ///         kind: PlanItemKind::Dir,
 ///         reason: "system directory".to_string(),
 ///         bytes: 0,
+///         reversibility: Reversibility::Unknown,
 ///     }],
 ///     vec![],
 /// );
@@ -61,6 +64,7 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 /// ```
 /// use osx_clnr::domain::delete::{DeletionPlanAdjudicator, PlanSafetyWitness};
 /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
 /// use std::path::PathBuf;
 /// use wasm4pm_compat::admission::Admit;
 /// use wasm4pm_compat::evidence::Evidence;
@@ -75,6 +79,7 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 ///         kind: PlanItemKind::Dir,
 ///         reason: "rust target".to_string(),
 ///         bytes: 0,
+///         reversibility: Reversibility::Unknown,
 ///     }],
 ///     vec![],
 /// );
@@ -92,6 +97,7 @@ pub fn validate_plan_item(item_path: &Path, plan: &DeletionPlan) -> bool {
 ///         kind: PlanItemKind::Dir,
 ///         reason: "system directory".to_string(),
 ///         bytes: 0,
+///         reversibility: Reversibility::Unknown,
 ///     }],
 ///     vec![],
 /// );
@@ -167,6 +173,7 @@ impl Admit for DeletionPlanAdjudicator {
 /// ```
 /// use osx_clnr::domain::delete::require_plan_approved;
 /// use osx_clnr::domain::plan::{DeletionPlan, PlanApproval, PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
 /// use std::path::PathBuf;
 ///
 /// let secret = b"the-real-secret";
@@ -180,6 +187,7 @@ impl Admit for DeletionPlanAdjudicator {
 ///         kind: PlanItemKind::Dir,
 ///         reason: "rust target".to_string(),
 ///         bytes: 0,
+///         reversibility: Reversibility::Unknown,
 ///     }],
 ///     vec![],
 /// );

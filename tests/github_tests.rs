@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use osx_clnr::{
     domain::{
+        dcm::Reversibility,
         github::GithubTarget,
         plan::{DeletionPlan, PlanItem, PlanItemKind},
         receipt::{DeletionReceipt, DeletionResult, DeletionStatus},
@@ -517,48 +518,56 @@ fn test_github_deletions_execution() {
             kind: PlanItemKind::GithubRepo,
             reason: "Empty repository".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://run/my-org/active-repo/111"),
             kind: PlanItemKind::GithubRun,
             reason: "Stale workflow run".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://branch/my-org/active-repo/feature/merged"),
             kind: PlanItemKind::GithubBranch,
             reason: "Merged branch".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://release/my-org/active-repo/v1.0.0-draft"),
             kind: PlanItemKind::GithubRelease,
             reason: "Draft release".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://cache/my-org/active-repo/333/stale-cache"),
             kind: PlanItemKind::GithubCache,
             reason: "Stale cache".to_string(),
             bytes: 5000,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://issue/my-org/active-repo/12"),
             kind: PlanItemKind::GithubIssue,
             reason: "Stale issue".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://pr/my-org/active-repo/24"),
             kind: PlanItemKind::GithubPr,
             reason: "Stale PR".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://release-asset/my-org/active-repo/555/large-asset.zip"),
             kind: PlanItemKind::GithubReleaseAsset,
             reason: "Large asset".to_string(),
             bytes: 10485760,
+            reversibility: Reversibility::Unknown,
         },
     ];
 
@@ -964,6 +973,7 @@ fn test_github_confirmation_and_refused() {
         kind: PlanItemKind::GithubRepo,
         reason: "Empty repository".to_string(),
         bytes: 0,
+        reversibility: Reversibility::Unknown,
     }];
 
     let plan = DeletionPlan::new(vec![PathBuf::from("github://")], false, false, items, vec![]);
@@ -1103,48 +1113,56 @@ fn test_github_execute_delete_plan_helper_success() {
             kind: PlanItemKind::GithubRepo,
             reason: "Empty repository".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://run/my-org/active-repo/111"),
             kind: PlanItemKind::GithubRun,
             reason: "Stale workflow run".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://branch/my-org/active-repo/feature/merged"),
             kind: PlanItemKind::GithubBranch,
             reason: "Merged branch".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://release/my-org/active-repo/v1.0.0-draft"),
             kind: PlanItemKind::GithubRelease,
             reason: "Draft release".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://cache/my-org/active-repo/333/stale-cache"),
             kind: PlanItemKind::GithubCache,
             reason: "Stale cache".to_string(),
             bytes: 5000,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://issue/my-org/active-repo/12"),
             kind: PlanItemKind::GithubIssue,
             reason: "Stale issue".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://pr/my-org/active-repo/24"),
             kind: PlanItemKind::GithubPr,
             reason: "Stale PR".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         PlanItem {
             path: PathBuf::from("github://release-asset/my-org/active-repo/555/large-asset.zip"),
             kind: PlanItemKind::GithubReleaseAsset,
             reason: "Large asset".to_string(),
             bytes: 10485760,
+            reversibility: Reversibility::Unknown,
         },
     ];
 
@@ -1206,6 +1224,7 @@ fn test_github_execute_delete_plan_helper_failures() {
             kind: PlanItemKind::GithubRepo,
             reason: "Failure repo".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         // Target 2: Not found branch
         PlanItem {
@@ -1213,6 +1232,7 @@ fn test_github_execute_delete_plan_helper_failures() {
             kind: PlanItemKind::GithubBranch,
             reason: "Missing branch".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         // Target 3: 404 issue
         PlanItem {
@@ -1220,6 +1240,7 @@ fn test_github_execute_delete_plan_helper_failures() {
             kind: PlanItemKind::GithubIssue,
             reason: "Missing issue".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
         // Target 4: Non-GitHub URI (Should be SkippedMissing)
         PlanItem {
@@ -1227,6 +1248,7 @@ fn test_github_execute_delete_plan_helper_failures() {
             kind: PlanItemKind::Dir,
             reason: "Local file".to_string(),
             bytes: 100,
+            reversibility: Reversibility::Unknown,
         },
         // Target 5: Invalid GitHub URI (Should be Failed)
         PlanItem {
@@ -1234,6 +1256,7 @@ fn test_github_execute_delete_plan_helper_failures() {
             kind: PlanItemKind::GithubRepo,
             reason: "Invalid URI".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         },
     ];
 

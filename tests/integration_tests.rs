@@ -12,6 +12,7 @@ use osx_clnr::{
             Candidate,
         },
         audit::Stats,
+        dcm::Reversibility,
         delete::{validate_plan_item, DeletionPlanAdjudicator, PlanSafetyWitness},
         plan::{DeletionPlan, PlanItem, PlanItemKind},
         receipt::{DeletionReceipt, DeletionStatus},
@@ -64,6 +65,7 @@ fn test_plan_bound_deletion_validation() {
             kind: PlanItemKind::Dir,
             reason: "rust target".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         }],
         vec![],
     );
@@ -81,6 +83,7 @@ fn test_plan_bound_deletion_validation() {
         kind: PlanItemKind::Dir,
         reason: "fake target".to_string(),
         bytes: 0,
+        reversibility: Reversibility::Unknown,
     });
     assert!(DeletionPlanAdjudicator::admit(Evidence::<_, Raw, PlanSafetyWitness>::raw(bad_plan))
         .is_err());
@@ -151,6 +154,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
             kind,
             reason: c.reason.clone(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         });
     }
 
@@ -363,6 +367,7 @@ fn test_receipt_verification_and_plan_correlation() {
     use std::fs;
 
     use osx_clnr::domain::{
+        dcm::Reversibility,
         plan::{DeletionPlan, PlanItem, PlanItemKind},
         receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType},
     };
@@ -380,6 +385,7 @@ fn test_receipt_verification_and_plan_correlation() {
             kind: PlanItemKind::File,
             reason: "temp file".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         }],
         vec![],
     );
@@ -546,6 +552,7 @@ fn test_back_compat_none_samples_no_mismatch() {
 #[test]
 fn test_bytes_freed_mismatch_plan_bound_deleted_results() {
     use osx_clnr::domain::{
+        dcm::Reversibility,
         plan::{DeletionPlan, PlanItem, PlanItemKind},
         receipt::{DeletionReceipt, DeletionResult, DeletionStatus, IssueType},
     };
@@ -567,12 +574,14 @@ fn test_bytes_freed_mismatch_plan_bound_deleted_results() {
                 kind: PlanItemKind::File,
                 reason: "big artifact".to_string(),
                 bytes: 2_000_000_000,
+                reversibility: Reversibility::Unknown,
             },
             PlanItem {
                 path: p2.clone(),
                 kind: PlanItemKind::File,
                 reason: "big artifact".to_string(),
                 bytes: 1_000_000_000,
+                reversibility: Reversibility::Unknown,
             },
         ],
         vec![],
@@ -716,6 +725,7 @@ fn test_exclusion_planning_and_application() {
         kind: PlanItemKind::Dir,
         reason: "Mock rust target".to_string(),
         bytes: 0,
+        reversibility: Reversibility::Unknown,
     }];
 
     let tool_roots = vec![ToolRootReport {
@@ -839,6 +849,7 @@ fn test_verify_invalid_timestamps() {
 #[test]
 fn test_verify_missing_plan_item() {
     use osx_clnr::domain::{
+        dcm::Reversibility,
         plan::{DeletionPlan, PlanItem, PlanItemKind},
         receipt::{DeletionReceipt, IssueType},
     };
@@ -854,6 +865,7 @@ fn test_verify_missing_plan_item() {
             kind: PlanItemKind::Dir,
             reason: "rust target".to_string(),
             bytes: 0,
+            reversibility: Reversibility::Unknown,
         }],
         vec![],
     );

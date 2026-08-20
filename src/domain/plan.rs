@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{
     artifact::Candidate,
     crypto::{hash_bytes, hmac_sha256_hex, verify_hmac_sha256},
+    dcm::Reversibility,
     tool_roots::ToolRootReport,
 };
 
@@ -76,6 +77,12 @@ pub struct PlanItem {
     /// written before this field was added loadable.
     #[serde(default)]
     pub bytes: u64,
+    /// DCM reversibility classification (see [`crate::domain::dcm`]).
+    /// `#[serde(default)]` (which resolves to [`Reversibility::Unknown`],
+    /// the fence variant) keeps plans written before this field existed
+    /// loadable without silently upgrading their items to "reversible".
+    #[serde(default)]
+    pub reversibility: Reversibility,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,6 +107,7 @@ impl DeletionPlan {
     ///
     /// ```
     /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    /// use osx_clnr::domain::dcm::Reversibility;
     /// use std::path::PathBuf;
     ///
     /// let items = vec![PlanItem {
@@ -107,6 +115,7 @@ impl DeletionPlan {
     ///     kind: PlanItemKind::Dir,
     ///     reason: "rust target".to_string(),
     ///     bytes: 0,
+    ///     reversibility: Reversibility::Unknown,
     /// }];
     /// let plan = DeletionPlan::new(
     ///     vec![PathBuf::from("/Users/user")],
@@ -150,6 +159,7 @@ impl DeletionPlan {
     ///
     /// ```
     /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    /// use osx_clnr::domain::dcm::Reversibility;
     /// use std::path::PathBuf;
     ///
     /// let plan = DeletionPlan::new(
@@ -161,6 +171,7 @@ impl DeletionPlan {
     ///         kind: PlanItemKind::Dir,
     ///         reason: "rust target".to_string(),
     ///         bytes: 0,
+    ///         reversibility: Reversibility::Unknown,
     ///     }],
     ///     vec![],
     /// );
@@ -175,6 +186,7 @@ impl DeletionPlan {
     ///     kind: PlanItemKind::Dir,
     ///     reason: "injected".to_string(),
     ///     bytes: 0,
+    ///     reversibility: Reversibility::Unknown,
     /// });
     /// assert_ne!(plan.content_hash(), tampered.content_hash());
     /// ```
@@ -195,6 +207,7 @@ impl DeletionPlan {
     ///
     /// ```
     /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind};
+    /// use osx_clnr::domain::dcm::Reversibility;
     /// use std::path::PathBuf;
     ///
     /// let plan = DeletionPlan::new(
@@ -206,6 +219,7 @@ impl DeletionPlan {
     ///         kind: PlanItemKind::Dir,
     ///         reason: "rust target".to_string(),
     ///         bytes: 0,
+    ///         reversibility: Reversibility::Unknown,
     ///     }],
     ///     vec![],
     /// );
@@ -255,6 +269,7 @@ impl DeletionPlan {
     ///
     /// ```
     /// use osx_clnr::domain::plan::{DeletionPlan, PlanApproval, PlanItem, PlanItemKind};
+    /// use osx_clnr::domain::dcm::Reversibility;
     /// use std::path::PathBuf;
     ///
     /// let secret = b"the-real-secret";
@@ -268,6 +283,7 @@ impl DeletionPlan {
     ///         kind: PlanItemKind::Dir,
     ///         reason: "rust target".to_string(),
     ///         bytes: 0,
+    ///         reversibility: Reversibility::Unknown,
     ///     }],
     ///     vec![],
     /// );
@@ -343,6 +359,7 @@ impl DeletionPlan {
 /// ```
 /// use osx_clnr::domain::plan::{DeletionPlan, PlanItem, PlanItemKind, extract_exclusion_candidates};
 /// use osx_clnr::domain::tool_roots::ToolRootReport;
+/// use osx_clnr::domain::dcm::Reversibility;
 /// use std::path::PathBuf;
 ///
 /// let items = vec![
@@ -351,12 +368,14 @@ impl DeletionPlan {
 ///         kind: PlanItemKind::Dir,
 ///         reason: "rust target".to_string(),
 ///         bytes: 0,
+///         reversibility: Reversibility::Unknown,
 ///     },
 ///     PlanItem {
 ///         path: PathBuf::from("/Users/user/dev/project/src/main.rs"),
 ///         kind: PlanItemKind::File,
 ///         reason: "source file".to_string(),
 ///         bytes: 0,
+///         reversibility: Reversibility::Unknown,
 ///     },
 /// ];
 /// let tool_roots = vec![

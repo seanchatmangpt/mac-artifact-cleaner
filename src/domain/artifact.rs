@@ -830,7 +830,7 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
 ///
 /// let root = Path::new("/project");
 /// let project = ProjectKind { names: vec!["rust"] };
-/// let args = ArgsSnapshot { deps: true, aggressive: true, verbose: false, tool_roots: false, ignore_recent_hours: 1 };
+/// let args = ArgsSnapshot { deps: true, aggressive: true, verbose: false, tool_roots: false, ignore_recent_hours: 1, all_filesystems: false };
 ///
 /// // Positive case: "target" dir in snapshot → candidate.
 /// let snap = DirSnapshot {
@@ -868,7 +868,7 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
 /// // Refusal case: Source is never nominated, aggressive or not.
 /// assert!(!unreal_candidates.iter().any(|c| c.path.ends_with("Source")));
 ///
-/// let mild_args = ArgsSnapshot { deps: true, aggressive: false, verbose: false, tool_roots: false, ignore_recent_hours: 1 };
+/// let mild_args = ArgsSnapshot { deps: true, aggressive: false, verbose: false, tool_roots: false, ignore_recent_hours: 1, all_filesystems: false };
 /// let mild_candidates = artifact_candidates_from_snapshot(root, &unreal_project, &mild_args, &unreal_snap);
 /// assert!(!mild_candidates.iter().any(|c| c.path.ends_with("Binaries")));
 /// ```

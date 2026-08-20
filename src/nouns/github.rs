@@ -11,6 +11,7 @@ use wasm4pm_compat::{admission::Admit, evidence::Evidence, state::Raw};
 
 use crate::{
     domain::{
+        dcm::Reversibility,
         delete::{DeletionPlanAdjudicator, PlanSafetyWitness},
         github::{
             is_branch_merged, is_cache_stale, is_issue_stale, is_pr_stale,
@@ -542,6 +543,7 @@ pub fn discover_candidates(
                 kind: PlanItemKind::GithubRepo,
                 reason,
                 bytes: 0,
+                reversibility: Reversibility::Compensatable,
             });
             // If deleting the repo itself, we don't need to plan deleting its components
             continue;
@@ -565,6 +567,7 @@ pub fn discover_candidates(
                                 run_days, run.number
                             ),
                             bytes: 0,
+                            reversibility: Reversibility::Compensatable,
                         });
                     }
                 }
@@ -614,6 +617,7 @@ pub fn discover_candidates(
                                         default_branch
                                     ),
                                     bytes: 0,
+                                    reversibility: Reversibility::Compensatable,
                                 });
                             }
                         }
@@ -651,6 +655,7 @@ pub fn discover_candidates(
                             kind: PlanItemKind::GithubRelease,
                             reason,
                             bytes: 0,
+                            reversibility: Reversibility::Compensatable,
                         });
                     } else {
                         // Release is not stale/draft, scan its assets!
@@ -672,6 +677,7 @@ pub fn discover_candidates(
                                         asset.name, asset_size_mb
                                     ),
                                     bytes: asset.size,
+                                    reversibility: Reversibility::Compensatable,
                                 });
                             }
                         }
@@ -699,6 +705,7 @@ pub fn discover_candidates(
                             kind: PlanItemKind::GithubCache,
                             reason: format!("Stale cache (inactive for > {} days)", cache_days),
                             bytes: cache.size_in_bytes,
+                            reversibility: Reversibility::Compensatable,
                         });
                     }
                 }
@@ -723,6 +730,7 @@ pub fn discover_candidates(
                             kind: PlanItemKind::GithubIssue,
                             reason: format!("Stale issue (inactive for > {} days)", issue_days),
                             bytes: 0,
+                            reversibility: Reversibility::Compensatable,
                         });
                     }
                 }
@@ -747,6 +755,7 @@ pub fn discover_candidates(
                             kind: PlanItemKind::GithubPr,
                             reason: format!("Stale pull request (inactive for > {} days)", pr_days),
                             bytes: 0,
+                            reversibility: Reversibility::Compensatable,
                         });
                     }
                 }
