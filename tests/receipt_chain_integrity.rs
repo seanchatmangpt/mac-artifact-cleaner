@@ -65,7 +65,7 @@ fn write_receipt_and_affidavit(dir: &Path, state: AffidavitState) -> std::path::
     let receipt_path = dir.join("deletion-receipt.jsonocel");
     std::fs::write(&receipt_path, serde_json::to_vec_pretty(&receipt).unwrap()).unwrap();
 
-    let sealed = build_deletion_affidavit(&receipt);
+    let sealed = build_deletion_affidavit(&receipt).unwrap();
     let mut bytes = serialize_receipt(&sealed);
 
     if let AffidavitState::Tampered = state {

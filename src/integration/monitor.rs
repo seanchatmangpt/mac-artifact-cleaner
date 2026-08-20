@@ -38,8 +38,22 @@ impl FsMonitor {
                                         .unwrap_or_default()
                                         as u64;
 
+                                    // Distinguish "not applicable" (not a
+                                    // regular file) from "hashing failed" —
+                                    // both used to collapse into the same
+                                    // `None`, hiding a real permission/I-O
+                                    // error behind "no hash needed."
                                     let hash = if meta.is_file() {
-                                        generate_manifest(&path).ok()
+                                        match generate_manifest(&path) {
+                                            Ok(h) => Some(h),
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "warning: fs monitor could not hash {}: {e}",
+                                                    path.display()
+                                                );
+                                                None
+                                            }
+                                        }
                                     } else {
                                         None
                                     };
@@ -53,13 +67,30 @@ impl FsMonitor {
                                         last_seen: system_time_to_unix(SystemTime::now()) as u64,
                                     };
 
-                                    let _ = db.insert_artifact(&artifact);
+                                    // `FsMonitor::watch`'s callback runs in a
+                                    // background thread with no channel back
+                                    // to a caller — a sled write failure
+                                    // (disk full, corruption, lock
+                                    // contention) can't be propagated
+                                    // synchronously, but it must not vanish
+                                    // silently either.
+                                    if let Err(e) = db.insert_artifact(&artifact) {
+                                        eprintln!(
+                                            "warning: fs monitor could not index {}: {e}",
+                                            path.display()
+                                        );
+                                    }
                                 }
                             }
                         }
                         EventKind::Remove(_) => {
                             for path in event.paths {
-                                let _ = db.remove_artifact(&path);
+                                if let Err(e) = db.remove_artifact(&path) {
+                                    eprintln!(
+                                        "warning: fs monitor could not remove {} from index: {e}",
+                                        path.display()
+                                    );
+                                }
                             }
                         }
                         _ => {}

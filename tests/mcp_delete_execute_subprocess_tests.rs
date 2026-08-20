@@ -75,7 +75,7 @@ fn run_delete(tmp: &Path, confirm: bool) -> Vec<String> {
     let receipt_file = tmp.join("deletion-receipt.json");
 
     let result = runner
-        .delete_run(&workspace, &plan_file, &receipt_file, confirm)
+        .delete_run(&workspace, &plan_file, &receipt_file, confirm, None, 30)
         .expect("delete_run should not itself return an ErrorResponse for a working stub");
 
     assert!(

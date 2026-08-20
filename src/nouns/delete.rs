@@ -35,12 +35,16 @@ pub enum DeleteAction {
         /// Actually delete; default is a dry-run preview
         #[arg(long)]
         yes: bool,
+        /// Bound concurrent deletion to this many threads (default: rayon's
+        /// global pool width, typically the number of CPUs).
+        #[arg(long)]
+        max_concurrent: Option<usize>,
     },
 }
 
 pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
     match action {
-        DeleteAction::Execute { plan: plan_path, receipt: receipt_path, yes } => {
+        DeleteAction::Execute { plan: plan_path, receipt: receipt_path, yes, max_concurrent } => {
             let content = std::fs::read_to_string(&plan_path).map_err(|e| {
                 anyhow::anyhow!(
                     "Failed to read plan file {}: {}\n\nSuggestions:\n  - Check that {} was created by `oclnr plan build`\n  - Re-run `oclnr plan build` to regenerate the plan\n  - Check file permissions on {}",
@@ -129,96 +133,109 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             );
             pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-            // Concurrent deletion using Rayon
-            let results: Vec<DeletionResult> = plan
-                .items
-                .par_iter()
-                .map(|item| {
-                    pb.set_message(format!("Deleting {} ...", item.path.display()));
+            // Concurrent deletion using Rayon, optionally bounded to
+            // `max_concurrent` threads. Building a scoped pool and calling
+            // `.install()` confines this deletion's parallelism without
+            // touching rayon's global pool (which other calls in-process
+            // may still be using with its default width).
+            let delete_body = || -> Vec<DeletionResult> {
+                plan.items
+                    .par_iter()
+                    .map(|item| {
+                        pb.set_message(format!("Deleting {} ...", item.path.display()));
 
-                    let res = if !item.path.exists() {
-                        DeletionResult {
-                            path: item.path.clone(),
-                            status: DeletionStatus::SkippedMissing,
-                            error: None,
-                            blake3_hash: None,
-                            bytes_freed: 0,
-                        }
-                    } else {
-                        // Delegate all filesystem mutations to the integration layer.
-                        // On success, the planned physical size is what was reclaimed.
-                        match item.kind {
-                            PlanItemKind::File => {
-                                // Generate cryptographic manifest before deletion. A
-                                // failure here (permission error, race with another
-                                // process, unreadable file) must not be silently
-                                // conflated with "hashing was never attempted" — the
-                                // receipt's evidentiary value depends on knowing why
-                                // a hash is missing.
-                                let (hash, hash_err) = match generate_manifest(&item.path) {
-                                    Ok(h) => (Some(h), None),
-                                    Err(e) => (None, Some(format!("hash failed: {}", e))),
-                                };
+                        let res = if !item.path.exists() {
+                            DeletionResult {
+                                path: item.path.clone(),
+                                status: DeletionStatus::SkippedMissing,
+                                error: None,
+                                blake3_hash: None,
+                                bytes_freed: 0,
+                            }
+                        } else {
+                            // Delegate all filesystem mutations to the integration layer.
+                            // On success, the planned physical size is what was reclaimed.
+                            match item.kind {
+                                PlanItemKind::File => {
+                                    // Generate cryptographic manifest before deletion. A
+                                    // failure here (permission error, race with another
+                                    // process, unreadable file) must not be silently
+                                    // conflated with "hashing was never attempted" — the
+                                    // receipt's evidentiary value depends on knowing why
+                                    // a hash is missing.
+                                    let (hash, hash_err) = match generate_manifest(&item.path) {
+                                        Ok(h) => (Some(h), None),
+                                        Err(e) => (None, Some(format!("hash failed: {}", e))),
+                                    };
 
-                                match delete_file(&item.path) {
+                                    match delete_file(&item.path) {
+                                        Ok(()) => DeletionResult {
+                                            path: item.path.clone(),
+                                            status: DeletionStatus::Deleted,
+                                            error: hash_err,
+                                            blake3_hash: hash,
+                                            bytes_freed: item.bytes,
+                                        },
+                                        Err(e) => DeletionResult {
+                                            path: item.path.clone(),
+                                            status: DeletionStatus::Failed,
+                                            error: Some(match hash_err {
+                                                Some(he) => format!("{}; {}", he, e),
+                                                None => e.to_string(),
+                                            }),
+                                            blake3_hash: hash,
+                                            bytes_freed: 0,
+                                        },
+                                    }
+                                }
+                                PlanItemKind::Dir => match delete_dir_all(&item.path) {
                                     Ok(()) => DeletionResult {
                                         path: item.path.clone(),
                                         status: DeletionStatus::Deleted,
-                                        error: hash_err,
-                                        blake3_hash: hash,
+                                        error: None,
+                                        blake3_hash: None,
                                         bytes_freed: item.bytes,
                                     },
                                     Err(e) => DeletionResult {
                                         path: item.path.clone(),
                                         status: DeletionStatus::Failed,
-                                        error: Some(match hash_err {
-                                            Some(he) => format!("{}; {}", he, e),
-                                            None => e.to_string(),
-                                        }),
-                                        blake3_hash: hash,
+                                        error: Some(e.to_string()),
+                                        blake3_hash: None,
                                         bytes_freed: 0,
                                     },
-                                }
-                            }
-                            PlanItemKind::Dir => match delete_dir_all(&item.path) {
-                                Ok(()) => DeletionResult {
-                                    path: item.path.clone(),
-                                    status: DeletionStatus::Deleted,
-                                    error: None,
-                                    blake3_hash: None,
-                                    bytes_freed: item.bytes,
                                 },
-                                Err(e) => DeletionResult {
+                                PlanItemKind::GithubRepo
+                                | PlanItemKind::GithubBranch
+                                | PlanItemKind::GithubRun
+                                | PlanItemKind::GithubRelease
+                                | PlanItemKind::GithubCache
+                                | PlanItemKind::GithubIssue
+                                | PlanItemKind::GithubPr
+                                | PlanItemKind::GithubReleaseAsset => DeletionResult {
                                     path: item.path.clone(),
                                     status: DeletionStatus::Failed,
-                                    error: Some(e.to_string()),
+                                    error: Some(
+                                        "GitHub resources must be deleted using the github command"
+                                            .to_string(),
+                                    ),
                                     blake3_hash: None,
                                     bytes_freed: 0,
                                 },
-                            },
-                            PlanItemKind::GithubRepo
-                            | PlanItemKind::GithubBranch
-                            | PlanItemKind::GithubRun
-                            | PlanItemKind::GithubRelease
-                            | PlanItemKind::GithubCache
-                            | PlanItemKind::GithubIssue
-                            | PlanItemKind::GithubPr
-                            | PlanItemKind::GithubReleaseAsset => DeletionResult {
-                                path: item.path.clone(),
-                                status: DeletionStatus::Failed,
-                                error: Some(
-                                    "GitHub resources must be deleted using the github command"
-                                        .to_string(),
-                                ),
-                                blake3_hash: None,
-                                bytes_freed: 0,
-                            },
-                        }
-                    };
-                    pb.inc(1);
-                    res
-                })
-                .collect();
+                            }
+                        };
+                        pb.inc(1);
+                        res
+                    })
+                    .collect()
+            };
+            let results: Vec<DeletionResult> = match max_concurrent {
+                Some(n) if n > 0 => rayon::ThreadPoolBuilder::new()
+                    .num_threads(n)
+                    .build()
+                    .map_err(|e| anyhow::anyhow!("could not build a {n}-thread pool: {e}"))?
+                    .install(delete_body),
+                _ => delete_body(),
+            };
 
             pb.finish_with_message("Deletion execution complete.");
 
@@ -247,7 +264,7 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             // deletion receipt and certify it. Increasing destructive power
             // (the deletion just performed) must come with increased receipts.
             let affidavit_receipt =
-                crate::domain::affidavit_integration::build_deletion_affidavit(&receipt);
+                crate::domain::affidavit_integration::build_deletion_affidavit(&receipt)?;
             let verdict = crate::domain::affidavit_integration::certify(&affidavit_receipt);
             let affidavit_path = receipt_path.with_extension("affidavit.json");
             let affidavit_json = String::from_utf8(

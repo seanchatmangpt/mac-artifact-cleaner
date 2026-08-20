@@ -25,9 +25,11 @@ use crate::{
 fn seal_snapshot_receipt(
     receipt_obj: &SnapshotThinReceipt,
     receipt_path: &Path,
-    event_builder: fn(&SnapshotThinReceipt) -> crate::domain::affidavit_integration::Receipt,
+    event_builder: fn(
+        &SnapshotThinReceipt,
+    ) -> anyhow::Result<crate::domain::affidavit_integration::Receipt>,
 ) -> anyhow::Result<()> {
-    let affidavit_receipt = event_builder(receipt_obj);
+    let affidavit_receipt = event_builder(receipt_obj)?;
     let verdict = crate::domain::affidavit_integration::certify(&affidavit_receipt);
     let affidavit_path = receipt_path.with_extension("affidavit.json");
     let affidavit_json = String::from_utf8(

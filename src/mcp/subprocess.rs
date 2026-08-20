@@ -251,6 +251,8 @@ impl OclnrRunner {
         plan_file: &PathBuf,
         receipt_file: &PathBuf,
         confirm: bool,
+        max_concurrent: Option<usize>,
+        timeout_secs: u32,
     ) -> Result<SubprocessResult, ErrorResponse> {
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("delete")
@@ -266,8 +268,11 @@ impl OclnrRunner {
         if confirm {
             cmd.arg("--yes");
         }
+        if let Some(n) = max_concurrent {
+            cmd.arg("--max-concurrent").arg(n.to_string());
+        }
 
-        self.run_command(cmd, "oclnr delete execute")
+        self.run_command_with_timeout(cmd, "oclnr delete execute", timeout_secs)
     }
 
     /// Run: oclnr receipt verify [--receipt receipt-file]
@@ -514,6 +519,78 @@ impl OclnrRunner {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         })
+    }
+
+    /// Like [`Self::run_command`], but kills the child and returns an error
+    /// if it hasn't exited within `timeout_secs`.
+    ///
+    /// `Command::output()` (used by `run_command`) blocks indefinitely —
+    /// there is no way to bound it. This spawns instead and polls
+    /// `try_wait()`, so a real timeout previously advertised in the
+    /// `delete` MCP tool's schema (`timeout_secs`) but never enforced now
+    /// actually bounds how long a hung deletion subprocess can block.
+    #[allow(clippy::result_large_err)]
+    fn run_command_with_timeout(
+        &self,
+        mut cmd: Command,
+        name: &str,
+        timeout_secs: u32,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        use std::io::Read;
+
+        let mut child =
+            cmd.spawn().map_err(|e| ErrorResponse::subprocess_failed(name, &e.to_string()))?;
+
+        // Drain stdout/stderr on background threads while we poll for exit
+        // below — `try_wait()` alone doesn't read the pipes, and on macOS a
+        // full ~64KB pipe buffer would otherwise deadlock the child against
+        // an OS write() that never returns while we're just waiting.
+        let mut stdout_pipe = child.stdout.take();
+        let mut stderr_pipe = child.stderr.take();
+        let stdout_thread = std::thread::spawn(move || {
+            let mut buf = String::new();
+            if let Some(mut p) = stdout_pipe.take() {
+                let _ = p.read_to_string(&mut buf);
+            }
+            buf
+        });
+        let stderr_thread = std::thread::spawn(move || {
+            let mut buf = String::new();
+            if let Some(mut p) = stderr_pipe.take() {
+                let _ = p.read_to_string(&mut buf);
+            }
+            buf
+        });
+
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs as u64);
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {
+                    if std::time::Instant::now() >= deadline {
+                        // Best-effort: if kill() itself fails (process
+                        // already gone in a race), that's fine — we're
+                        // about to report the timeout either way.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(ErrorResponse::subprocess_failed(
+                            name,
+                            &format!("timed out after {timeout_secs}s and was killed"),
+                        ));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => {
+                    return Err(ErrorResponse::subprocess_failed(name, &e.to_string()));
+                }
+            }
+        };
+
+        let stdout = stdout_thread.join().unwrap_or_default();
+        let stderr = stderr_thread.join().unwrap_or_default();
+
+        Ok(SubprocessResult { status: status.code().unwrap_or(-1), stdout, stderr })
     }
 }
 

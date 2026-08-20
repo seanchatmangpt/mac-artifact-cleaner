@@ -69,6 +69,7 @@ pub fn handle(path: Option<PathBuf>) -> anyhow::Result<()> {
         plan: plan_file.clone(),
         receipt: receipt_file.clone(),
         yes: true,
+        max_concurrent: None,
     })?;
 
     println!("\n{}", "=====================================================".green().bold());

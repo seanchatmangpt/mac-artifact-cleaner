@@ -58,7 +58,7 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
             // receipt and certify it through the 7-stage pipeline. This is a
             // structural witness (the receipt was not forged or hand-edited),
             // complementary to the filesystem-consistency report above.
-            let affidavit_receipt = affidavit::build_deletion_affidavit(&receipt_data);
+            let affidavit_receipt = affidavit::build_deletion_affidavit(&receipt_data)?;
             let verdict = affidavit::certify(&affidavit_receipt);
 
             // If a sealed affidavit file was persisted alongside this receipt
@@ -182,7 +182,7 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
             let content = std::fs::read_to_string(&receipt)?;
             let receipt_data: DeletionReceipt = serde_json::from_str(&content)?;
 
-            let affidavit_receipt = affidavit::build_deletion_affidavit(&receipt_data);
+            let affidavit_receipt = affidavit::build_deletion_affidavit(&receipt_data)?;
             let verdict = affidavit::certify(&affidavit_receipt);
 
             // If a sealed affidavit file already exists at the canonical

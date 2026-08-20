@@ -27,8 +27,11 @@ pub fn scan_git_repos(root: &Path) -> Result<Vec<GitRepoHealth>> {
     for repo_path in repo_paths {
         match inspect_repo(&repo_path) {
             Ok(health) => results.push(health),
-            Err(_) => {
-                // Skip repos that fail inspection (e.g. permissions, corrupt)
+            Err(e) => {
+                // Skip repos that fail inspection (e.g. permissions,
+                // corrupt) — but say so, rather than silently under-
+                // reporting git bloat with no signal anything was skipped.
+                eprintln!("warning: skipping git health check for {}: {e}", repo_path.display());
             }
         }
     }
@@ -36,7 +39,7 @@ pub fn scan_git_repos(root: &Path) -> Result<Vec<GitRepoHealth>> {
 }
 
 fn inspect_repo(repo_path: &Path) -> Result<GitRepoHealth> {
-    let (pack_size_bytes, loose_objects) = count_objects(repo_path);
+    let (pack_size_bytes, loose_objects) = count_objects(repo_path)?;
     let (worktrees, dangling_worktrees) = list_worktrees(repo_path);
 
     Ok(GitRepoHealth {
@@ -48,16 +51,23 @@ fn inspect_repo(repo_path: &Path) -> Result<GitRepoHealth> {
     })
 }
 
-fn count_objects(repo_path: &Path) -> (u64, u64) {
+/// Runs `git count-objects -vH` in `repo_path` and parses pack size / loose
+/// object count from its output. Returns `Err` (rather than silently
+/// reporting `(0, 0)`, indistinguishable from a genuinely clean repo) if
+/// the subprocess itself fails to spawn or run — a missing `git` binary,
+/// a permission error, or a corrupt repo are real failures, not evidence
+/// of zero git bloat.
+fn count_objects(repo_path: &Path) -> Result<(u64, u64)> {
     let output = Command::new("git")
         .args(["-C", repo_path.to_str().unwrap_or(""), "count-objects", "-vH"])
-        .output();
+        .output()?;
 
-    let Ok(out) = output else {
-        return (0, 0);
-    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git count-objects failed: {}", stderr.trim());
+    }
 
-    let text = String::from_utf8_lossy(&out.stdout);
+    let text = String::from_utf8_lossy(&output.stdout);
     let mut pack_size_bytes: u64 = 0;
     let mut loose_objects: u64 = 0;
 
@@ -69,7 +79,7 @@ fn count_objects(repo_path: &Path) -> (u64, u64) {
         }
     }
 
-    (pack_size_bytes, loose_objects)
+    Ok((pack_size_bytes, loose_objects))
 }
 
 /// Parse a human-readable size string like "4.50 MiB", "12.00 KiB", "2.30 GiB",

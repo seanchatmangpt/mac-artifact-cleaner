@@ -41,17 +41,29 @@ use crate::domain::{receipt::DeletionReceipt, time::SnapshotThinReceipt};
 ///     }],
 ///     None, None,
 /// );
-/// let sealed = build_deletion_affidavit(&receipt);
+/// let sealed = build_deletion_affidavit(&receipt).unwrap();
 /// assert_eq!(sealed.events.len(), 2); // header + 1 result
 ///
 /// // Negative — an empty execution still seals into a lone header event.
 /// let empty = DeletionReceipt::new(0, 1, 2, vec![], None, None);
-/// assert_eq!(build_deletion_affidavit(&empty).events.len(), 1);
+/// assert_eq!(build_deletion_affidavit(&empty).unwrap().events.len(), 1);
 /// ```
-pub fn build_deletion_affidavit(receipt: &DeletionReceipt) -> Receipt {
+///
+/// # Errors
+///
+/// Returns `Err` if `receipt.execution_record` fails to serialize to JSON.
+/// This is possible in practice, not just theoretical: `serde`'s `PathBuf`
+/// serialization fails on a non-UTF-8 path (permitted on real Unix
+/// filesystems), and `DeletionResult.path` is a `PathBuf`. A failure here
+/// used to be silently laundered into an empty-payload commitment via
+/// `unwrap_or_default()` — sealing a cryptographic chain over nothing while
+/// still reporting success. See `no-overclaiming-rust.md`.
+pub fn build_deletion_affidavit(receipt: &DeletionReceipt) -> anyhow::Result<Receipt> {
     let mut assembler = ChainAssembler::new();
 
     // Header event: the deletion operation, bound to the plan it discharged.
+    let execution_record_json = serde_json::to_string(&receipt.execution_record)
+        .map_err(|e| anyhow::anyhow!("could not serialize execution_record for sealing: {e}"))?;
     let header_event = OperationEvent {
         id: "deletion-header".to_string(),
         seq: 0,
@@ -61,9 +73,7 @@ pub fn build_deletion_affidavit(receipt: &DeletionReceipt) -> Receipt {
             obj_type: "deletion_plan".to_string(),
             qualifier: None,
         }],
-        payload_commitment: Blake3Hash::from_bytes(
-            serde_json::to_string(&receipt.execution_record).unwrap_or_default().as_bytes(),
-        ),
+        payload_commitment: Blake3Hash::from_bytes(execution_record_json.as_bytes()),
     };
     // Append is infallible here: the event canonicalizes (no non-serializable
     // payloads), so a failure would be a library-level invariant break.
@@ -95,7 +105,7 @@ pub fn build_deletion_affidavit(receipt: &DeletionReceipt) -> Receipt {
         assembler.append(event).expect("result event canonicalizes");
     }
 
-    assembler.finalize()
+    Ok(assembler.finalize())
 }
 
 /// Shared projection for [`SnapshotThinReceipt`], parameterized by the
@@ -108,9 +118,11 @@ fn build_snapshot_affidavit(
     receipt: &SnapshotThinReceipt,
     event_type: &str,
     plan_obj_type: &str,
-) -> Receipt {
+) -> anyhow::Result<Receipt> {
     let mut assembler = ChainAssembler::new();
 
+    let receipt_json = serde_json::to_string(receipt)
+        .map_err(|e| anyhow::anyhow!("could not serialize snapshot receipt for sealing: {e}"))?;
     let header_event = OperationEvent {
         id: format!("{}-header", event_type),
         seq: 0,
@@ -120,9 +132,7 @@ fn build_snapshot_affidavit(
             obj_type: plan_obj_type.to_string(),
             qualifier: None,
         }],
-        payload_commitment: Blake3Hash::from_bytes(
-            serde_json::to_string(receipt).unwrap_or_default().as_bytes(),
-        ),
+        payload_commitment: Blake3Hash::from_bytes(receipt_json.as_bytes()),
     };
     assembler.append(header_event).expect("header event canonicalizes");
 
@@ -141,7 +151,7 @@ fn build_snapshot_affidavit(
         assembler.append(event).expect("result event canonicalizes");
     }
 
-    assembler.finalize()
+    Ok(assembler.finalize())
 }
 
 /// Project a [`SnapshotThinReceipt`] produced by a byte-driven thin operation
@@ -156,7 +166,7 @@ fn build_snapshot_affidavit(
 ///     vec!["snap1".to_string(), "snap2".to_string()],
 ///     vec!["snap2".to_string()],
 /// );
-/// let sealed = build_snapshot_thin_affidavit(&receipt);
+/// let sealed = build_snapshot_thin_affidavit(&receipt).unwrap();
 /// assert_eq!(sealed.events.len(), 2); // header + 1 thinned snapshot
 ///
 /// // Negative — nothing thinned still seals into a lone header event.
@@ -164,9 +174,15 @@ fn build_snapshot_affidavit(
 ///     "/".to_string(), 1_000_000, 1_716_768_000,
 ///     vec!["snap1".to_string()], vec!["snap1".to_string()],
 /// );
-/// assert_eq!(build_snapshot_thin_affidavit(&empty).events.len(), 1);
+/// assert_eq!(build_snapshot_thin_affidavit(&empty).unwrap().events.len(), 1);
 /// ```
-pub fn build_snapshot_thin_affidavit(receipt: &SnapshotThinReceipt) -> Receipt {
+///
+/// # Errors
+///
+/// Returns `Err` if `receipt` fails to serialize — see
+/// [`build_deletion_affidavit`]'s `# Errors` section for why this is a real,
+/// not theoretical, failure mode.
+pub fn build_snapshot_thin_affidavit(receipt: &SnapshotThinReceipt) -> anyhow::Result<Receipt> {
     build_snapshot_affidavit(receipt, "snapshot_thin_requested", "snapshot_thin_plan")
 }
 
@@ -185,11 +201,17 @@ pub fn build_snapshot_thin_affidavit(receipt: &SnapshotThinReceipt) -> Receipt {
 ///     vec!["snap1".to_string(), "snap2".to_string()],
 ///     vec!["snap2".to_string()],
 /// );
-/// let sealed = build_snapshot_delete_affidavit(&receipt);
+/// let sealed = build_snapshot_delete_affidavit(&receipt).unwrap();
 /// assert_eq!(sealed.events.len(), 2); // header + 1 deleted snapshot
 /// assert_eq!(sealed.events[0].event_type, "snapshot_delete_requested");
 /// ```
-pub fn build_snapshot_delete_affidavit(receipt: &SnapshotThinReceipt) -> Receipt {
+///
+/// # Errors
+///
+/// Returns `Err` if `receipt` fails to serialize — see
+/// [`build_deletion_affidavit`]'s `# Errors` section for why this is a real,
+/// not theoretical, failure mode.
+pub fn build_snapshot_delete_affidavit(receipt: &SnapshotThinReceipt) -> anyhow::Result<Receipt> {
     build_snapshot_affidavit(receipt, "snapshot_delete_requested", "snapshot_delete_plan")
 }
 
@@ -202,7 +224,7 @@ pub fn build_snapshot_delete_affidavit(receipt: &SnapshotThinReceipt) -> Receipt
 /// use osx_clnr::domain::receipt::DeletionReceipt;
 /// use osx_clnr::domain::affidavit_integration::{build_deletion_affidavit, certify};
 ///
-/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None));
+/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None)).unwrap();
 /// let verdict = certify(&sealed);
 /// assert!(verdict.accepted);              // freshly sealed → accepted
 /// assert!(!verdict.outcomes.is_empty());  // per-stage outcomes recorded
@@ -228,7 +250,7 @@ pub fn certify(receipt: &Receipt) -> Verdict {
 /// use osx_clnr::domain::receipt::DeletionReceipt;
 /// use osx_clnr::domain::affidavit_integration::{build_deletion_affidavit, certify, verify_chain_hash};
 ///
-/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None));
+/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None)).unwrap();
 /// let verdict = certify(&sealed);
 ///
 /// // Positive — stored hash matches the recomputed one.
@@ -280,7 +302,7 @@ pub fn verify_chain_hash(
 /// use osx_clnr::domain::receipt::DeletionReceipt;
 /// use osx_clnr::domain::affidavit_integration::{build_deletion_affidavit, content_address};
 ///
-/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None));
+/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None)).unwrap();
 /// let addr = content_address(&sealed);
 /// assert_eq!(addr.len(), 64);                       // BLAKE3-256 hex
 /// assert_eq!(addr, content_address(&sealed));       // stable
@@ -296,7 +318,7 @@ pub fn content_address(receipt: &Receipt) -> String {
 /// use osx_clnr::domain::receipt::DeletionReceipt;
 /// use osx_clnr::domain::affidavit_integration::{build_deletion_affidavit, serialize_receipt};
 ///
-/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None));
+/// let sealed = build_deletion_affidavit(&DeletionReceipt::new(0, 1, 2, vec![], None, None)).unwrap();
 /// let bytes = serialize_receipt(&sealed);
 /// assert!(!bytes.is_empty());
 /// let json = String::from_utf8(bytes).unwrap();
@@ -327,7 +349,7 @@ pub fn serialize_receipt(receipt: &Receipt) -> Vec<u8> {
 ///     }],
 ///     None, None,
 /// );
-/// let sealed = build_deletion_affidavit(&receipt);
+/// let sealed = build_deletion_affidavit(&receipt).unwrap();
 /// assert!(admit(sealed).is_ok());  // both courts accept
 /// ```
 pub fn admit(receipt: Receipt) -> Result<AdmittedReceipt, affidavit::admission::AffidavitRefusal> {

@@ -104,12 +104,18 @@ pub fn brew_cache_size() -> Result<BrewCacheSize> {
     // `du -sk` reports kilobytes; multiply by 1024 to get bytes.
     let output = Command::new("du").args(["-sk", &cache_path]).output()?;
 
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("du -sk {cache_path} failed: {}", stderr.trim());
+    }
+
     let text = String::from_utf8_lossy(&output.stdout);
     let bytes = text
         .split_whitespace()
         .next()
-        .and_then(|kb| kb.parse::<u64>().ok())
-        .unwrap_or(0)
+        .ok_or_else(|| anyhow::anyhow!("du -sk {cache_path} produced no output"))?
+        .parse::<u64>()
+        .map_err(|e| anyhow::anyhow!("could not parse du -sk output for {cache_path}: {e}"))?
         .saturating_mul(1024);
 
     Ok(BrewCacheSize { path: cache_path, bytes })

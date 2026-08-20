@@ -255,8 +255,6 @@ pub struct PlanBuildInput {
     #[serde(default)]
     pub roots: Vec<PathBuf>,
     #[serde(default)]
-    pub candidates: Option<Vec<Value>>,
-    #[serde(default)]
     pub deps: bool,
     #[serde(default)]
     pub aggressive: bool,

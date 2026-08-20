@@ -908,6 +908,35 @@ impl OsxClnrMcpServer {
         ctx.clear_error();
         self.workflows.insert(workspace.display().to_string(), ctx);
 
+        // max_reclaim_gb was accepted by the schema but never checked
+        // against anything — the field promised a cap the plan could
+        // silently exceed with `max_reclaim_respected` hardcoded to `true`
+        // regardless. This computes the real answer instead. It is
+        // deliberately a *warning*, not a truncation: dropping items
+        // post-hoc from an already-built plan (rather than re-building it
+        // scoped to the cap) would silently prune candidates with no
+        // record of which ones or why — the same anti-pattern this
+        // session's DCM retrofit exists to prevent (see domain::dcm).
+        let max_reclaim_respected = match input.max_reclaim_gb {
+            Some(cap_gb) => {
+                let cap_bytes = (cap_gb * 1_073_741_824.0) as u64;
+                plan_summary.total_bytes <= cap_bytes
+            }
+            None => true,
+        };
+        let mut warnings = vec![];
+        if !max_reclaim_respected {
+            if let Some(cap_gb) = input.max_reclaim_gb {
+                warnings.push(format!(
+                    "plan totals {:.2} GB, exceeding the requested max_reclaim_gb cap of {:.2} GB — \
+                     the plan was built anyway (not silently truncated); review before approving, \
+                     or narrow roots/flags and rebuild",
+                    plan_summary.total_bytes as f64 / 1_073_741_824.0,
+                    cap_gb
+                ));
+            }
+        }
+
         Ok(serde_json::to_value(PlanBuildOutput {
             state: "PLAN_READY".to_string(),
             plan_file: plan_file.display().to_string(),
@@ -915,10 +944,10 @@ impl OsxClnrMcpServer {
             safety_checks: SafetyChecks {
                 os_directory_protection: true,
                 no_dotfiles_in_home: true,
-                max_reclaim_respected: true,
+                max_reclaim_respected,
                 audit_integrity_ok: true,
                 issues: vec![],
-                warnings: vec![],
+                warnings,
             },
             message: "Plan ready".to_string(),
         })
@@ -1123,8 +1152,14 @@ impl OsxClnrMcpServer {
         let scratch_receipt = std::env::temp_dir()
             .join(format!("oclnr-dry-run-receipt-{}.json", uuid::Uuid::new_v4()));
 
-        let result =
-            self.runner.delete_run(&workspace, &input.plan_file, &scratch_receipt, false)?;
+        let result = self.runner.delete_run(
+            &workspace,
+            &input.plan_file,
+            &scratch_receipt,
+            false,
+            None,
+            30,
+        )?;
         std::fs::remove_file(&scratch_receipt).ok();
 
         if !result.success() {
@@ -1197,7 +1232,14 @@ impl OsxClnrMcpServer {
             input.receipt_file.clone().unwrap_or_else(|| workspace.join("deletion-receipt.json"));
 
         // Run deletion
-        let result = self.runner.delete_run(&workspace, &input.plan_file, &receipt_file, true)?;
+        let result = self.runner.delete_run(
+            &workspace,
+            &input.plan_file,
+            &receipt_file,
+            true,
+            Some(input.max_concurrent),
+            input.timeout_secs,
+        )?;
 
         // A non-zero exit here can mean the deletion itself failed, or it can mean
         // the CLI's post-hoc space-verification check (comparing claimed bytes freed
@@ -1392,7 +1434,13 @@ impl OsxClnrMcpServer {
         })?;
 
         let report = receipt.verify(None);
-        let affidavit_receipt = affidavit_integration::build_deletion_affidavit(&receipt);
+        let affidavit_receipt =
+            affidavit_integration::build_deletion_affidavit(&receipt).map_err(|e| {
+                ErrorResponse::new(
+                    ErrorCode::IoError,
+                    format!("cannot seal receipt into affidavit: {e}"),
+                )
+            })?;
         let verdict = affidavit_integration::certify(&affidavit_receipt);
 
         // If a sealed affidavit file exists alongside this receipt, its

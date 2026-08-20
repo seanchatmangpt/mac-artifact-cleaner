@@ -66,6 +66,7 @@ pub fn handle() -> anyhow::Result<()> {
         plan: plan_file.clone(),
         receipt: receipt_file.clone(),
         yes: true,
+        max_concurrent: None,
     })?;
 
     println!("\n{}", "[4/4] APFS Snapshot Check...".blue());
