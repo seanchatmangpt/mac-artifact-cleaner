@@ -676,6 +676,10 @@ pub struct DockerPruneInput {
     pub skip_colima: bool,
     #[serde(default)]
     pub confirm: bool,
+    /// Optional path to write a plain JSON receipt (not affidavit-sealed —
+    /// see `domain::docker_receipt`).
+    #[serde(default)]
+    pub receipt_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -683,6 +687,9 @@ pub struct DockerPruneOutput {
     pub state: String,
     pub raw: String,
     pub message: String,
+    /// Present only if the caller passed `receipt_file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_file: Option<PathBuf>,
 }
 
 // DOCTOR

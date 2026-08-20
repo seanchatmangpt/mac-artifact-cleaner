@@ -216,16 +216,19 @@ impl OsxClnrMcpServer {
                                  runs `docker system prune -af --volumes` and (unless \
                                  skip_colima) `colima prune` to reclaim it. `prune` is destructive \
                                  (removes unused images, stopped containers, unused volumes, and \
-                                 build cache) and requires confirm: true; it has no dry-run receipt \
-                                 or affidavit seal — no MCP-tracked audit trail exists for Docker \
-                                 yet, unlike delete/snapshot.",
+                                 build cache) and requires confirm: true. Passing receipt_file \
+                                 writes a plain JSON before/after/reclaimed record — but it is \
+                                 not affidavit-sealed the way delete/snapshot receipts are (no \
+                                 BLAKE3 provenance chain), because Docker cleanup has no \
+                                 plan/approval concept to bind a seal to.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "action": { "type": "string", "enum": ["scan", "plan", "prune"] },
                         "workspace": { "type": "string" },
                         "skip_colima": { "type": "boolean", "default": false, "description": "(prune only) Skip `colima prune` even if Colima is available." },
-                        "confirm": { "type": "boolean", "default": false, "description": "(prune only) Required to actually prune." }
+                        "confirm": { "type": "boolean", "default": false, "description": "(prune only) Required to actually prune." },
+                        "receipt_file": { "type": "string", "description": "(prune only) Optional path to write a plain JSON receipt (not affidavit-sealed)." }
                     },
                     "required": ["action"]
                 }
@@ -1873,7 +1876,8 @@ impl OsxClnrMcpServer {
 
         let workspace = input.workspace.unwrap_or_else(|| self.default_workspace.clone());
 
-        let result = self.runner.docker_prune(&workspace, input.skip_colima)?;
+        let result =
+            self.runner.docker_prune(&workspace, input.skip_colima, input.receipt_file.as_ref())?;
         if !result.success() {
             return Err(result.to_error("oclnr docker prune"));
         }
@@ -1882,6 +1886,7 @@ impl OsxClnrMcpServer {
             state: "DOCKER_PRUNE_COMPLETE".to_string(),
             raw: result.stdout.trim().to_string(),
             message: "Docker (and Colima, unless skipped) prune complete".to_string(),
+            receipt_file: input.receipt_file,
         })
         .unwrap())
     }

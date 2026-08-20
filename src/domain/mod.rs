@@ -6,6 +6,7 @@ pub mod audit;
 pub mod crypto;
 pub mod dcm;
 pub mod delete;
+pub mod docker_receipt;
 pub mod doctor;
 pub mod github;
 pub mod ocel;

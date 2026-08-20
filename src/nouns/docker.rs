@@ -3,14 +3,19 @@
 //! Routes Docker subcommands, formats output, and delegates to
 //! `integration::docker` for all subprocess interaction.
 
+use std::path::PathBuf;
+
 use clap::Subcommand;
 
-use crate::integration::{
-    docker::{
-        colima_prune, docker_disk_usage, docker_prune_preview, docker_system_prune,
-        is_colima_available, is_docker_available,
+use crate::{
+    domain::docker_receipt::DockerPruneReceipt,
+    integration::{
+        docker::{
+            colima_prune, docker_disk_usage, docker_prune_preview, docker_system_prune,
+            is_colima_available, is_docker_available,
+        },
+        progress::human_bytes as fmt_bytes,
     },
-    progress::human_bytes as fmt_bytes,
 };
 
 #[derive(Subcommand, Debug)]
@@ -31,6 +36,11 @@ pub enum DockerAction {
         /// Skip `colima prune` even if Colima is available.
         #[arg(long)]
         skip_colima: bool,
+        /// Optional path to write a plain JSON receipt (before/after usage,
+        /// reclaimed bytes, whether Colima was pruned). Not affidavit-sealed
+        /// — see `domain::docker_receipt` for why.
+        #[arg(long)]
+        receipt: Option<PathBuf>,
     },
 }
 
@@ -82,7 +92,7 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
 
             Ok(())
         }
-        DockerAction::Prune { confirm, skip_colima } => {
+        DockerAction::Prune { confirm, skip_colima, receipt } => {
             if !is_docker_available() {
                 println!("Docker not available or not running.");
                 return Ok(());
@@ -99,9 +109,11 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
             println!("  After:  {}", fmt_bytes(result.after.total_bytes));
             println!("  Reclaimed: {}", fmt_bytes(result.reclaimed_bytes));
 
+            let mut colima_pruned: Option<bool> = None;
             if !skip_colima && is_colima_available() {
                 match colima_prune() {
                     Ok(out) => {
+                        colima_pruned = Some(true);
                         println!("\nColima Prune");
                         if out.is_empty() {
                             println!("  (nothing to prune)");
@@ -109,7 +121,34 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
                             println!("{out}");
                         }
                     }
-                    Err(e) => println!("\nColima prune skipped: {e}"),
+                    Err(e) => {
+                        colima_pruned = Some(false);
+                        println!("\nColima prune skipped: {e}");
+                    }
+                }
+            }
+
+            if let Some(receipt_path) = receipt {
+                let docker_receipt = DockerPruneReceipt::new(
+                    result.before.images_bytes,
+                    result.after.images_bytes,
+                    result.before.containers_bytes,
+                    result.after.containers_bytes,
+                    result.before.volumes_bytes,
+                    result.after.volumes_bytes,
+                    result.before.build_cache_bytes,
+                    result.after.build_cache_bytes,
+                    colima_pruned,
+                );
+                match serde_json::to_string_pretty(&docker_receipt)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|json| {
+                        std::fs::write(&receipt_path, json).map_err(anyhow::Error::from)
+                    }) {
+                    Ok(()) => {
+                        println!("\nWrote docker prune receipt to: {}", receipt_path.display())
+                    }
+                    Err(e) => eprintln!("\nwarning: could not write docker prune receipt: {e}"),
                 }
             }
 

@@ -374,6 +374,7 @@ impl OclnrRunner {
         &self,
         workspace: &PathBuf,
         skip_colima: bool,
+        receipt_file: Option<&PathBuf>,
     ) -> Result<SubprocessResult, ErrorResponse> {
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("docker")
@@ -385,6 +386,9 @@ impl OclnrRunner {
 
         if skip_colima {
             cmd.arg("--skip-colima");
+        }
+        if let Some(r) = receipt_file {
+            cmd.arg("--receipt").arg(r);
         }
 
         self.run_command(cmd, "oclnr docker prune")
