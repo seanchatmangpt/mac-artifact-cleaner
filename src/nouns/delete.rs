@@ -117,7 +117,16 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             }
 
             println!("Executing deletion from plan: {}", plan_path.display());
-            let space_before = volume_space(std::path::Path::new("/")).ok();
+            // Sample the volume that actually holds the plan's target paths, not
+            // always the boot volume `/` — on macOS `/` is a sealed read-only
+            // System-volume snapshot; real user data (and its free space) lives on
+            // the Data volume (typically mounted at /System/Volumes/Data, firmlinked
+            // into /Users). Hardcoding `/` here happened to read correctly on setups
+            // where APFS shares free space across both volumes in one container, but
+            // is not guaranteed and produced misleading before/after deltas.
+            let volume_probe_path: std::path::PathBuf =
+                plan.roots.first().cloned().unwrap_or_else(|| std::path::PathBuf::from("/"));
+            let space_before = volume_space(&volume_probe_path).ok();
             let start_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -247,7 +256,7 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             // Sample free space once after execution; reuse for both the receipt
             // REALITY law and the printed delta below.
             let available_after: Option<u64> =
-                volume_space(std::path::Path::new("/")).ok().map(|v| v.available);
+                volume_space(&volume_probe_path).ok().map(|v| v.available);
 
             let receipt = DeletionReceipt::new(
                 plan.created_unix,

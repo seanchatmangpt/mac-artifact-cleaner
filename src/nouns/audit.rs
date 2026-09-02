@@ -357,7 +357,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             if json {
                 let min_bytes = min_mb * 1024 * 1024;
                 let total_bytes: u64 = results.iter().map(|(_, b)| b).sum();
-                let disk = volume_space(std::path::Path::new("/")).ok();
+                let disk = volume_space(&scan_root_path).ok();
                 let entries: Vec<serde_json::Value> = results
                     .iter()
                     .filter(|(_, b)| *b >= min_bytes)
@@ -386,7 +386,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 });
                 println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
-                print_disk_header();
+                print_disk_header(&scan_root_path);
                 print_breakdown(&scan_root_path, &results, top, min_mb);
             }
         }
@@ -410,26 +410,36 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
                 all_filesystems,
             )?;
 
-            print_disk_header();
+            print_disk_header(
+                roots.first().map(|p| p.as_path()).unwrap_or(std::path::Path::new("/")),
+            );
             print_premium_audit_summary(&stats, &candidates, &tool_reports);
         }
     }
     Ok(())
 }
 
-/// Prints a one-line free-space header for the boot volume (`/`).
+/// Prints a one-line free-space header for the volume backing `path`.
 ///
 /// This is the number that matters during a disk-full incident; without it the
 /// audit gives no sense of how urgent cleanup is or whether it helped.
-pub fn print_disk_header() {
-    match volume_space(std::path::Path::new("/")) {
+///
+/// Callers must pass the actual path being scanned/operated on, not a
+/// hardcoded `/` — on macOS `/` is a sealed read-only System-volume snapshot,
+/// while real user data (and its free space) lives on the Data volume
+/// (typically mounted at `/System/Volumes/Data`, firmlinked into `/Users`).
+/// These numbers happen to coincide on setups where APFS shares free space
+/// across both volumes in one container, but that is not guaranteed.
+pub fn print_disk_header(path: &std::path::Path) {
+    match volume_space(path) {
         Ok(vs) => println!(
-            "\x1b[1mDisk /:\x1b[0m {} free of {} ({}% used)",
+            "\x1b[1mDisk {}:\x1b[0m {} free of {} ({}% used)",
+            path.display(),
             human_bytes(vs.available),
             human_bytes(vs.total),
             vs.percent_used()
         ),
-        Err(e) => eprintln!("warning: could not read free space: {}", e),
+        Err(e) => eprintln!("warning: could not read free space for {}: {}", path.display(), e),
     }
 }
 
