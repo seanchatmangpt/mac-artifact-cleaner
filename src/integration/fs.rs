@@ -75,21 +75,53 @@ pub fn read_dir_snapshot(dir: &Path) -> DirSnapshot {
 
 // ── Disk-full-safe writer ──────────────────────────────────────────────────────
 
+/// Outcome of [`write_or_dump_on_full`] — distinguishes a clean write to disk
+/// from the degraded disk-full fallback so callers can report the truth
+/// instead of unconditionally claiming a file exists at `path`.
+///
+/// Never collapse this back to `Ok(())`/bare success: `DumpedToStdout` means
+/// there is **no file on disk at the requested path** — only the caller
+/// knows whether raw stdout was captured, so the decision to warn (rather
+/// than silently claim success) belongs at the call site, not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// `contents` landed on disk at the requested path.
+    Written,
+    /// The write failed with `ErrorKind::StorageFull`; `contents` was dumped
+    /// to stdout instead and **no file exists at the requested path**.
+    DumpedToStdout,
+}
+
+impl WriteOutcome {
+    /// True when the write actually landed on disk.
+    pub fn is_written(self) -> bool {
+        matches!(self, WriteOutcome::Written)
+    }
+}
+
 /// Writes `contents` to `path`, but if the write fails because the volume is
-/// full (`ENOSPC`), dumps the contents to stdout and returns `Ok` instead.
+/// full (`ENOSPC`), dumps the contents to stdout and returns
+/// `Ok(WriteOutcome::DumpedToStdout)` instead of propagating the error.
 ///
 /// A plan or receipt is evidence we must not lose to the very condition the tool
 /// exists to fix: at ~0 bytes free, `std::fs::write` of a multi-KB JSON fails,
 /// and silently losing it is how the original deadlock happened. Here we surface
 /// it so the user can capture it and run `oclnr emergency` to recover space.
-pub fn write_or_dump_on_full(path: &Path, contents: &str, label: &str) -> anyhow::Result<()> {
+///
+/// Callers MUST branch on the returned [`WriteOutcome`] rather than treating
+/// `Ok(_)` as "file written" — see that type's docs for why.
+pub fn write_or_dump_on_full(
+    path: &Path,
+    contents: &str,
+    label: &str,
+) -> anyhow::Result<WriteOutcome> {
     match std::fs::write(path, contents) {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok(WriteOutcome::Written),
         Err(e) if e.kind() == std::io::ErrorKind::StorageFull => {
             eprintln!("⚠️  Disk full — could not write {} to {}.", label, path.display());
             eprintln!("    Dumping it below; save it elsewhere, then run `oclnr emergency --yes`.");
             println!("{}", contents);
-            Ok(())
+            Ok(WriteOutcome::DumpedToStdout)
         }
         Err(e) => Err(e).with_context(|| format!("writing {} to {}", label, path.display())),
     }
@@ -1026,10 +1058,29 @@ pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
     }
 
     // Pass 1 — clear macOS immutable flags (nouchg = user immutable, noschg = sys immutable).
-    // Ignore errors: chflags will fail on root-owned files; we surface that later.
-    let _ = std::process::Command::new("chflags").args(["-R", "nouchg,noschg"]).arg(path).output();
+    // We do not abort on failure here (chflags can legitimately fail on root-owned or
+    // SIP-protected files while the rest of the tree still succeeds), but the failure
+    // itself — exit status and stderr — is captured so it can be surfaced in the final
+    // error if `remove_dir_all` subsequently fails.
+    let mut chflags_failure: Option<String> = None;
+    match std::process::Command::new("chflags").args(["-R", "nouchg,noschg"]).arg(path).output() {
+        Ok(output) if !output.status.success() => {
+            chflags_failure = Some(format!(
+                "chflags -R nouchg,noschg {} exited with {}: {}",
+                path.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Err(err) => {
+            chflags_failure = Some(format!("failed to spawn chflags on {}: {err}", path.display()));
+        }
+        Ok(_) => {}
+    }
 
-    // Pass 2 — make every entry user-writable so remove_dir_all can proceed.
+    // Pass 2 — make every entry user-writable so remove_dir_all can proceed. Per-entry
+    // failures are collected (not discarded) so the final error can name the specific
+    // blocking subpaths instead of a generic "some entries may be root-owned" guess.
     let mut builder = WalkBuilder::new(path);
     builder
         .hidden(false)
@@ -1040,24 +1091,88 @@ pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
         .follow_links(false)
         .same_file_system(true);
 
+    let mut chmod_failures: Vec<(std::path::PathBuf, std::io::Error)> = Vec::new();
     for result in builder.build() {
         let Ok(entry) = result else { continue };
         let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
         let mode = if is_dir { 0o700u32 } else { 0o600u32 };
-        let _ = std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(mode));
+        if let Err(err) =
+            std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(mode))
+        {
+            chmod_failures.push((entry.path().to_path_buf(), err));
+        }
     }
 
     // Final removal.
     std::fs::remove_dir_all(path).with_context(|| {
-        format!(
+        let mut msg = format!(
             "Could not remove {}. Some entries may be root-owned — try: sudo rm -rf {}",
             path.display(),
             path.display()
-        )
+        );
+        if let Some(chflags_err) = &chflags_failure {
+            msg.push_str(&format!("\n  chflags failure: {chflags_err}"));
+        }
+        if !chmod_failures.is_empty() {
+            msg.push_str(&format!(
+                "\n  Blocked by {} entries whose permissions could not be changed, including: {}",
+                chmod_failures.len(),
+                chmod_failures
+                    .iter()
+                    .take(5)
+                    .map(|(p, e)| format!("{} ({e})", p.display()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        msg
     })
 }
 
 // ── Plan-bound deletion ────────────────────────────────────────────────────────
+
+/// Refuses a path that is itself a symlink, using `symlink_metadata` so the
+/// check does not dereference the link the way `Path::is_file`/`Path::is_dir`
+/// do.
+///
+/// This closes a TOCTOU window between plan-build/approval time and
+/// `delete execute` time: a plan is built, inspected, and approved as
+/// separate invocations with a real time gap, during which anything with
+/// write access to the parent directory can replace `path` with a symlink to
+/// an arbitrary target (e.g. `~/.ssh/id_rsa`, or a path `is_macos_os_dir`'s
+/// literal-string denylist would otherwise have blocked). Callers must run
+/// this check — and skip any content read (hashing, manifest generation) —
+/// before ever touching `path` again.
+///
+/// ```
+/// use osx_clnr::integration::fs::refuse_if_symlink;
+///
+/// // Positive: a real file passes through untouched.
+/// let file = tempfile::NamedTempFile::new().unwrap();
+/// assert!(refuse_if_symlink(file.path()).is_ok());
+///
+/// // Refusal: a symlink is rejected outright, target never touched.
+/// #[cfg(unix)]
+/// {
+///     let dir = tempfile::tempdir().unwrap();
+///     let target = dir.path().join("target.txt");
+///     std::fs::write(&target, b"secret").unwrap();
+///     let link = dir.path().join("link");
+///     std::os::unix::fs::symlink(&target, &link).unwrap();
+///     assert!(refuse_if_symlink(&link).is_err());
+/// }
+/// ```
+pub fn refuse_if_symlink(path: &Path) -> anyhow::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            anyhow::bail!(
+                "refusing to delete: path is a symlink, plan target may have been swapped: {}",
+                path.display()
+            );
+        }
+        _ => Ok(()),
+    }
+}
 
 /// Deletes a single file from the filesystem.
 ///
@@ -1066,6 +1181,9 @@ pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
 ///
 /// **Callers must hold a validated `DeletionPlan` before invoking this.**
 pub fn delete_file(path: &Path) -> anyhow::Result<()> {
+    // Check for a swapped-in symlink via symlink_metadata BEFORE any
+    // dereferencing check (is_file() below would silently follow it).
+    refuse_if_symlink(path)?;
     if !path.is_file() {
         anyhow::bail!("delete_file: expected a file but path is not a file: {}", path.display());
     }
@@ -1073,22 +1191,197 @@ pub fn delete_file(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Error from a directory-tree deletion that got partway through a large
+/// subtree before failing. `std::fs::remove_dir_all` (and the `chflags`
+/// fallback `force_remove_dir_all`) offer no partial-progress accounting of
+/// their own: if half the children are removed and then one
+/// permission-denied file aborts the walk, the OS call just returns a single
+/// `Err` with no record of which specific paths actually disappeared versus
+/// which are still on disk.
+///
+/// `remaining_paths`/`remaining_bytes` are populated by a post-failure walk
+/// of the target root so callers (the plan-bound deletion path in
+/// particular) can report the real, non-zero bytes reclaimed and persist
+/// which subpaths survived, rather than collapsing the whole subtree's
+/// outcome into "Failed, 0 bytes freed" when a real, unrecoverable partial
+/// deletion already happened.
+#[derive(Debug)]
+pub struct PartialDeleteError {
+    /// The underlying error from the final removal attempt.
+    pub source: anyhow::Error,
+    /// Paths (files and directories) still present on disk under the target
+    /// root, discovered by walking `path` after the failed removal. Empty
+    /// means either nothing was removed before failing, or the entire tree
+    /// still exists (nothing was reclaimed).
+    pub remaining_paths: Vec<PathBuf>,
+    /// Physical bytes (blocks * 512) still occupied by `remaining_paths`.
+    /// `original_bytes.saturating_sub(remaining_bytes)` is the real amount
+    /// actually reclaimed by a partial deletion.
+    pub remaining_bytes: u64,
+}
+
+impl std::fmt::Display for PartialDeleteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} ({} paths / {} bytes remain on disk)",
+            self.source,
+            self.remaining_paths.len(),
+            self.remaining_bytes
+        )
+    }
+}
+
+impl std::error::Error for PartialDeleteError {}
+
+/// Walks `path` after a failed removal and returns every surviving
+/// file/dir path under it, plus the total physical bytes those files still
+/// occupy. Returns `(vec![], 0)` if `path` no longer exists (the removal
+/// actually succeeded in full despite the reported error, e.g. a race with
+/// another process finishing the job concurrently).
+fn walk_remaining(path: &Path) -> (Vec<PathBuf>, u64) {
+    if !path.exists() {
+        return (Vec::new(), 0);
+    }
+    let mut remaining = Vec::new();
+    let mut bytes = 0u64;
+    let mut builder = WalkBuilder::new(path);
+    builder
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .follow_links(false)
+        .same_file_system(true);
+    for result in builder.build() {
+        let Ok(entry) = result else { continue };
+        if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            if let Ok(meta) = entry.metadata() {
+                bytes += meta.blocks() * 512;
+            }
+        }
+        remaining.push(entry.path().to_path_buf());
+    }
+    (remaining, bytes)
+}
+
 /// Recursively deletes a directory and all its contents.
 ///
-/// Returns `Ok(())` on success. Returns `Err` if the path is not a directory or
-/// if the OS-level deletion fails.
+/// Returns `Ok(())` on success. Returns `Err(PartialDeleteError)` if the
+/// OS-level deletion fails partway through — the error carries the specific
+/// paths and bytes that survived the attempt, discovered by a post-failure
+/// walk, so a caller never has to collapse a real partial reclaim into
+/// "nothing happened." Returns `Err` (via `.into()`) if the path is not a
+/// directory — no walk is attempted in that case since nothing was removed.
 ///
 /// **Callers must hold a validated `DeletionPlan` before invoking this.**
-pub fn delete_dir_all(path: &Path) -> anyhow::Result<()> {
+pub fn delete_dir_all(path: &Path) -> Result<(), PartialDeleteError> {
+    // Check for a swapped-in symlink via symlink_metadata BEFORE any
+    // dereferencing check (is_dir() below would silently follow it).
+    if let Err(e) = refuse_if_symlink(path) {
+        return Err(PartialDeleteError {
+            source: e,
+            remaining_paths: Vec::new(),
+            remaining_bytes: 0,
+        });
+    }
+    if !path.is_dir() {
+        return Err(PartialDeleteError {
+            source: anyhow::anyhow!(
+                "delete_dir_all: expected a directory but path is not a dir: {}",
+                path.display()
+            ),
+            remaining_paths: Vec::new(),
+            remaining_bytes: 0,
+        });
+    }
+    // Try standard removal first as it's fastest.
+    if std::fs::remove_dir_all(path).is_err() {
+        // Fallback to macOS-specific force removal if standard fails (e.g. immutable flags).
+        if let Err(source) = force_remove_dir_all(path) {
+            let (remaining_paths, remaining_bytes) = walk_remaining(path);
+            return Err(PartialDeleteError { source, remaining_paths, remaining_bytes });
+        }
+    }
+    Ok(())
+}
+
+/// Recursively deletes a directory and all its contents, invoking `on_bytes`
+/// with each file's size immediately after that file is removed from disk.
+///
+/// Exists alongside `delete_dir_all` specifically so a caller watching a
+/// single very large directory delete (e.g. a 24GB `target/`) can report
+/// real sub-item progress — bytes removed so far — instead of the position
+/// staying frozen for the entire call, which reads as "hung" to a user
+/// watching a bar sized to item *count* rather than bytes.
+///
+/// Walks the tree once, deletes deepest paths first (files before their
+/// parent directories), and falls back to the immutable-flag-aware
+/// `force_remove_dir_all` for anything the plain walk could not remove
+/// (root-owned or `chflags`-protected entries) — so this variant is no less
+/// capable than `delete_dir_all`, only more observable while it runs.
+///
+/// Returns `Ok(())` on success. Returns `Err` if the path is not a directory
+/// or if the OS-level deletion ultimately fails.
+///
+/// **Callers must hold a validated `DeletionPlan` before invoking this.**
+pub fn delete_dir_all_with_progress(
+    path: &Path,
+    mut on_bytes: impl FnMut(u64),
+) -> anyhow::Result<()> {
+    // Check for a swapped-in symlink via symlink_metadata BEFORE any
+    // dereferencing check (is_dir() below would silently follow it) — same
+    // TOCTOU protection as delete_dir_all.
+    refuse_if_symlink(path)?;
     if !path.is_dir() {
         anyhow::bail!(
-            "delete_dir_all: expected a directory but path is not a dir: {}",
+            "delete_dir_all_with_progress: expected a directory but path is not a dir: {}",
             path.display()
         );
     }
-    // Try standard removal first as it's fastest.
-    if let Err(_) = std::fs::remove_dir_all(path) {
-        // Fallback to macOS-specific force removal if standard fails (e.g. immutable flags).
+
+    // Single walk, collecting each entry's path/kind/size up front so
+    // deletion order can be computed (deepest-first) without repeatedly
+    // re-walking the shrinking tree.
+    let mut entries: Vec<(PathBuf, bool, u64)> = Vec::new();
+    let builder = WalkBuilder::new(path)
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .follow_links(false)
+        .same_file_system(true)
+        .build();
+    for entry in builder.flatten() {
+        let p = entry.path().to_path_buf();
+        if p == path {
+            continue;
+        }
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        let size = if is_dir { 0 } else { entry.metadata().map(|m| m.len()).unwrap_or(0) };
+        entries.push((p, is_dir, size));
+    }
+
+    // Deepest paths first: files (and empty subdirectories) are removed
+    // before the directories that contain them.
+    entries.sort_by(|a, b| b.0.components().count().cmp(&a.0.components().count()));
+
+    for (p, is_dir, size) in &entries {
+        let result = if *is_dir { std::fs::remove_dir(p) } else { std::fs::remove_file(p) };
+        if result.is_ok() && !*is_dir {
+            on_bytes(*size);
+        }
+        // Errors here (permission, immutable flags, race with another
+        // process) are not fatal to this pass — anything left over is
+        // swept up by the force-removal fallback below, which is what
+        // reports the real, final error if removal still fails.
+    }
+
+    // Clean up the root itself, and anything the per-entry pass above could
+    // not remove (stuck entries leave the directory non-empty).
+    if path.exists() {
         force_remove_dir_all(path)?;
     }
     Ok(())
@@ -1505,10 +1798,11 @@ mod breakdown_sizes_depth_tests {
 mod write_or_dump_on_full_tests {
     use std::fs;
 
-    use super::write_or_dump_on_full;
+    use super::{write_or_dump_on_full, WriteOutcome};
 
     /// The normal case: writing to a writable path inside a real directory
-    /// succeeds and the contents land on disk unchanged.
+    /// succeeds, the contents land on disk unchanged, and the outcome says
+    /// so explicitly (not just `Ok(())`).
     #[test]
     fn writes_contents_to_path_on_success() {
         let dir = tempfile::tempdir().unwrap();
@@ -1516,9 +1810,19 @@ mod write_or_dump_on_full_tests {
 
         let result = write_or_dump_on_full(&path, "{\"ok\":true}", "test plan");
 
-        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), WriteOutcome::Written);
+        assert!(WriteOutcome::Written.is_written());
         let on_disk = fs::read_to_string(&path).unwrap();
         assert_eq!(on_disk, "{\"ok\":true}");
+    }
+
+    /// `WriteOutcome::DumpedToStdout` must report itself as NOT written —
+    /// this is the exact distinction the type exists to preserve: a caller
+    /// must never mistake it for a clean write and claim a file exists at a
+    /// path where nothing was ever created.
+    #[test]
+    fn dumped_to_stdout_reports_not_written() {
+        assert!(!WriteOutcome::DumpedToStdout.is_written());
     }
 
     /// Writing to a path whose parent directory doesn't exist fails with a
@@ -1539,5 +1843,246 @@ mod write_or_dump_on_full_tests {
         let result = write_or_dump_on_full(&path, "contents", "test plan");
 
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod force_remove_dir_all_tests {
+    use std::fs;
+
+    use super::force_remove_dir_all;
+
+    /// The normal case: a plain tree with no immutable flags and no
+    /// permission problems is removed cleanly, and both fix-up passes
+    /// (chflags, chmod) run without affecting the successful outcome.
+    #[test]
+    fn removes_plain_directory_tree_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("victim");
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("nested").join("file.txt"), b"contents").unwrap();
+
+        let result = force_remove_dir_all(&root);
+
+        assert!(result.is_ok(), "expected success, got: {result:?}");
+        assert!(!root.exists());
+    }
+
+    /// A path that doesn't exist is a no-op success, not an error — callers
+    /// (e.g. re-running a plan after a partial prior deletion) rely on this.
+    #[test]
+    fn missing_path_is_a_no_op_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("never-existed");
+
+        let result = force_remove_dir_all(&root);
+
+        assert!(result.is_ok());
+    }
+
+    /// Real failure path: a file kept immutable (`uchg`) inside a tree can
+    /// still be cleared by pass 1's `chflags -R nouchg,noschg` even without
+    /// root, since the user owns the file. This exercises the success side
+    /// of the chflags pass with a real macOS immutable flag (not a mock),
+    /// confirming the flag-clearing logic still allows removal to succeed.
+    #[test]
+    fn clears_user_immutable_flag_and_removes_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("locked");
+        fs::create_dir_all(&root).unwrap();
+        let locked_file = root.join("blob");
+        fs::write(&locked_file, b"immutable contents").unwrap();
+
+        let status = std::process::Command::new("chflags")
+            .args(["uchg"])
+            .arg(&locked_file)
+            .status()
+            .unwrap();
+        assert!(status.success(), "test setup: failed to set uchg flag");
+
+        let result = force_remove_dir_all(&root);
+
+        assert!(result.is_ok(), "expected success after clearing uchg, got: {result:?}");
+        assert!(!root.exists());
+    }
+
+    /// When the final `remove_dir_all` genuinely fails, the error context
+    /// must name the target path and the generic sudo hint — this is a
+    /// state-based assertion on the real `anyhow::Error` returned, not an
+    /// interaction check on which functions were called. Root-owned/SIP
+    /// failures that populate the `chflags failure` / `Blocked by N entries`
+    /// detail lines aren't constructible without root or actual permission
+    /// friction in CI, so those specific detail lines are verified by code
+    /// inspection (see the `chflags_failure` and `chmod_failures` collection
+    /// above) rather than by a runnable test here.
+    #[test]
+    fn error_context_names_the_failing_path() {
+        // A file (not a directory) handed to `remove_dir_all` fails at the
+        // OS level with `ENOTDIR`, giving us a real, non-root-dependent way
+        // to reach the final `with_context` error arm.
+        let dir = tempfile::tempdir().unwrap();
+        let not_a_dir = dir.path().join("plain-file");
+        fs::write(&not_a_dir, b"just a file").unwrap();
+
+        let result = force_remove_dir_all(&not_a_dir);
+
+        let err = result.expect_err("remove_dir_all on a file should fail");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains(&not_a_dir.display().to_string()),
+            "error should name the failing path, got: {message}"
+        );
+        assert!(message.contains("sudo rm -rf"), "error should keep the sudo hint, got: {message}");
+    }
+}
+
+#[cfg(test)]
+mod delete_dir_all_with_progress_tests {
+    use std::{fs, sync::Mutex};
+
+    use super::delete_dir_all_with_progress;
+
+    /// The whole point of this function: a caller watching a directory
+    /// delete sees real, incremental sub-item progress (bytes removed so
+    /// far) rather than one lump-sum callback at the very end. Real files
+    /// on disk, real removal, state-based assertions on what the callback
+    /// actually observed and on the real post-condition (directory gone) —
+    /// no mocking of the filesystem or of the callback's caller.
+    #[test]
+    fn reports_incremental_bytes_as_each_file_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("victim");
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("a.bin"), vec![0u8; 100]).unwrap();
+        fs::write(root.join("nested").join("b.bin"), vec![0u8; 250]).unwrap();
+
+        let calls: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+        let result = delete_dir_all_with_progress(&root, |freed| {
+            calls.lock().unwrap().push(freed);
+        });
+
+        assert!(result.is_ok(), "expected success, got: {result:?}");
+        assert!(!root.exists(), "directory should be fully removed");
+
+        let calls = calls.into_inner().unwrap();
+        // More than one callback invocation is the actual regression test:
+        // a caller sized to item-count-only progress (the bug this function
+        // fixes) would see only one signal for this whole directory: this
+        // asserts real sub-item granularity instead.
+        assert_eq!(calls.len(), 2, "expected one callback per file, got: {calls:?}");
+        let total: u64 = calls.iter().sum();
+        assert_eq!(total, 350, "callback byte sum should equal real file bytes removed");
+    }
+
+    /// A path that is a file, not a directory, is refused rather than
+    /// silently doing nothing — same contract as `delete_dir_all`.
+    #[test]
+    fn refuses_a_plain_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let not_a_dir = dir.path().join("plain-file");
+        fs::write(&not_a_dir, b"just a file").unwrap();
+
+        let result = delete_dir_all_with_progress(&not_a_dir, |_| {});
+
+        let err = result.expect_err("a file path should be refused");
+        assert!(format!("{err:#}").contains("not a dir"));
+        assert!(not_a_dir.exists(), "refused call must not touch the file");
+    }
+
+    /// An empty directory is removed with zero byte-callbacks (no files to
+    /// report) but the directory itself is still gone afterward.
+    #[test]
+    fn removes_empty_directory_with_no_callbacks() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("empty-victim");
+        fs::create_dir_all(&root).unwrap();
+
+        let calls: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+        let result = delete_dir_all_with_progress(&root, |freed| {
+            calls.lock().unwrap().push(freed);
+        });
+
+        assert!(result.is_ok());
+        assert!(!root.exists());
+        assert!(calls.into_inner().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod delete_dir_all_partial_tests {
+    use std::fs;
+
+    use super::{delete_dir_all, walk_remaining};
+
+    /// A full, unobstructed subtree removes cleanly and reports no
+    /// remaining paths/bytes — the baseline the partial-failure accounting
+    /// below is contrasted against.
+    #[test]
+    fn full_success_leaves_nothing_remaining() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("victim");
+        fs::create_dir_all(root.join("child")).unwrap();
+        fs::write(root.join("child").join("a.txt"), b"hello").unwrap();
+
+        let result = delete_dir_all(&root);
+
+        assert!(result.is_ok(), "expected clean removal, got: {result:?}");
+        assert!(!root.exists());
+    }
+
+    /// A non-directory path is refused outright, and — because nothing was
+    /// ever removed — carries an empty `remaining_paths`/zero
+    /// `remaining_bytes` rather than a walk of an untouched tree.
+    #[test]
+    fn non_directory_path_is_refused_with_no_remaining_accounting() {
+        let dir = tempfile::tempdir().unwrap();
+        let not_a_dir = dir.path().join("plain-file");
+        fs::write(&not_a_dir, b"just a file").unwrap();
+
+        let err = delete_dir_all(&not_a_dir).expect_err("a file is not a directory");
+
+        assert!(err.remaining_paths.is_empty());
+        assert_eq!(err.remaining_bytes, 0);
+        assert!(not_a_dir.exists(), "the untouched file should still be on disk");
+    }
+
+    /// `walk_remaining` — the post-failure accounting primitive
+    /// `PartialDeleteError` is built from — reports the real, on-disk
+    /// survivors of a subtree: real files on a real `tempdir()`, real
+    /// physical byte counts, checked with a state-based assertion (the
+    /// returned paths and byte sum), not an interaction check on which
+    /// functions ran.
+    #[test]
+    fn walk_remaining_lists_real_surviving_paths_and_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("subtree");
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::write(root.join("a.bin"), vec![0u8; 4096]).unwrap();
+        fs::write(root.join("nested").join("b.bin"), vec![0u8; 4096]).unwrap();
+
+        let (remaining, bytes) = walk_remaining(&root);
+
+        assert!(remaining.contains(&root.join("a.bin")));
+        assert!(remaining.contains(&root.join("nested")));
+        assert!(remaining.contains(&root.join("nested").join("b.bin")));
+        // Real physical (block-rounded) size, not zero and not a fabricated
+        // stand-in — proves the byte accounting reads actual on-disk
+        // allocation for the surviving files.
+        assert!(bytes >= 8192, "expected at least the two files' real bytes, got: {bytes}");
+    }
+
+    /// `walk_remaining` on a path that no longer exists (the removal
+    /// actually succeeded despite a reported error — e.g. a race with a
+    /// concurrent process) returns nothing left behind, never a bogus
+    /// nonzero reading.
+    #[test]
+    fn walk_remaining_on_missing_path_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("never-existed");
+
+        let (remaining, bytes) = walk_remaining(&gone);
+
+        assert!(remaining.is_empty());
+        assert_eq!(bytes, 0);
     }
 }

@@ -441,3 +441,55 @@ pub fn extract_exclusion_candidates(plan: &DeletionPlan) -> Vec<Candidate> {
 
     candidates
 }
+
+/// Splits plan items into (top-level items, items nested inside another
+/// planned item's path). A nested item is one whose ancestor path is also
+/// present in `items` — deleting the ancestor (e.g. `delete_dir_all` on a
+/// directory) already removes it, so deleting it again independently races
+/// against the ancestor's own deletion.
+///
+/// Pure partition over paths already present on the plan — no filesystem
+/// access (domain purity: zero `std::fs`/`std::process`).
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::plan::{partition_nested_items, PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
+/// use std::path::PathBuf;
+///
+/// let items = vec![
+///     PlanItem {
+///         path: PathBuf::from("/Users/user/dev/project/target"),
+///         kind: PlanItemKind::Dir,
+///         reason: "rust target".to_string(),
+///         bytes: 0,
+///         reversibility: Reversibility::Reversible,
+///     },
+///     PlanItem {
+///         path: PathBuf::from("/Users/user/dev/project/target/debug"),
+///         kind: PlanItemKind::Dir,
+///         reason: "nested build output".to_string(),
+///         bytes: 0,
+///         reversibility: Reversibility::Reversible,
+///     },
+///     PlanItem {
+///         path: PathBuf::from("/Users/user/dev/other/node_modules"),
+///         kind: PlanItemKind::Dir,
+///         reason: "node_modules".to_string(),
+///         bytes: 0,
+///         reversibility: Reversibility::Unknown,
+///     },
+/// ];
+///
+/// let (top_level, nested) = partition_nested_items(items);
+/// assert_eq!(top_level.len(), 2);
+/// assert_eq!(nested.len(), 1);
+/// assert_eq!(nested[0].path, PathBuf::from("/Users/user/dev/project/target/debug"));
+/// ```
+pub fn partition_nested_items(items: Vec<PlanItem>) -> (Vec<PlanItem>, Vec<PlanItem>) {
+    let all_paths: Vec<PathBuf> = items.iter().map(|i| i.path.clone()).collect();
+    items.into_iter().partition(|item| {
+        !all_paths.iter().any(|other| other != &item.path && item.path.starts_with(other))
+    })
+}

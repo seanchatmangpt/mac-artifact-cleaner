@@ -12,6 +12,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::dcm::Reversibility;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletionExecutionRecord {
     pub version: u32,
@@ -42,6 +44,15 @@ pub struct DeletionResult {
     /// `Deleted`, 0 otherwise). Proves total reclaim in the receipt.
     #[serde(default)]
     pub bytes_freed: u64,
+    /// The reversibility classification this item carried on the plan at
+    /// execution time (copied from `PlanItem::reversibility`). Per DCM §3
+    /// ("reversibility is admission, not optimism"), this must survive into
+    /// the sealed receipt — the permanent audit record — rather than living
+    /// only on the (possibly since-deleted or overwritten) plan file.
+    /// `#[serde(default)]` (resolving to [`Reversibility::Unknown`], the
+    /// fence value) keeps old receipts deserializable.
+    #[serde(default)]
+    pub reversibility: Reversibility,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -175,6 +186,7 @@ impl DeletionReceipt {
     ///         error: None,
     ///         blake3_hash: None,
     ///         bytes_freed: 1024,
+    ///         reversibility: Default::default(),
     ///     }],
     ///     Some(8_000_000_000),
     ///     Some(8_000_001_024),
@@ -222,6 +234,7 @@ impl DeletionReceipt {
     ///         error: None,
     ///         blake3_hash: None,
     ///         bytes_freed: 2_000_000_000,
+    ///         reversibility: Default::default(),
     ///     }],
     ///     Some(8_000_000_000),
     ///     Some(10_000_000_000), // delta = +2_000_000_000 == claimed
@@ -241,6 +254,7 @@ impl DeletionReceipt {
     ///         error: None,
     ///         blake3_hash: None,
     ///         bytes_freed: 2_000_000_000,
+    ///         reversibility: Default::default(),
     ///     }],
     ///     Some(5_000_000_000),
     ///     Some(5_000_000_000), // delta = 0, claim = 2 GB

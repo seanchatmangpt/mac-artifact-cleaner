@@ -39,7 +39,7 @@ pub enum ProjectType {
 }
 
 /// Deletion status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum DeletionStatus {
     Deleted,
@@ -317,6 +317,15 @@ pub struct PlanApproveInput {
     pub approval_reason: String,
     #[serde(default)]
     pub confirm: bool,
+    /// Required (in addition to `confirm`) when the plan contains any item
+    /// classified `Reversibility::Unknown` or `Reversibility::Irreversible`.
+    /// Without this, `plan_approve` refuses — closing the gap where a
+    /// caller could go `audit -> plan build -> plan approve -> delete
+    /// execute` without ever having looked at `plan(validate)`'s
+    /// reversibility warnings, and Unknown/Irreversible items were deleted
+    /// with the exact same single `confirm: true` flag as Reversible ones.
+    #[serde(default)]
+    pub acknowledge_unknown_reversibility: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

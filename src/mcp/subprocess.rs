@@ -115,6 +115,7 @@ impl OclnrRunner {
 
     /// Run: oclnr audit run [roots...] [options]
     #[allow(clippy::result_large_err)]
+    #[allow(clippy::too_many_arguments)]
     pub fn audit_run(
         &self,
         workspace: &PathBuf,

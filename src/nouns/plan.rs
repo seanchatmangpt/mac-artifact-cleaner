@@ -15,7 +15,7 @@ use crate::{
         tool_roots::build_tool_root_defs,
     },
     integration::{
-        fs::{physical_dir_size, scan_root, write_or_dump_on_full},
+        fs::{physical_dir_size, scan_root, write_or_dump_on_full, WriteOutcome},
         progress::ProgressReporter,
     },
 };
@@ -131,13 +131,23 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             // allowlist itself is the safety boundary.
             if include_global_caches {
                 if let Some(home) = dirs::home_dir() {
-                    let known: std::collections::HashSet<_> =
+                    // Reject/skip a global-cache candidate that exactly matches, is an
+                    // ancestor of, or is a descendant of, any already-known candidate
+                    // path. Exact-equality dedup alone (`known.contains`) is not enough:
+                    // an ancestor/descendant pair reaching the plan would still race
+                    // under the parallel deletion executor (mitigated defense-in-depth
+                    // by `partition_nested_items`, but best avoided at nomination time).
+                    let mut known: Vec<std::path::PathBuf> =
                         candidate_vec.iter().map(|c| c.path.clone()).collect();
                     for (path, reason) in crate::domain::artifact::global_cache_candidates(&home) {
+                        let overlaps = known
+                            .iter()
+                            .any(|k| *k == path || path.starts_with(k) || k.starts_with(&path));
                         if path.exists()
                             && !crate::domain::artifact::is_macos_os_dir(&path)
-                            && !known.contains(&path)
+                            && !overlaps
                         {
+                            known.push(path.clone());
                             candidate_vec.push(Candidate { path, reason });
                         }
                     }
@@ -196,9 +206,19 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
 
             let plan = DeletionPlan::new(roots, deps, aggressive, items, vec![]);
             let serialized = serde_json::to_string_pretty(&plan)?;
-            write_or_dump_on_full(&output, &serialized, "deletion plan")?;
+            let plan_write = write_or_dump_on_full(&output, &serialized, "deletion plan")?;
 
-            println!("\n✨ Success: Wrote deletion plan to: {}", output.display());
+            match plan_write {
+                WriteOutcome::Written => {
+                    println!("\n✨ Success: Wrote deletion plan to: {}", output.display());
+                }
+                WriteOutcome::DumpedToStdout => {
+                    println!(
+                        "\n⚠️  Deletion plan could NOT be written to disk — dumped to stdout above, no file exists at {}",
+                        output.display()
+                    );
+                }
+            }
             println!("   Total deletion items: {}", plan.items.len());
             println!("   Estimated reclaim:    {}", human_bytes(plan_total));
             let top_n = 10.min(plan.items.len());

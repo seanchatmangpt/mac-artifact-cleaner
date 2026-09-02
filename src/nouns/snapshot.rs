@@ -10,7 +10,7 @@ use crate::{
         time::{parse_size_in_bytes, select_oldest_snapshots, SnapshotThinReceipt},
     },
     integration::{
-        fs::{volume_space, write_or_dump_on_full},
+        fs::{volume_space, write_or_dump_on_full, WriteOutcome},
         progress::human_bytes,
         tmutil::{delete_local_snapshot, list_local_snapshots, thin_local_snapshots},
     },
@@ -36,14 +36,27 @@ fn seal_snapshot_receipt(
         crate::domain::affidavit_integration::serialize_receipt(&affidavit_receipt),
     )
     .unwrap_or_default();
-    write_or_dump_on_full(&affidavit_path, &affidavit_json, "affidavit receipt")?;
+    let affidavit_write =
+        write_or_dump_on_full(&affidavit_path, &affidavit_json, "affidavit receipt")?;
 
-    println!(
-        "Affidavit receipt written to: {} (core/v1 chain {}, certify: {})",
-        affidavit_path.display(),
-        affidavit_receipt.chain_hash,
-        if verdict.accepted { "✅ ACCEPTED" } else { "❌ REJECTED" }
-    );
+    match affidavit_write {
+        WriteOutcome::Written => {
+            println!(
+                "Affidavit receipt written to: {} (core/v1 chain {}, certify: {})",
+                affidavit_path.display(),
+                affidavit_receipt.chain_hash,
+                if verdict.accepted { "✅ ACCEPTED" } else { "❌ REJECTED" }
+            );
+        }
+        WriteOutcome::DumpedToStdout => {
+            println!(
+                "⚠️  Affidavit receipt could NOT be written to disk — dumped to stdout above, no file exists at {} (core/v1 chain {}, certify: {})",
+                affidavit_path.display(),
+                affidavit_receipt.chain_hash,
+                if verdict.accepted { "✅ ACCEPTED" } else { "❌ REJECTED" }
+            );
+        }
+    }
     Ok(())
 }
 

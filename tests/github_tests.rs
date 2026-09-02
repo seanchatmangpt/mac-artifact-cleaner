@@ -620,6 +620,7 @@ fn test_github_deletions_execution() {
                         error: None,
                         blake3_hash: None,
                         bytes_freed,
+                        reversibility: item.reversibility,
                     }
                 }
                 Err(e) => DeletionResult {
@@ -628,6 +629,7 @@ fn test_github_deletions_execution() {
                     error: Some(e.to_string()),
                     blake3_hash: None,
                     bytes_freed: 0,
+                    reversibility: item.reversibility,
                 },
             }
         } else {
@@ -637,6 +639,7 @@ fn test_github_deletions_execution() {
                 error: Some("Invalid path".to_string()),
                 blake3_hash: None,
                 bytes_freed: 0,
+                reversibility: item.reversibility,
             }
         };
         results.push(res);

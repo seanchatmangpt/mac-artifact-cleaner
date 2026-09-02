@@ -1077,6 +1077,42 @@ impl OsxClnrMcpServer {
                 ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid plan JSON: {}", e))
             })?;
 
+        // Refuse to approve a plan containing any Unknown/Irreversible item
+        // unless the caller has explicitly acknowledged it. `confirm: true`
+        // alone previously gated approval regardless of what the plan
+        // contained, so a caller could go straight from `plan build` to
+        // `plan approve` to `delete execute` without ever having called
+        // `plan(validate)` and seen its reversibility warnings — an
+        // Unknown/Irreversible item (a hand-edited node_modules, a venv
+        // with unpushed local changes) was one `confirm: true` away from
+        // deletion, exactly like a Reversible rust `target/`. This forces
+        // the caller to have actually looked (or to explicitly say they
+        // don't need to) before the plan is signed.
+        let non_reversible_paths: Vec<String> = plan
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.reversibility,
+                    crate::domain::dcm::Reversibility::Unknown
+                        | crate::domain::dcm::Reversibility::Irreversible
+                )
+            })
+            .map(|item| format!("{} [{}]", item.path.display(), item.reversibility.label()))
+            .collect();
+        if !non_reversible_paths.is_empty() && !input.acknowledge_unknown_reversibility {
+            return Err(ErrorResponse::new(
+                ErrorCode::ConfirmationRequired,
+                format!(
+                    "plan contains {} item(s) classified unknown or irreversible reversibility; \
+                     call plan(validate) to review them, then re-call plan_approve with \
+                     acknowledge_unknown_reversibility: true to proceed. Items: {}",
+                    non_reversible_paths.len(),
+                    non_reversible_paths.join(", ")
+                ),
+            ));
+        }
+
         let mut approval = ApprovalMetadata::new(input.approver_name, input.approval_reason);
 
         // Source the real approval secret (env var or machine-local key
@@ -1181,17 +1217,49 @@ impl OsxClnrMcpServer {
             .iter()
             .map(|item| {
                 total_bytes += item.bytes;
-                let status = if item.path.exists() {
-                    DeletionStatus::Deleted
-                } else {
-                    DeletionStatus::SkippedMissing
+                // Shared with `nouns::delete`'s real execution loop via
+                // `classify_nonmutating_outcome` so this preview cannot
+                // structurally diverge from what `delete execute` will
+                // actually do again: it used to hand-roll its own
+                // `item.path.exists()` check with no branch on `item.kind`
+                // at all, so every GitHub-kind item (whose `path` is a
+                // `github://...` string, never a real filesystem path) was
+                // reported `SkippedMissing`/`Deleted` here while real
+                // execution always fails it.
+                let path_exists = item.path.exists();
+                let (domain_status, bytes_freed) =
+                    match crate::domain::delete::classify_nonmutating_outcome(item, path_exists) {
+                        Some((status, bytes_freed)) => (status, bytes_freed),
+                        // File/Dir item whose path exists: a real execute
+                        // would attempt the actual delete here. The preview
+                        // never mutates the filesystem, so it reports the
+                        // planned outcome (`Deleted`, planned bytes) without
+                        // performing it.
+                        None => (crate::domain::receipt::DeletionStatus::Deleted, item.bytes),
+                    };
+                let (status, error) = match domain_status {
+                    crate::domain::receipt::DeletionStatus::Deleted => {
+                        (DeletionStatus::Deleted, None)
+                    }
+                    crate::domain::receipt::DeletionStatus::SkippedMissing => {
+                        (DeletionStatus::SkippedMissing, None)
+                    }
+                    crate::domain::receipt::DeletionStatus::Refused => {
+                        (DeletionStatus::Refused, None)
+                    }
+                    crate::domain::receipt::DeletionStatus::Failed => (
+                        DeletionStatus::Failed,
+                        Some(
+                            "GitHub resources must be deleted using the github command".to_string(),
+                        ),
+                    ),
                 };
                 *items_by_status.entry(format!("{:?}", status)).or_insert(0) += 1;
                 DeletionResult {
                     path: item.path.clone(),
                     status,
-                    bytes_freed: item.bytes,
-                    error: None,
+                    bytes_freed,
+                    error,
                     blake3_hash: None,
                 }
             })

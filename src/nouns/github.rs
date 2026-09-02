@@ -277,6 +277,7 @@ pub fn execute_delete_plan_helper(
                 error: Some("Deletion refused by user".to_string()),
                 blake3_hash: None,
                 bytes_freed: 0,
+                reversibility: item.reversibility,
             }
         } else if !is_github_uri(&item.path) {
             DeletionResult {
@@ -285,6 +286,7 @@ pub fn execute_delete_plan_helper(
                 error: Some("Non-GitHub item skipped during github delete".to_string()),
                 blake3_hash: None,
                 bytes_freed: 0,
+                reversibility: item.reversibility,
             }
         } else if let Some(target) = GithubTarget::parse(&item.path) {
             match delete_github_target(executor, &target) {
@@ -301,6 +303,7 @@ pub fn execute_delete_plan_helper(
                         error: None,
                         blake3_hash: None,
                         bytes_freed,
+                        reversibility: item.reversibility,
                     }
                 }
                 Err(e) => {
@@ -316,6 +319,7 @@ pub fn execute_delete_plan_helper(
                         error: Some(err_str),
                         blake3_hash: None,
                         bytes_freed: 0,
+                        reversibility: item.reversibility,
                     }
                 }
             }
@@ -326,6 +330,7 @@ pub fn execute_delete_plan_helper(
                 error: Some("Invalid github:// URI".to_string()),
                 blake3_hash: None,
                 bytes_freed: 0,
+                reversibility: item.reversibility,
             }
         };
         results.push(res);

@@ -181,6 +181,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
                 error: None,
                 blake3_hash: None,
                 bytes_freed: 0,
+                reversibility: Default::default(),
             });
             continue;
         }
@@ -194,6 +195,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
                     error: None,
                     blake3_hash: None,
                     bytes_freed: 0,
+                    reversibility: Default::default(),
                 },
                 Err(e) => osx_clnr::domain::receipt::DeletionResult {
                     path: item.path.clone(),
@@ -201,6 +203,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
                     error: Some(e.to_string()),
                     blake3_hash: None,
                     bytes_freed: 0,
+                    reversibility: Default::default(),
                 },
             },
             PlanItemKind::Dir => match delete_dir_all(&item.path) {
@@ -210,6 +213,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
                     error: None,
                     blake3_hash: None,
                     bytes_freed: 0,
+                    reversibility: Default::default(),
                 },
                 Err(e) => osx_clnr::domain::receipt::DeletionResult {
                     path: item.path.clone(),
@@ -217,6 +221,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
                     error: Some(e.to_string()),
                     blake3_hash: None,
                     bytes_freed: 0,
+                    reversibility: Default::default(),
                 },
             },
             PlanItemKind::GithubRepo
@@ -232,6 +237,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
                 error: Some("Not supported".to_string()),
                 blake3_hash: None,
                 bytes_freed: 0,
+                reversibility: Default::default(),
             },
         };
         results.push(res);
@@ -402,6 +408,7 @@ fn test_receipt_verification_and_plan_correlation() {
             error: None,
             blake3_hash: None,
             bytes_freed: 0,
+            reversibility: Default::default(),
         }],
         None,
         None,
@@ -431,6 +438,7 @@ fn test_receipt_verification_and_plan_correlation() {
                 error: None,
                 blake3_hash: None,
                 bytes_freed: 0,
+                reversibility: Default::default(),
             },
             DeletionResult {
                 path: tmp.path().join("extra_file.txt"),
@@ -438,6 +446,7 @@ fn test_receipt_verification_and_plan_correlation() {
                 error: None,
                 blake3_hash: None,
                 bytes_freed: 0,
+                reversibility: Default::default(),
             },
         ],
         None,
@@ -465,6 +474,7 @@ fn test_bytes_freed_mismatch_on_zero_movement() {
             error: None,
             blake3_hash: None,
             bytes_freed: 2_000_000_000,
+            reversibility: Default::default(),
         }],
         Some(5_000_000_000),
         Some(5_000_000_000),
@@ -500,6 +510,7 @@ fn test_no_false_positive_within_tolerance() {
             error: None,
             blake3_hash: None,
             bytes_freed: 4_000_000_000,
+            reversibility: Default::default(),
         }],
         Some(10_000_000_000),
         Some(13_000_000_000), // delta = +3 GB == 75% of 4 GB claim
@@ -532,6 +543,7 @@ fn test_back_compat_none_samples_no_mismatch() {
             error: None,
             blake3_hash: None,
             bytes_freed: 5_000_000_000,
+            reversibility: Default::default(),
         }],
         None, // available_before
         None, // available_after
@@ -598,6 +610,7 @@ fn test_bytes_freed_mismatch_plan_bound_deleted_results() {
                 error: None,
                 blake3_hash: None,
                 bytes_freed: 2_000_000_000,
+                reversibility: Default::default(),
             },
             DeletionResult {
                 path: p2.clone(),
@@ -605,6 +618,7 @@ fn test_bytes_freed_mismatch_plan_bound_deleted_results() {
                 error: None,
                 blake3_hash: None,
                 bytes_freed: 1_000_000_000,
+                reversibility: Default::default(),
             },
         ],
         Some(7_000_000_000),

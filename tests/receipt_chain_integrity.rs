@@ -57,6 +57,7 @@ fn write_receipt_and_affidavit(dir: &Path, state: AffidavitState) -> std::path::
             error: None,
             blake3_hash: None,
             bytes_freed: 4096,
+            reversibility: osx_clnr::domain::dcm::Reversibility::Reversible,
         }],
         Some(8_000_000_000),
         Some(8_000_004_096),

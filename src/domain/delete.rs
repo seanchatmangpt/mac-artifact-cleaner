@@ -2,7 +2,11 @@
 
 use std::path::Path;
 
-use crate::domain::{artifact::is_macos_os_dir, plan::DeletionPlan};
+use crate::domain::{
+    artifact::is_macos_os_dir,
+    plan::{DeletionPlan, PlanItem, PlanItemKind},
+    receipt::DeletionStatus,
+};
 
 /// Validates whether a single plan item path is present in the plan and passes safety checks.
 ///
@@ -226,4 +230,100 @@ impl Admit for DeletionPlanAdjudicator {
 /// ```
 pub fn require_plan_approved(plan: &DeletionPlan, secret: &[u8]) -> Result<(), String> {
     plan.verify_approval(secret)
+}
+
+/// Classifies the non-mutating outcomes of executing a single plan item —
+/// a missing path, or a GitHub-kind item (which `delete execute` refuses;
+/// GitHub resources go through the `github` command instead) — without
+/// performing any filesystem mutation itself.
+///
+/// Returns `Some((status, bytes_freed))` for a non-mutating outcome the
+/// caller should use directly, or `None` when the item requires an actual
+/// filesystem delete (a `File`/`Dir` item whose path exists). Shared
+/// between `nouns::delete`'s real execution loop and the MCP
+/// `delete_dry_run` preview so the two paths cannot structurally diverge —
+/// a bug in one branch's classification used to show up as a preview that
+/// promised one outcome and an execute that produced another.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::delete::classify_nonmutating_outcome;
+/// use osx_clnr::domain::plan::{PlanItem, PlanItemKind};
+/// use osx_clnr::domain::receipt::DeletionStatus;
+/// use osx_clnr::domain::dcm::Reversibility;
+/// use std::path::PathBuf;
+///
+/// let missing = PlanItem {
+///     path: PathBuf::from("/tmp/does-not-exist-oclnr-doctest"),
+///     kind: PlanItemKind::Dir,
+///     reason: "rust target".to_string(),
+///     bytes: 1234,
+///     reversibility: Reversibility::Reversible,
+/// };
+/// // Positive: a missing path is classified SkippedMissing regardless of kind.
+/// assert_eq!(
+///     classify_nonmutating_outcome(&missing, false),
+///     Some((DeletionStatus::SkippedMissing, 0))
+/// );
+///
+/// let github_item = PlanItem {
+///     path: PathBuf::from("github://owner/repo/branch/stale"),
+///     kind: PlanItemKind::GithubBranch,
+///     reason: "stale branch".to_string(),
+///     bytes: 0,
+///     reversibility: Reversibility::Compensatable,
+/// };
+/// // Refusal: GitHub-kind items are never deleted by `delete execute`.
+/// assert_eq!(
+///     classify_nonmutating_outcome(&github_item, true),
+///     Some((DeletionStatus::Failed, 0))
+/// );
+///
+/// // Refusal case, false-existence path: a `github://...` path is never a
+/// // real filesystem path, so `path_exists` is always false for it in
+/// // practice — this must still classify as `Failed`, not `SkippedMissing`.
+/// // This is the exact divergence bug this function was extracted to close
+/// // (the old preview called `.exists()` on the `github://...` string, got
+/// // `false`, and reported `SkippedMissing` where real execution always
+/// // reports `Failed`).
+/// assert_eq!(
+///     classify_nonmutating_outcome(&github_item, false),
+///     Some((DeletionStatus::Failed, 0))
+/// );
+///
+/// let dir_item = PlanItem {
+///     path: PathBuf::from("/tmp"),
+///     kind: PlanItemKind::Dir,
+///     reason: "rust target".to_string(),
+///     bytes: 1234,
+///     reversibility: Reversibility::Reversible,
+/// };
+/// // Negative: an existing File/Dir item requires an actual delete — `None`.
+/// assert_eq!(classify_nonmutating_outcome(&dir_item, true), None);
+/// ```
+pub fn classify_nonmutating_outcome(
+    item: &PlanItem,
+    path_exists: bool,
+) -> Option<(DeletionStatus, u64)> {
+    // Github-kind check MUST come before the missing-path check: a
+    // `github://...` item's `path` is never a real filesystem path, so
+    // `path_exists` is always false for it — checking existence first would
+    // misclassify every GitHub item as `SkippedMissing` instead of the
+    // `Failed` real execution always produces for that kind, which is
+    // exactly the divergence this function exists to prevent.
+    match item.kind {
+        PlanItemKind::GithubRepo
+        | PlanItemKind::GithubBranch
+        | PlanItemKind::GithubRun
+        | PlanItemKind::GithubRelease
+        | PlanItemKind::GithubCache
+        | PlanItemKind::GithubIssue
+        | PlanItemKind::GithubPr
+        | PlanItemKind::GithubReleaseAsset => Some((DeletionStatus::Failed, 0)),
+        PlanItemKind::File | PlanItemKind::Dir if !path_exists => {
+            Some((DeletionStatus::SkippedMissing, 0))
+        }
+        PlanItemKind::File | PlanItemKind::Dir => None,
+    }
 }
