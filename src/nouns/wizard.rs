@@ -25,6 +25,7 @@ pub fn handle() -> anyhow::Result<()> {
         output: plan_file.clone(),
         include_global_caches: false,
         verbose: false,
+        redact: false,
     })?;
 
     // Read plan to show count
@@ -83,6 +84,7 @@ pub fn handle() -> anyhow::Result<()> {
             bytes: "100GB".to_string(), // Request a large amount to clear old ones
             receipt: None,
             ocel: None,
+            redact: false,
         })?;
     }
 

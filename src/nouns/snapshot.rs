@@ -76,6 +76,10 @@ pub enum SnapshotAction {
         /// Path to write OCEL v2 JSON evidence
         #[arg(long)]
         ocel: Option<PathBuf>,
+        /// Redact absolute paths and credential-shaped strings (via
+        /// `domain::redaction::redact_content`) before writing `--ocel`.
+        #[arg(long)]
+        redact: bool,
     },
     /// Thin local APFS snapshots to reclaim bytes
     Thin {
@@ -91,6 +95,13 @@ pub enum SnapshotAction {
         /// Path to write OCEL v2 JSON evidence
         #[arg(long)]
         ocel: Option<PathBuf>,
+        /// Redact absolute paths and credential-shaped strings (via
+        /// `domain::redaction::redact_content`) before writing `--ocel`.
+        /// Does not apply to `--receipt` or its sealed affidavit sidecar,
+        /// which are content-addressed and would fail chain-hash
+        /// verification if redacted after the fact.
+        #[arg(long)]
+        redact: bool,
     },
     /// Delete specific local APFS snapshots (by name/date, or the oldest N)
     Delete {
@@ -109,12 +120,19 @@ pub enum SnapshotAction {
         /// Path to write OCEL v2 JSON evidence
         #[arg(long)]
         ocel: Option<PathBuf>,
+        /// Redact absolute paths and credential-shaped strings (via
+        /// `domain::redaction::redact_content`) before writing `--ocel`.
+        /// Does not apply to `--receipt` or its sealed affidavit sidecar,
+        /// which are content-addressed and would fail chain-hash
+        /// verification if redacted after the fact.
+        #[arg(long)]
+        redact: bool,
     },
 }
 
 pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
     match action {
-        SnapshotAction::Audit { mount, ocel } => {
+        SnapshotAction::Audit { mount, ocel, redact } => {
             println!("Auditing local snapshots for: {}", mount);
             let snapshots = list_local_snapshots(&mount)?;
             println!("Found {} local APFS snapshots:", snapshots.len());
@@ -125,11 +143,16 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
             if let Some(o_path) = ocel {
                 let ocel_log = build_snapshot_audit_ocel(&mount, &snapshots);
                 let serialized = serde_json::to_string_pretty(&ocel_log)?;
-                std::fs::write(&o_path, serialized)?;
+                crate::integration::fs::write_or_dump_on_full_redact(
+                    &o_path,
+                    &serialized,
+                    "snapshot audit OCEL log",
+                    redact,
+                )?;
                 println!("Wrote snapshot audit OCEL v2 log to: {}", o_path.display());
             }
         }
-        SnapshotAction::Thin { mount, bytes, receipt, ocel } => {
+        SnapshotAction::Thin { mount, bytes, receipt, ocel, redact } => {
             let parsed_bytes = parse_size_in_bytes(&bytes)
                 .map_err(|e| anyhow::anyhow!("Invalid size format: {}", e))?;
 
@@ -180,11 +203,16 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
                     &receipt_obj.snapshots_thinned,
                 );
                 let serialized = serde_json::to_string_pretty(&ocel_log)?;
-                std::fs::write(&o_path, serialized)?;
+                crate::integration::fs::write_or_dump_on_full_redact(
+                    &o_path,
+                    &serialized,
+                    "snapshot thin OCEL log",
+                    redact,
+                )?;
                 println!("Wrote snapshot thin OCEL v2 log to: {}", o_path.display());
             }
         }
-        SnapshotAction::Delete { mount, which, oldest_n, receipt, ocel } => {
+        SnapshotAction::Delete { mount, which, oldest_n, receipt, ocel, redact } => {
             let before = list_local_snapshots(&mount)?;
 
             // Resolve `which` into a concrete list of date suffixes to delete.
@@ -256,7 +284,12 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
                     &receipt_obj.snapshots_thinned,
                 );
                 let serialized = serde_json::to_string_pretty(&ocel_log)?;
-                std::fs::write(&o_path, serialized)?;
+                crate::integration::fs::write_or_dump_on_full_redact(
+                    &o_path,
+                    &serialized,
+                    "snapshot delete OCEL log",
+                    redact,
+                )?;
                 println!("Wrote snapshot delete OCEL v2 log to: {}", o_path.display());
             }
         }

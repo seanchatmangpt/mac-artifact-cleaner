@@ -33,6 +33,7 @@ pub fn handle(path: Option<PathBuf>) -> anyhow::Result<()> {
         output: plan_file.clone(),
         include_global_caches: false,
         verbose: false,
+        redact: false,
     })?;
 
     // Read plan to show count

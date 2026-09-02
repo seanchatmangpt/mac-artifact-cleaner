@@ -57,6 +57,11 @@ pub enum AuditAction {
         /// network mounts or other users' volumes.
         #[arg(long)]
         all_filesystems: bool,
+        /// Redact absolute paths and credential-shaped strings (via
+        /// `domain::redaction::redact_content`) before writing `--ocel-output`,
+        /// so the report never leaves the machine unredacted by construction.
+        #[arg(long)]
+        redact: bool,
     },
     /// Run a full disk audit and present a premium user-friendly analytics summary
     Summarize {
@@ -142,6 +147,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             verbose,
             ocel_output,
             all_filesystems,
+            redact,
         } => {
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
@@ -193,7 +199,12 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             if let Some(o_path) = ocel_output {
                 let log = build_disk_audit_ocel(&roots, &candidates, &tool_reports, &stats);
                 let serialized = serde_json::to_string_pretty(&log)?;
-                std::fs::write(&o_path, serialized)?;
+                crate::integration::fs::write_or_dump_on_full_redact(
+                    &o_path,
+                    &serialized,
+                    "audit OCEL log",
+                    redact,
+                )?;
                 println!("\nWrote OCEL v2 log to: {}", o_path.display());
             }
         }

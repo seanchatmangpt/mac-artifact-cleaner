@@ -83,6 +83,48 @@ pub fn read_dir_snapshot(dir: &Path) -> DirSnapshot {
 /// and silently losing it is how the original deadlock happened. Here we surface
 /// it so the user can capture it and run `oclnr emergency` to recover space.
 pub fn write_or_dump_on_full(path: &Path, contents: &str, label: &str) -> anyhow::Result<()> {
+    write_or_dump_on_full_redact(path, contents, label, false)
+}
+
+/// Same as [`write_or_dump_on_full`], but when `redact` is `true` runs
+/// [`crate::domain::redaction::redact_content`] over `contents` before writing
+/// (and before any disk-full dump to stdout), so a report never touches disk —
+/// or the terminal — unredacted when the caller asked for `--redact`.
+///
+/// This is the single shared choke point audit/plan/snapshot output writers
+/// go through, so `--redact` applies globally per `docs/GALL_ROADMAP.md`
+/// Phase 4 rather than requiring a manual follow-up `oclnr privacy redact`
+/// pass.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::integration::fs::write_or_dump_on_full_redact;
+/// use std::fs;
+///
+/// let dir = std::env::temp_dir().join(format!("oclnr-redact-write-test-{}", std::process::id()));
+/// fs::create_dir_all(&dir).unwrap();
+/// let path = dir.join("report.json");
+///
+/// write_or_dump_on_full_redact(&path, "/Users/alice/project", "report", true).unwrap();
+/// let written = fs::read_to_string(&path).unwrap();
+/// assert_eq!(written, "/Users/<user>/project");
+///
+/// fs::remove_dir_all(&dir).ok();
+/// ```
+pub fn write_or_dump_on_full_redact(
+    path: &Path,
+    contents: &str,
+    label: &str,
+    redact: bool,
+) -> anyhow::Result<()> {
+    let owned;
+    let contents = if redact {
+        owned = crate::domain::redaction::redact_content(contents);
+        owned.as_str()
+    } else {
+        contents
+    };
     match std::fs::write(path, contents) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::StorageFull => {

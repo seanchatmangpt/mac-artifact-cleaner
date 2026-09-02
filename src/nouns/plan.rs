@@ -15,7 +15,7 @@ use crate::{
         tool_roots::build_tool_root_defs,
     },
     integration::{
-        fs::{physical_dir_size, scan_root, write_or_dump_on_full},
+        fs::{physical_dir_size, scan_root},
         progress::ProgressReporter,
     },
 };
@@ -46,6 +46,10 @@ pub enum PlanAction {
         /// Verbose trace output
         #[arg(long)]
         verbose: bool,
+        /// Redact absolute paths and credential-shaped strings (via
+        /// `domain::redaction::redact_content`) before writing the plan file.
+        #[arg(long)]
+        redact: bool,
     },
     /// Inspect a built deletion plan
     Inspect {
@@ -69,6 +73,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             output,
             include_global_caches,
             verbose,
+            redact,
         } => {
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
@@ -196,7 +201,12 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
 
             let plan = DeletionPlan::new(roots, deps, aggressive, items, vec![]);
             let serialized = serde_json::to_string_pretty(&plan)?;
-            write_or_dump_on_full(&output, &serialized, "deletion plan")?;
+            crate::integration::fs::write_or_dump_on_full_redact(
+                &output,
+                &serialized,
+                "deletion plan",
+                redact,
+            )?;
 
             println!("\n✨ Success: Wrote deletion plan to: {}", output.display());
             println!("   Total deletion items: {}", plan.items.len());
