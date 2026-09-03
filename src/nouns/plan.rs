@@ -53,6 +53,30 @@ pub enum PlanAction {
         #[arg(short, long)]
         plan: PathBuf,
     },
+    /// Sign a plan for deletion (CLI-only path — mirrors the MCP `plan_approve`
+    /// tool's HMAC-signing logic exactly, so an unattended script/launchd job
+    /// can complete the full audit->plan->approve->delete pipeline without an
+    /// MCP/Claude session in the loop). `delete execute` refuses any plan
+    /// lacking a signature this command (or the MCP tool) produced.
+    Approve {
+        /// Path to the deletion plan to sign
+        #[arg(short, long)]
+        plan: PathBuf,
+        /// Recorded approver identity (free text, goes into the receipt)
+        #[arg(long, default_value = "oclnr-cli")]
+        approver: String,
+        /// Recorded reason for this approval (free text, goes into the receipt)
+        #[arg(long)]
+        reason: String,
+        /// Required to approve a plan containing any item whose reversibility
+        /// classification is Unknown or Irreversible (see `plan inspect`) —
+        /// forces the caller to have actually looked before signing.
+        #[arg(long)]
+        acknowledge_unknown_reversibility: bool,
+        /// Required: this command signs the plan for real deletion.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 use std::sync::atomic::Ordering;
@@ -301,6 +325,51 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                 }
             }
             println!("==================================================");
+        }
+        PlanAction::Approve { plan, approver, reason, acknowledge_unknown_reversibility, yes } => {
+            if !yes {
+                anyhow::bail!(
+                    "Refusing to approve without --yes — this signs the plan for real deletion. \
+                     Review it first with `oclnr plan inspect --plan {}`.",
+                    plan.display()
+                );
+            }
+            let content = std::fs::read_to_string(&plan)?;
+            let mut plan_data: DeletionPlan = serde_json::from_str(&content)?;
+
+            // Same fence as the MCP `plan_approve` tool: a plan with any
+            // Unknown/Irreversible item requires an explicit acknowledgement,
+            // not just `--yes`, so an unattended caller can't sign past a
+            // classification gap it never looked at.
+            let non_reversible: Vec<String> = plan_data
+                .items
+                .iter()
+                .filter(|i| {
+                    matches!(i.reversibility, Reversibility::Unknown | Reversibility::Irreversible)
+                })
+                .map(|i| format!("{} [{}]", i.path.display(), i.reversibility.label()))
+                .collect();
+            if !non_reversible.is_empty() && !acknowledge_unknown_reversibility {
+                anyhow::bail!(
+                    "plan contains {} item(s) classified unknown or irreversible reversibility; \
+                     review with `oclnr plan inspect --plan {}`, then re-run with \
+                     --acknowledge-unknown-reversibility to proceed. Items: {}",
+                    non_reversible.len(),
+                    plan.display(),
+                    non_reversible.join(", ")
+                );
+            }
+
+            let secret = crate::integration::config::approval_secret()?;
+            plan_data.approval = Some(plan_data.sign_approval(&secret, &approver, &reason));
+            let signed = serde_json::to_string_pretty(&plan_data)?;
+            std::fs::write(&plan, signed)?;
+            println!(
+                "✅ Plan approved: {} (approver: {}, reason: {})",
+                plan.display(),
+                approver,
+                reason
+            );
         }
     }
     Ok(())

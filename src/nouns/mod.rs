@@ -2,6 +2,7 @@
 
 pub mod artifact;
 pub mod audit;
+pub mod autoclean;
 pub mod backup;
 pub mod brew;
 pub mod completion;
@@ -154,6 +155,12 @@ pub enum Command {
         #[command(subcommand)]
         action: daemon::DaemonAction,
     },
+    /// Unattended, safe, capped cleanup pipeline for the `daemon install
+    /// --mode autoclean` launchd job
+    Autoclean {
+        #[command(subcommand)]
+        action: autoclean::AutocleanAction,
+    },
     /// Xcode simulator and DerivedData scan
     Xcode {
         #[command(subcommand)]
@@ -237,6 +244,7 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::Docker { action } => docker::handle(action),
         Command::Brew { action } => brew::handle(action),
         Command::Daemon { action } => daemon::handle(action),
+        Command::Autoclean { action } => autoclean::handle(action),
         Command::Xcode { action } => xcode::handle(action),
         Command::Backup { action } => backup::handle(action),
         Command::Tools { action } => tools::handle(action),

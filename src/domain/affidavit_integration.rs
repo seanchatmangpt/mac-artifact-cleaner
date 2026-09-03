@@ -29,6 +29,7 @@ use crate::domain::{receipt::DeletionReceipt, time::SnapshotThinReceipt};
 /// ```
 /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
 /// use osx_clnr::domain::affidavit_integration::build_deletion_affidavit;
+/// use osx_clnr::domain::dcm::Reversibility;
 ///
 /// let receipt = DeletionReceipt::new(
 ///     0, 1, 2,
@@ -38,6 +39,7 @@ use crate::domain::{receipt::DeletionReceipt, time::SnapshotThinReceipt};
 ///         error: None,
 ///         blake3_hash: None,
 ///         bytes_freed: 4096,
+///         reversibility: Reversibility::Reversible,
 ///     }],
 ///     None, None,
 /// );
@@ -337,6 +339,7 @@ pub fn serialize_receipt(receipt: &Receipt) -> Vec<u8> {
 /// ```
 /// use osx_clnr::domain::receipt::{DeletionReceipt, DeletionResult, DeletionStatus};
 /// use osx_clnr::domain::affidavit_integration::{build_deletion_affidavit, admit};
+/// use osx_clnr::domain::dcm::Reversibility;
 ///
 /// let receipt = DeletionReceipt::new(
 ///     0, 1, 2,
@@ -346,6 +349,7 @@ pub fn serialize_receipt(receipt: &Receipt) -> Vec<u8> {
 ///         error: None,
 ///         blake3_hash: None,
 ///         bytes_freed: 1,
+///         reversibility: Reversibility::Reversible,
 ///     }],
 ///     None, None,
 /// );
