@@ -605,11 +605,27 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 check_reclaim(bytes_freed_total, space_before.map(|v| v.available), available_after)
             {
                 let measured_unsigned = if measured < 0 { 0 } else { measured as u64 };
-                anyhow::bail!(
-                    "Space verification shortfall: Receipt claims {} bytes freed but volume free-space delta measured only {} bytes (floor={:.0}%).",
+                // Non-fatal, matching `DeletionReceipt::verify()`'s treatment of the
+                // same `check_reclaim` witness (a `VerificationIssue`, not a hard
+                // error). A real, common, non-bug cause of this shortfall on macOS:
+                // local APFS/Time Machine snapshots retain the freed blocks until
+                // thinned (`tmutil thinlocalsnapshots`), so files can be genuinely,
+                // fully deleted (per-item bytes_freed is a real stat/sum at delete
+                // time, not an estimate) while `statvfs` free space barely moves.
+                // Bailing here previously turned every real, successful deletion
+                // into a nonzero exit — which the MCP server reported as "Subprocess
+                // 'oclnr delete execute' failed" even though the receipt (written
+                // and affidavit-certified above) was completely valid. Warn instead
+                // so the caller can inspect the receipt and thin snapshots if
+                // needed, rather than losing the whole run to a false negative.
+                println!(
+                    "\n⚠️  Space verification shortfall: receipt claims {} bytes freed but volume free-space delta measured only {} bytes (floor={:.0}%).",
                     human_bytes(claimed),
                     human_bytes(measured_unsigned),
                     crate::domain::receipt::RECLAIM_TOLERANCE * 100.0
+                );
+                println!(
+                    "    This commonly means local APFS/Time Machine snapshots are retaining the freed blocks — run `oclnr snapshot thin` (or the `snapshot` MCP tool) to reclaim visible free space. The receipt above is still valid: per-item bytes were measured, not estimated."
                 );
             }
         }

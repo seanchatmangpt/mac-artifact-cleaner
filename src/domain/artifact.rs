@@ -485,15 +485,26 @@ pub fn is_global_cache(path: &Path) -> bool {
 ///
 /// let cands = global_cache_candidates(Path::new("/Users/john"));
 ///
-/// // Positive case: the user's Library cache is nominated, under home.
-/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/john/Library/Caches")));
+/// // Positive case: a specific, named compiler cache is nominated, under home.
+/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/john/Library/Caches/Mozilla.sccache")));
 ///
 /// // Refusal case: nothing system-level (outside home) is ever nominated.
 /// assert!(cands.iter().all(|(p, _)| p.starts_with("/Users/john")));
+///
+/// // Refusal case: the wholesale ~/Library/Caches directory itself is never
+/// // nominated in one shot — only specific named subdirectories inside it.
+/// assert!(cands.iter().all(|(p, _)| p != Path::new("/Users/john/Library/Caches")));
 /// ```
 pub fn global_cache_candidates(home: &Path) -> Vec<(std::path::PathBuf, String)> {
     [
-        ("Library/Caches", "macOS/app user cache"),
+        // Deliberately NOT a wholesale "Library/Caches" entry — per standing
+        // policy, never nominate all of ~/Library/Caches in one shot (it holds
+        // app state alongside real caches; some subdirs are not safe to blanket
+        // -delete). Instead, name specific, well-known, always-rebuildable
+        // compiler/package caches individually so each is auditable on its own
+        // line in a plan, not buried inside one opaque multi-GB directory.
+        ("Library/Caches/Mozilla.sccache", "sccache compiler cache"),
+        ("Library/pnpm/store", "pnpm content-addressable store"),
         ("Library/Developer/Xcode/DerivedData", "Xcode derived data"),
         ("Library/Developer/CoreSimulator/Caches", "CoreSimulator cache"),
         (".cache", "generic user cache"),
@@ -744,6 +755,10 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
         names.push("rust");
     }
 
+    if snap.has_file("lakefile.lean") || snap.has_file("lakefile.toml") {
+        names.push("lean");
+    }
+
     // Only genuine AI-tool marker directories are sufficient signal on their own.
     // Bare, generic names like `tmp`/`logs`/`chats`/`agents` at a project root are
     // NOT used here: any ordinary project can legitimately have a `logs/` dir (app
@@ -871,6 +886,22 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
 /// let mild_args = ArgsSnapshot { deps: true, aggressive: false, verbose: false, tool_roots: false, ignore_recent_hours: 1, all_filesystems: false };
 /// let mild_candidates = artifact_candidates_from_snapshot(root, &unreal_project, &mild_args, &unreal_snap);
 /// assert!(!mild_candidates.iter().any(|c| c.path.ends_with("Binaries")));
+///
+/// // Positive case: Lean4/lake project → `.lake` is a candidate, always (no
+/// // --deps gate needed, matching rust's "whole cache dir" treatment).
+/// let lean_project = ProjectKind { names: vec!["lean"] };
+/// let lean_snap = DirSnapshot {
+///     children: vec![
+///         EntrySnapshot::new(PathBuf::from("/project/.lake"), ".lake".into(), None, EntryKind::Dir),
+///     ],
+/// };
+/// let lean_candidates = artifact_candidates_from_snapshot(root, &lean_project, &args, &lean_snap);
+/// assert!(lean_candidates.iter().any(|c| c.path.ends_with(".lake")));
+///
+/// // Negative case: no .lake dir present → no candidate, even for a lean project.
+/// let lean_empty = DirSnapshot::default();
+/// let lean_none = artifact_candidates_from_snapshot(root, &lean_project, &args, &lean_empty);
+/// assert!(lean_none.is_empty());
 /// ```
 pub fn artifact_candidates_from_snapshot(
     root: &Path,
@@ -945,6 +976,16 @@ pub fn artifact_candidates_from_snapshot(
             "gradle" => {
                 add_dir(&mut out, root, "build", "gradle build output", snap);
                 add_dir(&mut out, root, ".gradle", "gradle cache", snap);
+            }
+
+            "lean" => {
+                // Lean4/lake build output. Rebuildable via `lake build` given the
+                // `lakefile.lean`/`lakefile.toml` + `lake-manifest.json` that gate
+                // this detector; `.lake` holds both the build cache and fetched
+                // dependency sources, mirroring `rust target`'s "whole cache dir,
+                // no --deps gate" treatment since lake has no separate deps-only
+                // subdirectory to split out.
+                add_dir(&mut out, root, ".lake", "lean lake build", snap);
             }
 
             "rust" => {
