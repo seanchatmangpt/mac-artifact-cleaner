@@ -27,7 +27,7 @@ src/
     audit.rs              - CLI handlers for audit
     artifact.rs           - CLI handlers for artifact
     tool_roots.rs         - CLI handlers for tool-roots
-    plan.rs               - CLI handlers for plan
+    plan.rs               - CLI handlers for plan (includes `plan approve`, HMAC-signs a plan)
     delete.rs             - CLI handlers for delete
     receipt.rs            - CLI handlers for receipt
     snapshot.rs           - CLI handlers for snapshot
@@ -35,6 +35,16 @@ src/
     ocel.rs               - CLI handlers for ocel
     privacy.rs            - CLI handlers for privacy
     doctor.rs             - CLI handlers for doctor diagnostics
+    autoclean.rs          - `autoclean run`: unattended plan->approve->delete->verify pipeline
+    daemon.rs             - `daemon install-autoclean`/`uninstall-autoclean`/`status`: launchd jobs
+    monitor.rs            - CLI handlers for the alert-only monitor daemon
+    docker.rs             - CLI handlers for Docker/Colima cleanup
+    backup.rs, brew.rs, completion.rs, dev.rs, github.rs,
+    tools.rs, wizard.rs, wpm.rs, xcode.rs
+                          - Additional noun handlers (backup, Homebrew, shell
+                            completion, dev-tool utilities, GitHub, tool
+                            discovery, setup wizard, workflow/package
+                            management, Xcode cleanup)
   integration/
     mod.rs                - Registers integrations
     fs.rs                 - Filesystem traversal wrapper (WalkBuilder, estimate_size)

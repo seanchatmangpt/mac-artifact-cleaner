@@ -177,6 +177,8 @@ exclusion
 ocel
 privacy
 doctor
+daemon
+autoclean
 ```
 
 ### 4.2 Verbs
@@ -194,6 +196,7 @@ tool-roots summarize
 plan build
 plan inspect
 plan validate
+plan approve
 plan redact
 
 delete execute
@@ -218,7 +221,38 @@ doctor architecture
 doctor substrate
 doctor doctests
 doctor privacy
+
+daemon install
+daemon install-autoclean
+daemon uninstall
+daemon uninstall-autoclean
+daemon status
+
+autoclean run
 ```
+
+`plan approve` HMAC-signs a plan for deletion (secret sourced via
+`integration::config::approval_secret()`); it requires `--yes`, and requires
+`--acknowledge-unknown-reversibility` to approve a plan containing any item
+whose reversibility classification is `Unknown` or `Irreversible`. This is the
+CLI-only path to sign a plan — previously only the MCP `plan(action:
+"approve")` tool could do this, so no unattended/non-MCP caller could
+complete audit -> plan -> delete.
+
+`autoclean run` orchestrates `plan build` -> `plan approve` -> `delete
+execute` -> `receipt verify` as subprocesses of the running binary, bounded
+by a hard `--max-reclaim-gb` cap (default 50; a plan claiming more is
+refused and logged, never deleted), skips any plan containing an
+`Unknown`/`Irreversible`-reversibility item, defaults `--ignore-recent-hours`
+to 24, and never touches Docker/Colima or wholesale `~/Library/Caches`. Each
+run logs its plan/receipt files and a one-line summary to
+`~/Library/Logs/oclnr/autoclean.log`.
+
+`daemon install-autoclean` / `daemon uninstall-autoclean` write and load a
+`com.oclnr.autoclean` launchd LaunchAgent running `autoclean run --yes`
+daily (default 04:15 local) — separate from the existing alert-only
+`com.oclnr.monitor` job (`daemon install`/`uninstall`), which only notifies
+and never deletes. `daemon status` reports both jobs.
 
 ### 4.3 CLI Layer Rule
 

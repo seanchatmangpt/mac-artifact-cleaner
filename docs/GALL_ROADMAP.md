@@ -7,6 +7,11 @@ This roadmap defines the remaining steps to transition `pentecost` from its curr
 - **M2 (G4-G6):** ✅ Complete — free-space reporting (`VolumeSpace`/`statvfs`), bytes accounting, snapshot delete, emergency reclaim, tool-root aging, global cache nomination.
 - **M3 (G7):** ✅ Substantially complete — all operations emit OCEL v2; `snapshot_delete_requested` event type distinct from `snapshot_thin_requested`.
 - **M4 (G8-G9):** 🔄 In progress — `doctor privacy` exists; auto-redaction and full G9 promotion rule pending.
+- **Beyond the gate scope:** `oclnr autoclean run` (capped, unattended plan→approve→delete→verify
+  pipeline) and `oclnr daemon install-autoclean`/`uninstall-autoclean` (daily launchd job wrapping
+  it) now exist, plus a Lean4/.lake artifact detector in `src/domain/artifact.rs`. None of these
+  were tracked as roadmap items above; noted here since they land outside the G0-G9 gate
+  checklist this document otherwise tracks.
 
 ---
 

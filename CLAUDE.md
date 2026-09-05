@@ -59,15 +59,19 @@ src/
 | `fabric` | SurfaceGraph fabric |
 | `tool_roots` | Tool root detection |
 | `doctor` | Self-verification and diagnostics |
+| `dcm` | Destructive Cleanup Model — `Reversibility` classification (`Reversible`/`Compensatable`/`Unknown`/`Irreversible`) threaded through `PlanItem`/`DeletionResult`/receipts |
+| `docker_receipt` | Plain JSON receipt for `docker prune` (not affidavit-sealed) |
 | `policy`, `time`, `redaction`, `crypto`, `github`, `ocl` | Supporting domains |
 
 ### Integration modules
 
-`fs`, `tmutil`, `doctor`, `github`, `docker`, `monitor`, `progress`
+`fs`, `tmutil`, `doctor`, `github`, `docker`, `monitor`, `progress`, `backup`, `brew`,
+`config` (approval secret sourcing), `git_health`, `notify`, `ocl_store`, `scan_cache`,
+`toolchain`, `xcode`
 
 ### MCP server (`src/mcp/`)
 
-`oclnr-mcp` exposes 7 resource-grouped tools over JSON-RPC, each dispatched by an `action`
+`oclnr-mcp` exposes 8 resource-grouped tools over JSON-RPC, each dispatched by an `action`
 parameter, for Claude to drive the full workflow:
 
 | Tool | Actions |
@@ -78,6 +82,7 @@ parameter, for Claude to drive the full workflow:
 | `delete` | `dry_run` \| `execute` |
 | `receipt` | `parse` \| `verify` (pass `seal: true` to also seal with an affidavit proof chain) |
 | `snapshot` | `audit` \| `thin` \| `delete` |
+| `docker` | `scan` \| `plan` \| `prune` (requires `confirm: true`; writes a plain JSON receipt, not affidavit-sealed — Docker/Colima cleanup has no plan/approval concept to bind a seal to) |
 | `emergency_reclaim` | *(no actions — standalone; scans and deletes in one call, kept separate from `delete` deliberately)* |
 
 **When using Claude to clean disk: use MCP tools — not raw `cargo run` or shell commands.**
@@ -86,11 +91,12 @@ that inspects every shell command for two categories:
 - **Destructive cleanup-shaped commands** (`rm -rf .../target`, `find ... -delete`,
   `docker system/container/image prune`, `colima delete`, `tmutil deletelocalsnapshots`,
   `cargo clean`) — blocked behind an explicit confirmation prompt naming the MCP tool that
-  should have been used instead. Covers the failure mode from a prior session where
-  Docker/Colima cleanup happened via raw `Bash` (`docker system prune`, `colima delete`) with
-  no receipt, entirely outside this audit trail — Time Machine/APFS snapshot work has an MCP
-  tool (`snapshot`) and stayed inside the trail; Docker/Colima do not yet, so that specific gap
-  can still recur until an MCP tool exists for them.
+  should have been used instead. Originally written to cover a failure mode from a prior
+  session where Docker/Colima cleanup happened via raw `Bash` with no receipt, entirely
+  outside this audit trail; the `docker` MCP tool above now closes that specific gap for
+  `prune` (plain JSON receipt), but the hook still blocks raw `colima stop`/`colima delete`
+  unconditionally — there is no MCP tool for Colima VM lifecycle (start/stop/resize) itself,
+  only for what runs inside it (images/containers/build cache via `docker`).
 - **Read-only disk-usage inspection commands** (`df`, `du`, `diskutil list`/`apfs list`/`info`,
   `tmutil listlocalsnapshots`) — allowed to run (no confirmation needed, nothing destructive),
   but the hook injects a note recommending `audit(action: "breakdown")` instead: it walks
@@ -129,13 +135,16 @@ Always drive cleanup through the MCP server. Never use `rm -rf`, `find -delete`,
 | Noun | Domain |
 |---|---|
 | `audit run/summarize` | `artifact`, `audit` |
-| `plan build/inspect` | `plan` |
+| `plan build/inspect/approve` | `plan` (`approve` HMAC-signs via `integration::config::approval_secret()` — CLI-only path, mirrors the MCP `plan(action: "approve")` tool) |
 | `delete execute` | `delete` |
 | `receipt verify` | `receipt`, `affidavit_integration` |
 | `snapshot` | `integration::tmutil` |
+| `docker scan/plan/prune` | `docker_receipt`, `integration::docker` |
 | `emergency` | `artifact`, `integration::fs` |
 | `doctor` | `doctor` |
 | `privacy` | `redaction` |
+| `autoclean run` | orchestrates `plan build` → `plan approve` → `delete execute` → `receipt verify` as subprocesses; hard `--max-reclaim-gb` cap (default 50), refuses over-cap plans, skips Unknown/Irreversible-reversibility items, `--ignore-recent-hours` defaults to 24h, never touches Docker/Colima or wholesale `~/Library/Caches` |
+| `daemon install-autoclean/uninstall-autoclean/status` | writes/loads a `com.oclnr.autoclean` launchd LaunchAgent running `autoclean run --yes` daily (default 04:15 local) — separate from the existing alert-only `com.oclnr.monitor` job |
 
 ### Execution pipeline
 
@@ -171,7 +180,9 @@ oclnr receipt verify     →  deletion-receipt.jsonocel
 
 `disk-audit.json`, `*.jsonocel`, `cleanup-plan.json`, `deletion-receipt.jsonocel` — contain absolute paths and local machine state. Covered by `.gitignore`.
 
+`~/Library/Logs/oclnr/autoclean.log` — append-only log of every `autoclean run` invocation (plan/receipt file paths + a one-line summary), written outside the repo; not gitignored here since it lives outside the working tree.
+
 ## Gall Checkpoints
 
-G0–G7 complete. G8 (privacy gate) and G9 (doctor self-verification) in progress.  
+G0–G7 and G10 complete. G8 (privacy gate) and G9 (doctor self-verification) in progress.  
 See `docs/GALL_CHECKPOINTS.md`. Do not add capabilities without corresponding receipts.

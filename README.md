@@ -55,6 +55,39 @@ oclnr emergency        # dry run: show what would be reclaimed
 oclnr emergency --yes  # execute: delete all local snapshots + sweep regenerable caches
 ```
 
+### Plan Approval (CLI)
+
+A plan can be HMAC-signed for deletion without going through the MCP server:
+
+```bash
+oclnr plan approve --plan cleanup-plan.json --yes
+# a plan containing any Unknown/Irreversible-reversibility item also requires:
+oclnr plan approve --plan cleanup-plan.json --yes --acknowledge-unknown-reversibility
+```
+
+### Unattended Autoclean
+
+`oclnr autoclean run` chains plan build -> plan approve -> delete execute -> receipt
+verify as subprocesses of the running binary, for scheduled/unattended use:
+
+```bash
+oclnr autoclean run --yes
+```
+
+Safety posture: a hard `--max-reclaim-gb` cap (default 50) refuses — logs, does not
+delete — a plan claiming more; any plan containing an Unknown/Irreversible-reversibility
+item is skipped rather than overridden; `--ignore-recent-hours` defaults to 24h; it never
+touches Docker/Colima or wholesale `~/Library/Caches`. Every run's plan/receipt files and
+a one-line summary are logged to `~/Library/Logs/oclnr/autoclean.log`.
+
+To run this daily and unattended via `launchd`:
+
+```bash
+oclnr daemon install-autoclean    # installs com.oclnr.autoclean, daily at 04:15 local
+oclnr daemon status               # reports both com.oclnr.monitor (alert-only) and com.oclnr.autoclean
+oclnr daemon uninstall-autoclean
+```
+
 ## Privacy and Safety
 
 This tool is safe to publish as source code, but its generated reports are machine-local evidence files.

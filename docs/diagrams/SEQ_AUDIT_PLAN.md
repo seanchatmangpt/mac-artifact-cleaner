@@ -88,9 +88,43 @@ sequenceDiagram
     CLI-->>User: ✨ Success: Wrote deletion plan
 ```
 
+### 2a. Plan Approval (CLI-only path)
+
+`oclnr plan approve` HMAC-signs a plan so it becomes eligible for `delete execute`. This
+is a separate, later invocation — not part of `plan build` — but is the step that turns a
+plan produced above into one the delete phase will accept:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant CLI as Nouns::Plan
+    participant Config as Integration::Config
+    participant Plan as Domain::Plan
+    participant Disk as Filesystem (OS)
+
+    User->>CLI: plan approve --plan cleanup-plan.jsonocel --yes
+    CLI->>Config: approval_secret()
+    Config-->>CLI: secret
+    CLI->>Disk: read_file("cleanup-plan.jsonocel")
+    Disk-->>CLI: DeletionPlan (JSON)
+    alt plan has Unknown/Irreversible item
+        CLI->>User: refuse unless --acknowledge-unknown-reversibility
+    end
+    CLI->>Plan: sign(plan, secret)
+    Plan-->>CLI: HMAC signature
+    CLI->>Disk: write_file("cleanup-plan.jsonocel", signed JSON)
+    CLI-->>User: ✨ Success: Plan approved
+```
+
+This mirrors the MCP server's `plan(action: "approve")` tool logic exactly, giving
+unattended/non-MCP callers (e.g. `autoclean run`, see below) a CLI-only path through
+audit → plan → approve → delete without needing the MCP server running.
+
 ## Key Architectural Principles
 
 1.  **Integration/Domain Separation**: The Integration layer (`src/integration/fs.rs`) is the only part of the scanner that touches the OS (`std::fs`). It converts live OS handles into inert Data Transfer Objects (DTOs) like `DirSnapshot`.
 2.  **Pure Domain Classification**: The Domain layer (`src/domain/artifact.rs`) performs classification using only the DTOs. This makes the core logic testable without mocking the filesystem.
 3.  **Parallel Execution**: The `ignore` crate's parallel walker is used to saturate CPU cores while traversing the macOS filesystem, with thread-safe aggregation via `Arc`, `Mutex`, and `DashMap`.
 4.  **Artifact-Centric Observability**: The generation of `disk-audit.jsonocel` allows for external process mining and auditing of what was discovered on the disk.
+5.  **Unattended Orchestration Reuses This Same Pipeline**: `oclnr autoclean run` (see `src/nouns/autoclean.rs`) does not duplicate the audit/plan logic shown above — it drives `plan build`, `plan approve`, `delete execute`, and `receipt verify` as subprocesses of the same binary, with a hard `--max-reclaim-gb` cap and an automatic skip (never an override) of any plan containing an Unknown/Irreversible item. See `docs/diagrams/SEQ_DELETE_RECEIPT.md` for the delete/receipt phases; this document covers only audit → plan → approve.

@@ -65,6 +65,16 @@ sequenceDiagram
     N->>D: Write deletion-receipt.jsonocel
     Note right of D: Immutable record of consequences
 
+    Note over N, D: Phase 4: Space Verification (non-fatal)
+    N->>I: Sample statvfs free-space (before/after)
+    N->>R: check_reclaim(bytes_freed_total, space_before, space_after)
+    alt Delta matches claimed bytes freed
+        R-->>N: Ok
+    else Shortfall below floor
+        R-->>N: VerificationIssue (not an Err)
+        Note right of N: Printed as a ⚠️ warning to stdout;<br/>process still exits 0. Common non-bug cause:<br/>APFS/Time Machine local snapshots retaining<br/>the freed blocks. Suggests `oclnr snapshot thin`<br/>(or the `snapshot` MCP tool). The receipt is<br/>still valid — per-item bytes were measured, not estimated.
+    end
+
     N-->>U: Display Summary (Total, Deleted, Skipped, Failed)
     Note over U: Execution complete with cryptographic evidence
 ```
@@ -75,3 +85,4 @@ sequenceDiagram
 2.  **Validation Gate**: The `validate_plan` function acts as a safety barrier, preventing any system-critical paths from being included in the execution loop, even if they were accidentally included in the plan.
 3.  **Integration Layer Decoupling**: Deletions are performed via `integration::fs` functions which wrap `std::fs`, ensuring a single point of entry for OS-level mutations.
 4.  **OCEL Traceability**: Every deletion (or failure) is recorded as an event in the `deletion-receipt.jsonocel`, relating back to the plan and the original artifact candidate.
+5.  **Space verification is non-fatal**: `check_reclaim`'s post-execution comparison of claimed bytes-freed vs. measured statvfs free-space delta is a warning (stdout, exit 0), not a hard error — matching `DeletionReceipt::verify()`'s existing non-fatal treatment of the same witness. A shortfall commonly means local APFS/Time Machine snapshots are retaining the freed blocks (normal macOS behavior), not a failed or incomplete deletion; the fix is `oclnr snapshot thin` / the `snapshot` MCP tool, not re-running delete.

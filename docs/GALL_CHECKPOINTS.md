@@ -74,6 +74,13 @@ Each checkpoint is defined by five gates:
 *   **Receipt:** Doctor report.
 *   **Promotion Rule:** doctor architecture + doctor privacy + doctor ocel all pass.
 
+### G10 — Unattended Autoclean & CLI-Only Approval
+*   **Capability:** `oclnr plan approve` gives the CLI (not just the MCP server) a path to HMAC-sign a plan, and `oclnr autoclean run` chains `plan build → plan approve → delete execute → receipt verify` as a single unattended pass. `oclnr daemon install-autoclean` schedules it daily via a separate `com.oclnr.autoclean` launchd job (distinct from the pre-existing alert-only `com.oclnr.monitor` job, which never deletes).
+*   **Evidence:** Every prior checkpoint assumed a human runs each stage interactively and reviews the plan before approval; there was no way for a scheduled/non-interactive caller to complete the pipeline at all, since only the MCP server could sign a plan.
+*   **Constraint:** Autoclean is strictly more conservative than an interactive session — a hard `--max-reclaim-gb` cap (default 50) refuses rather than executes any plan claiming more; any plan containing an Unknown/Irreversible-reversibility item is skipped and logged, never auto-acknowledged; `--ignore-recent-hours` defaults to 24h; it never touches Docker/Colima or a wholesale `~/Library/Caches`.
+*   **Receipt:** Every run's plan/receipt file paths plus a one-line summary appended to `~/Library/Logs/oclnr/autoclean.log`, so an unattended run is still fully auditable after the fact.
+*   **Promotion Rule:** Unattended execution is admitted only once plan-bound deletion (G3), snapshot awareness (G5), and receipted verification (G3/G9) already hold — it adds no new deletion mechanism, only a scheduler and safety caps around the existing one.
+
 ---
 
 ## The Principle of Receipted Execution
@@ -114,6 +121,7 @@ This sequence proves the core architectural law of the project:
 | G7 OCEL v2 Reporting | ✅ Substantially complete | All operations emit OCEL; `snapshot_delete_requested` distinct from thin |
 | G8 Privacy / Redaction Gate | 🔄 In progress | `doctor privacy` exists; auto-redaction path not yet wired |
 | G9 Doctor / Self-Verification | 🔄 In progress | `doctor architecture/substrate/doctests` pass; full G9 promotion rule pending |
+| G10 Unattended Autoclean | ✅ Complete | `plan approve` (CLI), `autoclean run`, `daemon install-autoclean` (`com.oclnr.autoclean`), safety cap + reversibility gate + log receipt |
 
 ## Roadmap to G9
 For the current execution plan and status of remaining checkpoints, see the [Gall Checkpoint Roadmap](GALL_ROADMAP.md).

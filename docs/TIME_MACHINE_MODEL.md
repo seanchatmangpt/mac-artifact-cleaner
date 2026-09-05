@@ -111,8 +111,28 @@ oclnr emergency --yes
 
 ### 3.4 The APFS Snapshot Caveat in Receipt Verification
 
-`domain::receipt::check_reclaim` compares `bytes_freed_total` (sum of plan-declared sizes) against the actual `available_after - available_before` volume delta. When this delta falls below 50% of the claimed value, `BytesFreedMismatch` is raised in the receipt verification report.
+`domain::receipt::check_reclaim` compares `bytes_freed_total` (sum of plan-declared sizes) against the actual `available_after - available_before` volume delta. When this delta falls below 50% of the claimed value, it returns `ReclaimCheck::Shortfall` in the receipt verification report.
 
 This is **correct signal**, not a false positive: it means blocks were deleted but are still pinned by snapshots. The right response is to run `oclnr snapshot thin` or `oclnr emergency`.
 
+> [!NOTE]
+> A `Shortfall` is **non-fatal**, in both `delete execute` and `receipt verify`. `src/nouns/delete.rs`'s post-execution check used to hard-`bail!` on any shortfall, which produced false-negative "Subprocess ... failed" errors on runs that had actually succeeded completely and written a valid, affidavit-certified receipt — the receipt was correct, only the exit status was wrong. It now prints a non-fatal warning to stdout and exits 0, matching `DeletionReceipt::verify()`'s existing non-fatal treatment of the same witness. The warning suggests running `snapshot thin` (the `snapshot` MCP tool / `oclnr snapshot thin`).
+
 Every snapshot operation is logged in the final delete receipt, showing the before-and-after free space comparison to verify successful block reclamation.
+
+---
+
+## 4. `autoclean` Does Not Thin Snapshots
+
+`oclnr autoclean run` (and its daily `daemon install-autoclean` LaunchAgent) orchestrates
+`plan build` → `plan approve` → `delete execute` → `receipt verify` end to end, unattended.
+It deliberately **never** calls `snapshot thin` or `snapshot delete` as part of that
+pipeline — snapshot thinning stays a separate, explicit, human-invoked step (Rule 1 in
+§3.1: no automatic thinning).
+
+Practical effect: an `autoclean` run can report deleted bytes and still show little or no
+`df`-visible free-space gain, exactly as described in §1, if local Time Machine snapshots
+are pinning the freed blocks — `receipt verify` will surface this as a non-fatal
+`Shortfall` (§3.4), not a failure. If disk pressure persists after `autoclean` has run,
+follow up manually with `oclnr snapshot thin --bytes <N>` (or `oclnr snapshot audit` first
+to see what's pinned) — `autoclean` will not do this for you.

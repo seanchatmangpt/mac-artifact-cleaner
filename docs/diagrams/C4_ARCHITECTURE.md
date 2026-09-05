@@ -16,11 +16,13 @@ C4Context
     System_Ext(filesystem, "macOS Filesystem", "Local storage containing artifacts, caches, and plans.")
     System_Ext(tmutil, "Time Machine (tmutil)", "macOS utility for snapshots and exclusions.")
     System_Ext(docker, "Docker Desktop/Runtime", "Container runtime and image storage.")
+    System_Ext(launchd, "launchd", "macOS service manager; runs the unattended autoclean job on a daily schedule.")
 
     Rel(developer, mac_artifact_cleaner, "Uses CLI to audit, plan, and delete artifacts", "Shell")
     Rel(mac_artifact_cleaner, filesystem, "Scans files, detects projects, and deletes artifacts", "FS API")
     Rel(mac_artifact_cleaner, tmutil, "Queries snapshots and manages exclusions", "CLI Execution")
     Rel(mac_artifact_cleaner, docker, "Analyzes container and image usage", "Docker CLI/API")
+    Rel(mac_artifact_cleaner, launchd, "Installs/uninstalls a LaunchAgent (daemon install-autoclean) that invokes autoclean run --yes daily", "launchctl / plist")
 ```
 
 ## 2. Container Diagram
@@ -34,7 +36,7 @@ C4Container
     Person(developer, "Developer", "Uses CLI commands")
 
     System_Boundary(mac_artifact_cleaner_system, "osx-clnr") {
-        Container(cli_noun, "CLI (Noun Layer)", "Rust / Clap", "Handles user input, parses commands, and orchestrates workflows for audit, plan, delete, and doctor diagnostics.")
+        Container(cli_noun, "CLI (Noun Layer)", "Rust / Clap", "Handles user input, parses commands, and orchestrates workflows for audit, plan, delete, autoclean, daemon, and doctor diagnostics.")
         Container(domain_layer, "Domain Layer", "Pure Rust", "Contains core logic, artifact rules, project detection, plan validation, OCEL formatting, and architectural diagnostics (Doctor).")
         Container(integration_layer, "Integration Layer", "Rust", "Interacts with external systems (FS, Docker, Time Machine) and handles terminal progress visualization.")
     }
@@ -42,8 +44,10 @@ C4Container
     System_Ext(filesystem, "macOS Filesystem", "Source of artifacts and destination for logs/plans.")
     System_Ext(tmutil, "Time Machine (tmutil)", "Managed via sub-process.")
     System_Ext(docker, "Docker Desktop", "Managed via CLI/API.")
+    System_Ext(launchd, "launchd", "Runs the installed com.oclnr.autoclean LaunchAgent on a daily schedule.")
 
-    Rel(developer, cli_noun, "Sends commands (e.g., plan build, delete execute)", "CLI")
+    Rel(developer, cli_noun, "Sends commands (e.g., plan build, delete execute, autoclean run)", "CLI")
+    Rel(cli_noun, launchd, "daemon install-autoclean writes/loads a LaunchAgent invoking autoclean run --yes daily", "launchctl")
     Rel(cli_noun, domain_layer, "Delegates policy and logic", "Function Calls")
     Rel(cli_noun, integration_layer, "Requests I/O operations and progress feedback", "Function Calls")
     
@@ -62,6 +66,8 @@ The `nouns/` module follows a `clap-noun-verb` structure. It is responsible for:
 - Formatting output for the user.
 - Coordinating high-level workflows (e.g., "Scan FS" -> "Apply Domain Rules" -> "Save Plan").
 - Serializing/Deserializing state files (Plans, Receipts).
+- **Autoclean:** Orchestrating unattended `plan build` -> `plan approve` -> `delete execute` -> `receipt verify` as subprocesses, capped by `--max-reclaim-gb` and skipping any plan with an Unknown/Irreversible item.
+- **Daemon:** Installing/uninstalling a `com.oclnr.autoclean` launchd LaunchAgent (`daemon install-autoclean` / `uninstall-autoclean`) that runs `autoclean run --yes` on a daily schedule, separate from the existing alert-only `com.oclnr.monitor` job.
 - **Doctor (G9):** Implementing diagnostics and plan-based self-healing workflows.
 
 ### Domain Layer
