@@ -241,6 +241,45 @@ pub fn select_oldest_snapshots(snapshots: &[String], n: usize) -> Vec<String> {
     dated
 }
 
+/// Selects every *dated* snapshot except the single most recent one — the
+/// target set for "thin to only the most recent" (the default posture for
+/// any cleaning run per the user's standing disk-cleanup rule).
+///
+/// Counts only snapshots [`parse_snapshot_date`] actually matches before
+/// computing how many to keep. Using the raw `snapshots.len()` instead is a
+/// real bug this function replaces: `snapshots` also holds non-dated
+/// system/OS-update snapshots (`com.apple.os.update-*`) that never match
+/// `parse_snapshot_date`, so `len() - 1` overshoots — with 2 dated + 3
+/// OS-update snapshots it asks for the 4 oldest *dated* ones when only 2
+/// exist, deleting both instead of keeping one.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::time::select_snapshots_to_keep_latest;
+///
+/// // Positive case: 2 dated snapshots + 3 non-dated ones — only the older
+/// // dated one is selected for deletion, not both.
+/// let snaps = vec![
+///     "com.apple.TimeMachine.2026-09-11-122106.local".to_string(),
+///     "com.apple.TimeMachine.2026-09-11-134410.local".to_string(),
+///     "com.apple.os.update-AAAA".to_string(),
+///     "com.apple.os.update-BBBB".to_string(),
+///     "com.apple.os.update-MSUPrepareUpdate".to_string(),
+/// ];
+/// assert_eq!(select_snapshots_to_keep_latest(&snaps), vec!["2026-09-11-122106".to_string()]);
+///
+/// // Negative case: a single dated snapshot is already "just the latest" — nothing to delete.
+/// assert!(select_snapshots_to_keep_latest(&["com.apple.TimeMachine.2026-09-11-122106.local".to_string()]).is_empty());
+///
+/// // Refusal case: no dated snapshots at all selects nothing.
+/// assert!(select_snapshots_to_keep_latest(&["com.apple.os.update-AAAA".to_string()]).is_empty());
+/// ```
+pub fn select_snapshots_to_keep_latest(snapshots: &[String]) -> Vec<String> {
+    let dated_count = snapshots.iter().filter(|s| parse_snapshot_date(s).is_some()).count();
+    select_oldest_snapshots(snapshots, dated_count.saturating_sub(1))
+}
+
 /// Represents the terminal receipt of a local snapshot thinning execution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SnapshotThinReceipt {

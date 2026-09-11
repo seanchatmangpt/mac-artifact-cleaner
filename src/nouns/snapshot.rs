@@ -7,7 +7,10 @@ use clap::Subcommand;
 use crate::{
     domain::{
         ocel::{build_snapshot_audit_ocel, build_snapshot_delete_ocel, build_snapshot_thin_ocel},
-        time::{parse_size_in_bytes, select_oldest_snapshots, SnapshotThinReceipt},
+        time::{
+            parse_size_in_bytes, select_oldest_snapshots, select_snapshots_to_keep_latest,
+            SnapshotThinReceipt,
+        },
     },
     integration::{
         fs::{volume_space, write_or_dump_on_full, WriteOutcome},
@@ -110,7 +113,11 @@ pub enum SnapshotAction {
         /// Volume mount point (defaults to "/")
         #[arg(long, default_value = "/")]
         mount: String,
-        /// Snapshot name or date suffix to delete, or "oldest" / "all"
+        /// Snapshot name or date suffix to delete, "oldest" / "all", or
+        /// "keep-latest" (delete every snapshot except the single most
+        /// recent — the default posture for any cleaning run per the
+        /// user's standing disk-cleanup rule: don't let snapshots
+        /// accumulate past what's needed to explain today's state)
         #[arg(long)]
         which: String,
         /// When --which oldest, how many of the oldest snapshots to delete
@@ -207,6 +214,7 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
                     .iter()
                     .filter_map(|s| crate::domain::time::parse_snapshot_date(s))
                     .collect(),
+                "keep-latest" => select_snapshots_to_keep_latest(&before),
                 explicit => vec![explicit.to_string()],
             };
 

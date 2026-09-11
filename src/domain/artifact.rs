@@ -450,6 +450,15 @@ pub fn exclude_self_binary_ancestors(
 /// assert!(is_macos_os_dir(Path::new("/System")));
 /// assert!(is_macos_os_dir(Path::new("/usr")));
 ///
+/// // Positive case: iCloud Drive is blocked — its placeholder files trigger
+/// // blocking on-demand download, which has hung real scans for many
+/// // minutes. This path is `Library/Mobile Documents/com~apple~CloudDocs`,
+/// // not `Library/Application Support/CloudDocs` (a different, unrelated
+/// // string a prior version of this check mistakenly tested for).
+/// assert!(is_macos_os_dir(Path::new(
+///     "/Users/user/Library/Mobile Documents/com~apple~CloudDocs/Documents/notes.txt"
+/// )));
+///
 /// // Negative case: typical user project folders are not marked.
 /// assert!(!is_macos_os_dir(Path::new("/Users/user/projects")));
 /// ```
@@ -462,10 +471,16 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
     }
 
     // Allow everything inside the user's home directory (e.g. /Users/example/Library/...)
-    // but block the root-level /Library, /System, etc.
-    if s.starts_with("/Users/") && !s.contains("/Library/Application Support/CloudDocs") {
-        // We still want to block some very specific user paths that are too noisy or sensitive
-        if s.contains("/Library/Application Support/CloudDocs")
+    // but block a few specific, noisy/sensitive/dangerous-to-walk subtrees.
+    if s.starts_with("/Users/") {
+        // `Library/Mobile Documents/com~apple~CloudDocs` is iCloud Drive. Its
+        // files can be lazy placeholders that macOS materializes on first
+        // access — a `stat`/`read_dir` inside it can block for minutes
+        // waiting on a network fetch (confirmed: a real scan hung 12+
+        // minutes with an open fd into a CloudDocs subdirectory). No
+        // cleanup candidate legitimately lives there, so it's excluded
+        // outright rather than merely deprioritized.
+        if s.contains("/Library/Mobile Documents")
             || s.contains("/Library/Mail")
             || s.contains("/Library/Messages")
         {

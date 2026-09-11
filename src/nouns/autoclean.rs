@@ -259,5 +259,50 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     println!("{msg}");
     append_log(&msg)?;
 
+    // Default posture for every cleaning run: local Time Machine snapshots
+    // are thinned to only the single most recent one. File deletion alone
+    // often shows no visible free-space gain until snapshots pinning the
+    // deleted blocks are cleared too (the user's standing disk-cleanup
+    // rule) — so this runs unconditionally after a successful delete, not
+    // as an opt-in extra step. Deliberately non-fatal: it only ever
+    // touches dated `com.apple.TimeMachine.*` local snapshots (see
+    // `parse_snapshot_date` — OS-update snapshots never match and are left
+    // alone), and a failure here must never make an already-successful,
+    // already-verified file cleanup report as failed.
+    let snapshot_receipt = dir.join(format!("{ts}-snapshot-receipt.jsonocel"));
+    let snapshot_thin = Command::new(&exe)
+        .args(["snapshot", "delete", "--which", "keep-latest", "--receipt"])
+        .arg(&snapshot_receipt)
+        .output();
+    match snapshot_thin {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let summary_line = stdout
+                .lines()
+                .find(|l| l.starts_with("Deleted "))
+                .unwrap_or("snapshot thin: no summary line")
+                .to_string();
+            let msg = format!("[autoclean {ts}] snapshot keep-latest: {summary_line}");
+            println!("{msg}");
+            append_log(&msg)?;
+        }
+        Ok(out) => {
+            let msg = format!(
+                "[autoclean {ts}] snapshot keep-latest FAILED (non-fatal, file cleanup already \
+                 succeeded): {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            eprintln!("{msg}");
+            append_log(&msg)?;
+        }
+        Err(e) => {
+            let msg = format!(
+                "[autoclean {ts}] snapshot keep-latest could not be spawned (non-fatal): {e}"
+            );
+            eprintln!("{msg}");
+            append_log(&msg)?;
+        }
+    }
+
     Ok(())
 }
