@@ -392,6 +392,53 @@ pub fn cache_hit(prev: &CachedDirEntry, current_mtime: i64, current_children_has
 
 /// Returns true when a directory path represents a system/macOS directory
 /// that must never be traversed or deleted.
+/// Drops any candidate whose path is the currently-running executable, or an
+/// ancestor directory of it (e.g. a project `target/` dir that happens to
+/// contain the exe this very process is running from).
+///
+/// Exists because `plan build` is itself an ordinary rust project's build
+/// output when run via the MCP server: `oclnr-mcp` shells out to a `oclnr`
+/// binary co-located under `target/`, and with no exclusion that `target/`
+/// dir is indistinguishable from any other rust project's build cache — a
+/// plan can nominate, and `delete execute` can then remove, the very binary
+/// serving the request. This happened for real: cleaning up `osx-clnr`'s own
+/// checkout deleted `osx-clnr/target`, which took down every subsequent MCP
+/// call in the session until the binary was rebuilt by hand. `exe_path` is
+/// `None` when the caller couldn't resolve `std::env::current_exe()` (e.g. in
+/// a sandboxed test) — pure passthrough in that case, since there is nothing
+/// to protect against.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::{exclude_self_binary_ancestors, Candidate};
+/// use std::path::{Path, PathBuf};
+///
+/// let candidates = vec![
+///     Candidate { path: PathBuf::from("/Users/user/osx-clnr/target"), reason: "rust target".into() },
+///     Candidate { path: PathBuf::from("/Users/user/other-project/target"), reason: "rust target".into() },
+/// ];
+///
+/// // Positive case: the candidate containing the running exe is dropped.
+/// let exe = Path::new("/Users/user/osx-clnr/target/release/oclnr-mcp");
+/// let filtered = exclude_self_binary_ancestors(candidates.clone(), Some(exe));
+/// assert_eq!(filtered.len(), 1);
+/// assert_eq!(filtered[0].path, PathBuf::from("/Users/user/other-project/target"));
+///
+/// // Negative case: no exe path means nothing is excluded.
+/// let unfiltered = exclude_self_binary_ancestors(candidates, None);
+/// assert_eq!(unfiltered.len(), 2);
+/// ```
+pub fn exclude_self_binary_ancestors(
+    candidates: Vec<Candidate>,
+    exe_path: Option<&Path>,
+) -> Vec<Candidate> {
+    let Some(exe) = exe_path else {
+        return candidates;
+    };
+    candidates.into_iter().filter(|c| !exe.starts_with(&c.path)).collect()
+}
+
 ///
 /// # Examples
 ///

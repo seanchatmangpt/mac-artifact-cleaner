@@ -148,6 +148,18 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
 
             let mut candidate_vec: Vec<Candidate> =
                 candidates.iter().map(|e| e.value().clone()).collect();
+
+            // Never let the plan nominate the directory containing the binary
+            // that is running this very `plan build` — see
+            // `exclude_self_binary_ancestors` doc comment for the concrete
+            // incident this guards against (deleting `oclnr-mcp`'s own
+            // `target/` mid-session via the MCP server it was serving).
+            let exe_path = std::env::current_exe().ok();
+            candidate_vec = crate::domain::artifact::exclude_self_binary_ancestors(
+                candidate_vec,
+                exe_path.as_deref(),
+            );
+
             candidate_vec.sort();
 
             // Optionally nominate large user-level caches the per-project scanner
