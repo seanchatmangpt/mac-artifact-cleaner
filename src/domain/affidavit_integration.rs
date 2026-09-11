@@ -77,9 +77,9 @@ pub fn build_deletion_affidavit(receipt: &DeletionReceipt) -> anyhow::Result<Rec
         }],
         payload_commitment: Blake3Hash::from_bytes(execution_record_json.as_bytes()),
     };
-    // Append is infallible here: the event canonicalizes (no non-serializable
-    // payloads), so a failure would be a library-level invariant break.
-    assembler.append(header_event).expect("header event canonicalizes");
+    // Propagate rather than assume: `append` enforces chain-order invariants
+    // in the `affidavit` crate that this file does not itself verify.
+    assembler.append(header_event)?;
 
     // Per-result events: one per deleted/skipped/failed/refused item.
     for (i, result) in receipt.execution_record.results.iter().enumerate() {

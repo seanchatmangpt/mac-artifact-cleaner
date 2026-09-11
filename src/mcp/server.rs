@@ -1896,8 +1896,14 @@ impl OsxClnrMcpServer {
 
         // NOTE: `target_free_gb` is not currently a flag on `oclnr emergency`
         // (it reclaims unconditionally); accepted for forward-compatibility
-        // with a future CLI flag but not yet wired through.
-        let _ = input.target_free_gb;
+        // with a future CLI flag but not yet wired through. Warn the caller
+        // rather than silently ignoring a value they may believe bounds the
+        // reclaim.
+        let target_free_gb_warning = format!(
+            "target_free_gb ({}) was ignored: emergency_reclaim always reclaims unconditionally \
+             and does not yet support a target size",
+            input.target_free_gb
+        );
 
         let result =
             self.runner.emergency_reclaim(&workspace, &input.mount, true, Some(&receipt_file))?;
@@ -1941,7 +1947,7 @@ impl OsxClnrMcpServer {
             space_freed,
             snapshots_thinned,
             caches_cleared,
-            message: "Emergency reclaim complete".to_string(),
+            message: format!("Emergency reclaim complete. WARNING: {target_free_gb_warning}"),
         })
         .unwrap())
     }

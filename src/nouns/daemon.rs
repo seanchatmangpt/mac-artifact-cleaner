@@ -67,6 +67,17 @@ fn autoclean_plist_path() -> PathBuf {
         .join(format!("{}.plist", AUTOCLEAN_PLIST_LABEL))
 }
 
+/// Creates the parent directory of `plist` (e.g. `~/Library/LaunchAgents`),
+/// used by both the `Install` and `InstallAutoclean` branches. Returns a
+/// real error instead of unwrapping if `plist` has no parent.
+fn ensure_plist_dir(plist: &std::path::Path) -> anyhow::Result<()> {
+    let dir = plist
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("plist path has no parent: {}", plist.display()))?;
+    std::fs::create_dir_all(dir)?;
+    Ok(())
+}
+
 /// Generates the autoclean plist. Uses `StartCalendarInterval` (a fixed
 /// daily wall-clock time) rather than `StartInterval` (every N seconds since
 /// boot/load) — appropriate for "once a day, off-peak" the way it isn't for
@@ -193,8 +204,7 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
     match action {
         DaemonAction::Install { threshold_gb, interval_secs, yes } => {
             let plist = plist_path();
-            let dir = plist.parent().unwrap();
-            std::fs::create_dir_all(dir)?;
+            ensure_plist_dir(&plist)?;
             let contents = generate_plist(threshold_gb, interval_secs);
             std::fs::write(&plist, &contents)?;
             println!("Wrote plist: {}", plist.display());
@@ -248,8 +258,7 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
             yes,
         } => {
             let plist = autoclean_plist_path();
-            let dir = plist.parent().unwrap();
-            std::fs::create_dir_all(dir)?;
+            ensure_plist_dir(&plist)?;
             let contents =
                 generate_autoclean_plist(max_reclaim_gb, ignore_recent_hours, hour, minute);
             std::fs::write(&plist, &contents)?;

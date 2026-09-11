@@ -336,8 +336,12 @@ pub fn build_tool_root_report(
         let newest_descendant = acc.newest_mtime.load(Ordering::Relaxed);
         let newest_descendant = if newest_descendant > 0 { Some(newest_descendant) } else { None };
 
-        let newest_path =
-            acc.newest_mtime_path.lock().unwrap().as_ref().map(|p| p.display().to_string());
+        let newest_path = acc
+            .newest_mtime_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|p| p.display().to_string());
 
         let days_since_modified = modified.map(|t| seconds_to_days(now - t));
         let days_since_accessed = accessed.map(|t| seconds_to_days(now - t));

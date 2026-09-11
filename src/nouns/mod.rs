@@ -214,6 +214,7 @@ pub fn default_scan_roots() -> anyhow::Result<Vec<PathBuf>> {
     Ok(roots)
 }
 
+/// Parses CLI args, loads and admits policy, and dispatches to the matched noun's handler.
 pub fn handle_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
 

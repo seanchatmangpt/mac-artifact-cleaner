@@ -73,53 +73,40 @@ fn parse_info_plist(path: &std::path::Path) -> (Option<String>, Option<String>, 
     (device_name, product_type, last_backup_date)
 }
 
-/// Find `<key>KEY</key>` then return the text inside `<string>...</string>` on the next line.
-fn extract_plist_string(content: &str, key: &str) -> Option<String> {
+/// Find `<key>KEY</key>` then return the text inside `<TAG>...</TAG>` on the next line.
+fn extract_plist_tagged(content: &str, key: &str, tag: &str) -> Option<String> {
     let key_tag = format!("<key>{}</key>", key);
+    let open_tag = format!("<{}>", tag);
+    let close_tag = format!("</{}>", tag);
     let mut lines = content.lines();
     while let Some(line) = lines.next() {
         if line.contains(&key_tag) {
             if let Some(next) = lines.next() {
                 let trimmed = next.trim();
-                if trimmed.starts_with("<string>") && trimmed.ends_with("</string>") {
-                    let value = &trimmed["<string>".len()..trimmed.len() - "</string>".len()];
+                if trimmed.starts_with(&open_tag) && trimmed.ends_with(&close_tag) {
+                    let value = &trimmed[open_tag.len()..trimmed.len() - close_tag.len()];
                     return Some(value.to_string());
                 }
             }
         }
     }
     None
+}
+
+/// Find `<key>KEY</key>` then return the text inside `<string>...</string>` on the next line.
+fn extract_plist_string(content: &str, key: &str) -> Option<String> {
+    extract_plist_tagged(content, key, "string")
 }
 
 /// Find `<key>KEY</key>` then return the text inside `<date>...</date>` on the next line.
 fn extract_plist_date(content: &str, key: &str) -> Option<String> {
-    let key_tag = format!("<key>{}</key>", key);
-    let mut lines = content.lines();
-    while let Some(line) = lines.next() {
-        if line.contains(&key_tag) {
-            if let Some(next) = lines.next() {
-                let trimmed = next.trim();
-                if trimmed.starts_with("<date>") && trimmed.ends_with("</date>") {
-                    let value = &trimmed["<date>".len()..trimmed.len() - "</date>".len()];
-                    return Some(value.to_string());
-                }
-            }
-        }
-    }
-    None
+    extract_plist_tagged(content, key, "date")
 }
 
-/// Estimate directory size via `du -sk`.
+/// Estimate directory size via `du -sk`. Silently returns 0 on any failure.
+///
+/// Thin alias over the single shared implementation in
+/// [`crate::integration::progress::du_bytes`].
 fn du_path(path: &std::path::Path) -> u64 {
-    let output = std::process::Command::new("du").args(["-sk", &path.to_string_lossy()]).output();
-    if let Ok(out) = output {
-        if let Ok(s) = String::from_utf8(out.stdout) {
-            if let Some(kb) = s.split_whitespace().next() {
-                if let Ok(n) = kb.parse::<u64>() {
-                    return n * 1024;
-                }
-            }
-        }
-    }
-    0
+    crate::integration::progress::du_bytes(path).unwrap_or(0)
 }

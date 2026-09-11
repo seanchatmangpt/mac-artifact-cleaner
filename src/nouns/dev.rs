@@ -41,7 +41,9 @@ pub fn handle(path: Option<PathBuf>) -> anyhow::Result<()> {
 
     if plan_data.items.is_empty() {
         println!("\n{}", "🎉 No items to clean in this directory.".green());
-        let _ = std::fs::remove_file(&plan_file);
+        if let Err(e) = std::fs::remove_file(&plan_file) {
+            eprintln!("warning: failed to remove {}: {}", plan_file.display(), e);
+        }
         return Ok(());
     }
 

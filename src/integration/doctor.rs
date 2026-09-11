@@ -81,7 +81,7 @@ pub fn read_domain_files(workspace_root: &Path) -> Vec<(String, String)> {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() {
+                if path.is_dir() && !path.is_symlink() {
                     traverse(&path, root, out);
                 } else if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
                     let rel =
@@ -136,6 +136,9 @@ pub fn read_privacy_files(
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
+                    if path.is_symlink() {
+                        continue;
+                    }
                     let name = path.file_name().unwrap_or_default().to_string_lossy();
                     if name == "target"
                         || name == ".git"
@@ -150,16 +153,16 @@ pub fn read_privacy_files(
                 } else if path.is_file() {
                     let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
 
-                    if name.starts_with("cleanup-plan")
+                    if [
+                        "cleanup-plan",
+                        "deletion-plan",
+                        "delete-receipt",
+                        "disk-audit",
+                        "tool-root-audit",
+                    ]
+                    .iter()
+                    .any(|p| name.starts_with(p))
                         && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                        || name.starts_with("deletion-plan")
-                            && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                        || name.starts_with("delete-receipt")
-                            && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                        || name.starts_with("disk-audit")
-                            && (name.ends_with(".json") || name.ends_with(".jsonocel"))
-                        || name.starts_with("tool-root-audit")
-                            && (name.ends_with(".json") || name.ends_with(".jsonocel"))
                     {
                         sensitive_files.push(path.to_string_lossy().to_string());
                     }

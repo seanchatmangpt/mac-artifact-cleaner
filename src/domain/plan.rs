@@ -134,10 +134,8 @@ impl DeletionPlan {
         items: Vec<PlanItem>,
         tool_roots: Vec<ToolRootReport>,
     ) -> Self {
-        let created_unix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let created_unix =
+            crate::domain::time::system_time_to_unix(std::time::SystemTime::now()) as u64;
 
         Self {
             version: 1,

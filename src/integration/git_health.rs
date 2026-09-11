@@ -5,7 +5,7 @@ use std::{
     process::Command,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,7 +40,7 @@ pub fn scan_git_repos(root: &Path) -> Result<Vec<GitRepoHealth>> {
 
 fn inspect_repo(repo_path: &Path) -> Result<GitRepoHealth> {
     let (pack_size_bytes, loose_objects) = count_objects(repo_path)?;
-    let (worktrees, dangling_worktrees) = list_worktrees(repo_path);
+    let (worktrees, dangling_worktrees) = list_worktrees(repo_path)?;
 
     Ok(GitRepoHealth {
         path: repo_path.to_path_buf(),
@@ -75,7 +75,9 @@ fn count_objects(repo_path: &Path) -> Result<(u64, u64)> {
         if let Some(rest) = line.strip_prefix("size-pack:") {
             pack_size_bytes = parse_human_size(rest.trim());
         } else if let Some(rest) = line.strip_prefix("count:") {
-            loose_objects = rest.trim().parse().unwrap_or(0);
+            loose_objects = rest.trim().parse().with_context(|| {
+                format!("unparseable `count:` line from git count-objects: {rest}")
+            })?;
         }
     }
 
@@ -91,16 +93,22 @@ fn parse_human_size(s: &str) -> u64 {
     crate::integration::progress::parse_human_size(s)
 }
 
-fn list_worktrees(repo_path: &Path) -> (Vec<String>, Vec<String>) {
+/// Runs `git worktree list --porcelain` in `repo_path` and parses worktree
+/// paths / dangling status from its output. Returns `Err` (rather than
+/// silently reporting `(vec![], vec![])`, indistinguishable from a repo with
+/// no worktrees at all) if the subprocess itself fails to spawn or run —
+/// mirrors the same discipline as `count_objects` above.
+fn list_worktrees(repo_path: &Path) -> Result<(Vec<String>, Vec<String>)> {
     let output = Command::new("git")
         .args(["-C", repo_path.to_str().unwrap_or(""), "worktree", "list", "--porcelain"])
-        .output();
+        .output()?;
 
-    let Ok(out) = output else {
-        return (vec![], vec![]);
-    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git worktree list failed: {}", stderr.trim());
+    }
 
-    let text = String::from_utf8_lossy(&out.stdout);
+    let text = String::from_utf8_lossy(&output.stdout);
     let mut worktrees: Vec<String> = Vec::new();
     let mut dangling_worktrees: Vec<String> = Vec::new();
 
@@ -115,7 +123,7 @@ fn list_worktrees(repo_path: &Path) -> (Vec<String>, Vec<String>) {
         }
     }
 
-    (worktrees, dangling_worktrees)
+    Ok((worktrees, dangling_worktrees))
 }
 
 fn find_git_repos(dir: &Path, depth: u8, repos: &mut Vec<PathBuf>) {

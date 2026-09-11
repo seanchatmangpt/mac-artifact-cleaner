@@ -251,7 +251,7 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 ProgressStyle::with_template(
                     "[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({percent}%) {msg}",
                 )
-                .unwrap()
+                .expect("static progress template is valid")
                 .progress_chars("#>-"),
             );
             pb.enable_steady_tick(std::time::Duration::from_millis(100));

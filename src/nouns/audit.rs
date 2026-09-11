@@ -57,6 +57,13 @@ pub enum AuditAction {
         /// network mounts or other users' volumes.
         #[arg(long)]
         all_filesystems: bool,
+        /// Confirm an unbounded whole-home-directory scan when `--root` is
+        /// omitted. Without `--root` or `--yes`, the scan is refused rather
+        /// than silently defaulting to `default_scan_roots()` (home dir +
+        /// /tmp) — mirrors the MCP `audit_scan` handler's refusal of an
+        /// empty/blank `roots` input.
+        #[arg(long)]
+        yes: bool,
     },
     /// Run a full disk audit and present a premium user-friendly analytics summary
     Summarize {
@@ -78,6 +85,9 @@ pub enum AuditAction {
         /// See `Run`'s `--all-filesystems`.
         #[arg(long)]
         all_filesystems: bool,
+        /// See `Run`'s `--yes`.
+        #[arg(long)]
+        yes: bool,
     },
     /// Run cargo clean on all Rust target/ directories under a root
     CargoClean {
@@ -142,7 +152,15 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             verbose,
             ocel_output,
             all_filesystems,
+            yes,
         } => {
+            if root.is_empty() && !yes {
+                anyhow::bail!(
+                    "no --root given: refusing to default to a whole-home-directory scan. \
+                     Pass --root <path> to scope the scan, or --yes to confirm scanning the \
+                     home directory and /tmp."
+                );
+            }
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
             let (stats, candidates, tool_reports) = run_audit_scan(
@@ -397,7 +415,15 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             ignore_recent_hours,
             tool_roots,
             all_filesystems,
+            yes,
         } => {
+            if root.is_empty() && !yes {
+                anyhow::bail!(
+                    "no --root given: refusing to default to a whole-home-directory scan. \
+                     Pass --root <path> to scope the scan, or --yes to confirm scanning the \
+                     home directory and /tmp."
+                );
+            }
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
             let (stats, candidates, tool_reports) = run_audit_scan(
@@ -463,7 +489,7 @@ fn run_audit_scan(
 
     let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
     let stats = Arc::new(Stats::default());
-    *stats.phase.lock().unwrap() = "scanning disk".to_string();
+    *stats.phase.lock().unwrap_or_else(|e| e.into_inner()) = "scanning disk".to_string();
 
     let reporter = ProgressReporter::start("Auditing disk".to_string(), stats.clone());
 

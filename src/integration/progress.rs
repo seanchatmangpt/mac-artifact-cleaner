@@ -164,6 +164,34 @@ fn size_unit_multiplier(unit: &str) -> Option<f64> {
 /// assert_eq!(parse_human_size("12.00 KiB"), 12_288);
 /// assert_eq!(parse_human_size("2.1GB (40%)"), parse_human_size("2.1GB"));
 /// ```
+/// Estimate a directory's size in bytes by shelling out to `du -sk`.
+///
+/// Returns an error if the `du` process fails to spawn, exits unsuccessfully,
+/// or its stdout does not parse as the expected `<kilobytes>\t<path>` output.
+/// Callers that want a silent-zero-on-failure policy should use
+/// `.unwrap_or(0)` on the result rather than baking that policy in here.
+pub fn du_bytes(path: &std::path::Path) -> anyhow::Result<u64> {
+    let output =
+        std::process::Command::new("du").args(["-sk", &path.to_string_lossy()]).output()?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "du -sk {} failed: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let kb: u64 = text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("du -sk {} produced no output", path.display()))?
+        .parse()
+        .map_err(|e| {
+            anyhow::anyhow!("could not parse du -sk output for {}: {e}", path.display())
+        })?;
+    Ok(kb * 1024)
+}
+
 pub fn parse_human_size(s: &str) -> u64 {
     let tokens: Vec<&str> = s.split_whitespace().collect();
 

@@ -69,7 +69,7 @@ fn rustup_home_size() -> u64 {
         return 0;
     }
 
-    let output = Command::new("du").args(["-sk", path.to_str().unwrap_or("")]).output().ok();
+    let output = Command::new("du").arg("-sk").arg(path.as_os_str()).output().ok();
 
     if let Some(out) = output {
         let text = String::from_utf8_lossy(&out.stdout);

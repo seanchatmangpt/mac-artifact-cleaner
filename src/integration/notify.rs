@@ -3,6 +3,11 @@
 use anyhow::Result;
 
 /// Send a macOS user notification banner.
+///
+/// Escaping is minimal: only `"` is replaced with `'` in `title`/`body` before
+/// interpolation into the AppleScript string. Backslashes and other
+/// AppleScript-significant characters are not escaped. Callers must not pass
+/// untrusted or arbitrary text — only pre-sanitized/internally-formatted strings.
 pub fn send_notification(title: &str, body: &str) -> Result<()> {
     let script = format!(
         "display notification \"{}\" with title \"{}\"",
