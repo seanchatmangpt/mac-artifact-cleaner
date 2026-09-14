@@ -127,6 +127,61 @@ pub fn write_or_dump_on_full(
     }
 }
 
+/// Writes `content` to `path`, optionally redacting local usernames and
+/// credential-shaped values first (`redact: true`). This is the single
+/// integration-layer chokepoint every noun that writes audit/plan/receipt
+/// JSON should route through instead of calling `std::fs::write` directly,
+/// so `--redact` applies uniformly without touching each noun's own
+/// serialization logic. Built on `write_or_dump_on_full` so the ENOSPC
+/// evidence-preservation behavior (dump to stdout rather than silently
+/// losing the content) still applies regardless of `redact`.
+///
+/// Returns the underlying `WriteOutcome` (callers must still branch on it,
+/// exactly as `write_or_dump_on_full` requires) alongside the
+/// `RedactionLedger` produced when `redact` is true and something was
+/// actually redacted (`None` when `redact` is false, or true with nothing
+/// to redact).
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::integration::fs::{write_output_file, WriteOutcome};
+///
+/// // Positive: redaction applied, ledger populated, file contains no raw path.
+/// let dir = tempfile::tempdir().unwrap();
+/// let path = dir.path().join("out.json");
+/// let content = r#"{"path":"/Users/example/dev"}"#;
+/// let (outcome, ledger) = write_output_file(&path, content, true, "test output").unwrap();
+/// assert!(outcome.is_written());
+/// let ledger = ledger.expect("path was present, ledger should be Some");
+/// assert!(!ledger.is_empty());
+/// let written = std::fs::read_to_string(&path).unwrap();
+/// assert!(!written.contains("example/dev"));
+///
+/// // Negative: redact=false writes content unchanged with no ledger.
+/// let path2 = dir.path().join("out2.json");
+/// let (outcome2, ledger2) = write_output_file(&path2, content, false, "test output").unwrap();
+/// assert!(outcome2.is_written());
+/// assert!(ledger2.is_none());
+/// assert_eq!(std::fs::read_to_string(&path2).unwrap(), content);
+/// ```
+pub fn write_output_file(
+    path: &Path,
+    content: &str,
+    redact: bool,
+    label: &str,
+) -> anyhow::Result<(WriteOutcome, Option<crate::domain::redaction::RedactionLedger>)> {
+    if redact {
+        let (redacted, ledger) = crate::domain::redaction::redact_serialized(content);
+        let outcome = write_or_dump_on_full(path, &redacted, label)?;
+        let ledger = if ledger.is_empty() { None } else { Some(ledger) };
+        Ok((outcome, ledger))
+    } else {
+        let outcome = write_or_dump_on_full(path, content, label)?;
+        Ok((outcome, None))
+    }
+}
+
 // ── Volume free-space query ──────────────────────────────────────────────────────
 
 /// Inert snapshot of a volume's capacity, as reported by `statvfs(2)`.

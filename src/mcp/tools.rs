@@ -166,6 +166,10 @@ pub struct AuditScanInput {
     /// volumes joined by firmlinks. Set this true to actually cover them.
     #[serde(default)]
     pub all_filesystems: bool,
+    /// Redact local usernames and credential-shaped values from the written
+    /// disk-audit OCEL log before it hits disk. Default false.
+    #[serde(default)]
+    pub redact: bool,
 }
 
 fn default_ignore_recent_hours() -> u32 {
@@ -268,6 +272,10 @@ pub struct PlanBuildInput {
     /// it, unless the caller explicitly overrides it.
     #[serde(default)]
     pub ignore_recent_hours: Option<u32>,
+    /// Redact local usernames and credential-shaped values from the written
+    /// plan file before it hits disk. Default false.
+    #[serde(default)]
+    pub redact: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

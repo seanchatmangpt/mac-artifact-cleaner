@@ -18,7 +18,7 @@ use crate::{
     integration::{
         fs::{
             breakdown_sizes_depth, find_cargo_target_dirs, find_large_files, force_remove_dir_all,
-            scan_root, volume_space,
+            scan_root, volume_space, write_output_file,
         },
         progress::{human_bytes, ProgressReporter},
         scan_cache::ScanCache,
@@ -64,6 +64,10 @@ pub enum AuditAction {
         /// empty/blank `roots` input.
         #[arg(long)]
         yes: bool,
+        /// Redact local usernames and credential-shaped values from the
+        /// written OCEL log before it hits disk.
+        #[arg(long)]
+        redact: bool,
     },
     /// Run a full disk audit and present a premium user-friendly analytics summary
     Summarize {
@@ -153,6 +157,7 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             ocel_output,
             all_filesystems,
             yes,
+            redact,
         } => {
             if root.is_empty() && !yes {
                 anyhow::bail!(
@@ -211,8 +216,12 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             if let Some(o_path) = ocel_output {
                 let log = build_disk_audit_ocel(&roots, &candidates, &tool_reports, &stats);
                 let serialized = serde_json::to_string_pretty(&log)?;
-                std::fs::write(&o_path, serialized)?;
+                let (_outcome, ledger) =
+                    write_output_file(&o_path, &serialized, redact, "disk audit OCEL log")?;
                 println!("\nWrote OCEL v2 log to: {}", o_path.display());
+                if let Some(ledger) = ledger {
+                    eprintln!("redacted {} item(s) in {}", ledger.entries.len(), o_path.display());
+                }
             }
         }
         AuditAction::CargoClean { root, dry_run } => {
