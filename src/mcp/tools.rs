@@ -376,8 +376,18 @@ pub struct DeleteExecuteInput {
     pub timeout_secs: u32,
 }
 
+// 30s was the original default, but real deletion plans routinely take well
+// past that: writing/hashing many multi-GB directories, sealing the affidavit
+// receipt, and running the post-hoc space-verification check can each add
+// real wall-clock time on top of the raw unlink work. A too-low timeout
+// SIGKILLs the child mid-deletion — after it has already unlinked real
+// files — so the MCP caller sees a generic "Subprocess failed" while most of
+// the plan's items are, in fact, already gone (confirmed via repeated
+// real-world runs: 24s, 28s, 53s, and 151s executions against multi-GB plans
+// this default would have killed at 30s). 300s gives real headroom without
+// making a genuinely hung subprocess block for unreasonably long.
 fn default_timeout_secs() -> u32 {
-    30
+    300
 }
 
 #[derive(Debug, Clone, Serialize)]

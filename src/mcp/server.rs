@@ -145,7 +145,7 @@ impl OsxClnrMcpServer {
                         "receipt_file": { "type": "string", "description": "(execute only)" },
                         "confirm": { "type": "boolean", "default": false, "description": "(execute only)" },
                         "max_concurrent": { "type": "integer", "default": 4, "description": "(execute only)" },
-                        "timeout_secs": { "type": "integer", "default": 30, "description": "(execute only)" }
+                        "timeout_secs": { "type": "integer", "default": 300, "description": "(execute only) Real deletion plans routinely take well past 30s (multi-GB directory removal, receipt hashing, affidavit sealing, space verification) — a too-low value here SIGKILLs the subprocess mid-deletion after it has already unlinked real files, surfacing as a generic subprocess failure even though most of the plan succeeded." }
                     },
                     "required": ["action", "plan_file"]
                 }
