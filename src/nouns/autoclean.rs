@@ -13,9 +13,11 @@
 //!   Docker/Colima (no detector exists for either, and the project's own
 //!   safety hook independently blocks raw `colima`/`docker prune` commands
 //!   for any interactive session — this job has no path to them at all).
-//! - A hard `--max-reclaim-gb` cap refuses to approve/execute any single
-//!   run's plan larger than the cap, regardless of what the scanner finds —
-//!   a backstop against a detection bug nominating something huge.
+//! - A hard `--max-reclaim-gb` cap bounds how much any single run may delete:
+//!   a plan larger than the cap is trimmed largest-first to fit (the remainder
+//!   defers to the next scheduled run), and a plan whose *single largest item*
+//!   exceeds the cap is refused outright — the backstop against a detection
+//!   bug nominating something huge.
 //! - A plan containing any Unknown/Irreversible-reversibility item is never
 //!   approved unattended (unlike an interactive session, which can pass
 //!   `--acknowledge-unknown-reversibility` after a human looks) — it is
@@ -47,6 +49,10 @@ pub enum AutocleanAction {
         #[arg(long)]
         yes: bool,
     },
+    /// Show the standing of unattended runs, parsed from
+    /// `~/Library/Logs/oclnr/autoclean.log`: last outcome, freed bytes,
+    /// consecutive failures, and run counts. Read-only.
+    Status,
 }
 
 pub fn handle(action: AutocleanAction) -> anyhow::Result<()> {
@@ -54,6 +60,7 @@ pub fn handle(action: AutocleanAction) -> anyhow::Result<()> {
         AutocleanAction::Run { max_reclaim_gb, ignore_recent_hours, yes } => {
             run(max_reclaim_gb, ignore_recent_hours, yes)
         }
+        AutocleanAction::Status => print_status(),
     }
 }
 
@@ -81,6 +88,78 @@ pub fn exceeds_cap(total_bytes: u64, max_reclaim_gb: f64) -> bool {
     total_bytes > cap_bytes
 }
 
+/// Splits plan items into `(kept, deferred)` so the kept set's total never
+/// exceeds `cap_bytes` — the cap as a *per-run budget*, not a veto.
+///
+/// Items are considered largest-first (defensively re-sorted; `plan build`
+/// already emits them that way) so each run removes the biggest wins and
+/// defers the remainder to the next run. An item that alone exceeds the cap
+/// is always deferred, never partially kept — so a runaway nomination
+/// (the detection-bug scenario the cap exists to backstop) still results in
+/// an empty `kept` set and the caller's refuse-and-log path, never in a
+/// silently-truncated deletion of something huge.
+///
+/// Pure: no filesystem access.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::nouns::autoclean::trim_plan_items_to_cap;
+/// use osx_clnr::domain::plan::{PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
+/// use std::path::PathBuf;
+///
+/// let item = |gb: u64| PlanItem {
+///     path: PathBuf::from(format!("/tmp/item-{gb}")),
+///     kind: PlanItemKind::Dir,
+///     reason: "rust target".to_string(),
+///     bytes: gb * 1024 * 1024 * 1024,
+///     reversibility: Reversibility::Reversible,
+/// };
+///
+/// // 25+25+25 GB against a 50 GB budget: the first two fill it exactly, the
+/// // third defers.
+/// let (kept, deferred) = trim_plan_items_to_cap(vec![item(25), item(25), item(25)], 50.0);
+/// assert_eq!(kept.len(), 2);
+/// assert_eq!(deferred.len(), 1);
+/// assert_eq!(deferred[0].bytes, 25 * 1024 * 1024 * 1024);
+///
+/// // A single item larger than the whole cap defers everything — the caller
+/// // must refuse the run (empty kept set), never truncate the item.
+/// let (kept, deferred) = trim_plan_items_to_cap(vec![item(80)], 50.0);
+/// assert!(kept.is_empty());
+/// assert_eq!(deferred.len(), 1);
+///
+/// // Largest-first even if the input arrives unsorted: 40+10 fill the 50 GB
+/// // budget exactly (exact fit is within budget), 30 defers.
+/// let (kept, deferred) = trim_plan_items_to_cap(vec![item(10), item(40), item(30)], 50.0);
+/// assert_eq!(kept.iter().map(|i| i.bytes).sum::<u64>(), 50 * 1024 * 1024 * 1024);
+/// assert_eq!(deferred.len(), 1);
+/// ```
+pub fn trim_plan_items_to_cap(
+    items: Vec<crate::domain::plan::PlanItem>,
+    max_reclaim_gb: f64,
+) -> (Vec<crate::domain::plan::PlanItem>, Vec<crate::domain::plan::PlanItem>) {
+    let cap_bytes = (max_reclaim_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+    let mut sorted = items;
+    sorted.sort_by_key(|i| std::cmp::Reverse(i.bytes));
+
+    let mut kept: Vec<crate::domain::plan::PlanItem> = Vec::new();
+    let mut deferred: Vec<crate::domain::plan::PlanItem> = Vec::new();
+    let mut budget = cap_bytes;
+
+    for item in sorted {
+        if item.bytes <= budget {
+            budget -= item.bytes;
+            kept.push(item);
+        } else {
+            deferred.push(item);
+        }
+    }
+
+    (kept, deferred)
+}
+
 fn log_dir() -> anyhow::Result<PathBuf> {
     let dir = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("no home directory"))?
@@ -97,6 +176,292 @@ fn append_log(line: &str) -> anyhow::Result<()> {
     writeln!(f, "{}", line)?;
     Ok(())
 }
+
+// ── Standing: parsing autoclean.log into an inspectable outcome history ───────
+
+/// Terminal outcome of one unattended run, as classified from its log lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutocleanOutcome {
+    /// Ran to completion (`done.` line present) and deleted something.
+    Ok,
+    /// Ran, plan was empty — nothing to clean.
+    NothingToDo,
+    /// Deliberately did not proceed (unknown/irreversible reversibility).
+    Skipped,
+    /// Deliberately refused (single item over the safety cap).
+    Refused,
+    /// A stage failed (plan build / approve / execute nonzero exit).
+    Failed,
+}
+
+impl std::fmt::Display for AutocleanOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            AutocleanOutcome::Ok => "ok",
+            AutocleanOutcome::NothingToDo => "nothing-to-do",
+            AutocleanOutcome::Skipped => "skipped",
+            AutocleanOutcome::Refused => "refused",
+            AutocleanOutcome::Failed => "FAILED",
+        };
+        write!(f, "{s}")
+    }
+}
+
+/// One run's record, grouped from all log lines sharing its `[autoclean {ts}]`
+/// tag. `detail` is the terminal line that decided the outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutocleanRunRecord {
+    pub started_unix: i64,
+    pub outcome: AutocleanOutcome,
+    pub detail: String,
+    /// Human reclaim figure captured from the `freed:` line, if the run
+    /// reached (and reported) a measured deletion.
+    pub freed: Option<String>,
+}
+
+/// The inspectable history of unattended runs.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AutocleanStanding {
+    pub runs_total: usize,
+    pub last_run_unix: Option<i64>,
+    pub last_outcome: Option<AutocleanOutcome>,
+    pub last_detail: String,
+    pub last_freed: Option<String>,
+    /// Consecutive `Failed` runs counted back from the most recent run —
+    /// the "this job is broken and nobody noticed" signal.
+    pub consecutive_failures: usize,
+    pub runs_last_7d: usize,
+}
+
+/// Parses one log timestamp tag (`20260918T041500Z`) to Unix seconds.
+///
+/// ```
+/// use osx_clnr::nouns::autoclean::parse_log_ts;
+///
+/// assert_eq!(parse_log_ts("19700101T000000Z"), Some(0));
+/// // Refusal: not a timestamp.
+/// assert_eq!(parse_log_ts("nonsense"), None);
+/// ```
+pub fn parse_log_ts(tag: &str) -> Option<i64> {
+    chrono::NaiveDateTime::parse_from_str(tag, "%Y%m%dT%H%M%SZ")
+        .ok()
+        .map(|dt| dt.and_utc().timestamp())
+}
+
+/// Severity rank used to pick a run's terminal outcome when several
+/// classified lines exist (a failed run has no `done.` line, but a
+/// successful one has exactly one terminal marker; rank guards against
+/// reordering anyway).
+fn outcome_rank(line: &str) -> Option<(u8, AutocleanOutcome)> {
+    // Snapshot-thin failures are explicitly non-fatal — the file cleanup
+    // already succeeded — so they must not classify a run as Failed.
+    if line.contains("FAILED") && !line.contains("non-fatal") {
+        return Some((4, AutocleanOutcome::Failed));
+    }
+    if line.contains("REFUSED:") {
+        return Some((3, AutocleanOutcome::Refused));
+    }
+    if line.contains("SKIPPED:") {
+        return Some((2, AutocleanOutcome::Skipped));
+    }
+    if line.trim_start().starts_with("done.") {
+        return Some((1, AutocleanOutcome::Ok));
+    }
+    if line.contains("nothing to clean") {
+        return Some((1, AutocleanOutcome::NothingToDo));
+    }
+    None
+}
+
+/// Extracts the human reclaim figure from a `freed:` log line's text.
+///
+/// ```
+/// use osx_clnr::nouns::autoclean::parse_freed;
+///
+/// assert_eq!(parse_freed("freed: 3.20 GB"), Some("3.20 GB".to_string()));
+/// assert_eq!(parse_freed("freed: nothing"), Some("nothing".to_string()));
+/// // Refusal: a line that carries no freed figure.
+/// assert_eq!(parse_freed("done. plan=x receipt=y verify_exit=Some(0)"), None);
+/// ```
+pub fn parse_freed(line: &str) -> Option<String> {
+    let rest = line.split("freed:").nth(1)?.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    }
+}
+
+/// Folds `autoclean.log` lines (each record line shaped
+/// `[autoclean {ts}] message`, embedded stderr/stdout continuation lines
+/// without the prefix ignored) into the run history. Lines must be in
+/// chronological order — the log is append-only, so they are.
+///
+/// ```
+/// use osx_clnr::nouns::autoclean::{summarize_log, AutocleanOutcome};
+///
+/// let lines = [
+///     "[autoclean 20260917T041500Z] done. plan=/l/1-plan.json receipt=/l/1-r.jsonocel verify_exit=Some(0)",
+///     "[autoclean 20260917T041500Z] freed: 3.20 GB",
+///     "[autoclean 20260918T041500Z] plan build FAILED: exit code 1",
+///     "oclnr: error: something (unprefixed continuation line, ignored)",
+/// ];
+/// let now = osx_clnr::nouns::autoclean::parse_log_ts("20260918T041500Z").unwrap() + 86_400;
+///
+/// let s = summarize_log(&lines, now);
+///
+/// // Positive: both runs found, freed figure captured, failure streak = 1.
+/// assert_eq!(s.runs_total, 2);
+/// assert_eq!(s.last_outcome, Some(AutocleanOutcome::Failed));
+/// assert_eq!(s.consecutive_failures, 1);
+/// // The most recent *reported* reclaim survives even though the newest run
+/// // failed before deleting anything.
+/// assert_eq!(s.last_freed, Some("3.20 GB".to_string()));
+/// assert_eq!(s.runs_last_7d, 2);
+///
+/// // Refusal: no history at all.
+/// assert_eq!(summarize_log(&[], now).runs_total, 0);
+/// ```
+pub fn summarize_log(lines: &[&str], now_unix: i64) -> AutocleanStanding {
+    let mut records: Vec<AutocleanRunRecord> = Vec::new();
+
+    for line in lines {
+        let Some(rest) = line.strip_prefix("[autoclean ") else { continue };
+        let Some((tag, message)) = rest.split_once("] ") else { continue };
+        let Some(started_unix) = parse_log_ts(tag) else { continue };
+
+        let freed = parse_freed(message);
+        let classified = outcome_rank(message);
+
+        // Group by tag: the current record if the tag matches, else a new one.
+        if records.last().map(|r| r.started_unix) == Some(started_unix) && freed.is_some() {
+            records.last_mut().unwrap().freed = freed;
+            continue;
+        }
+        match classified {
+            Some((rank, outcome)) => {
+                let replace_last = records.last().map(|r| r.started_unix) == Some(started_unix)
+                    && outcome_rank(&records.last().unwrap().detail).map(|(r, _)| r) < Some(rank);
+                if replace_last {
+                    let r = records.last_mut().unwrap();
+                    r.outcome = outcome;
+                    r.detail = message.to_string();
+                } else if !replace_last
+                    && records.last().map(|r| r.started_unix) != Some(started_unix)
+                {
+                    records.push(AutocleanRunRecord {
+                        started_unix,
+                        outcome,
+                        detail: message.to_string(),
+                        freed,
+                    });
+                }
+            }
+            None => {
+                // Non-terminal line (progress chatter, freed figure for a
+                // fresh tag) — only open a record for it if this tag is new,
+                // so a run whose terminal line is somehow missing still
+                // appears in the count.
+                if records.last().map(|r| r.started_unix) != Some(started_unix) {
+                    records.push(AutocleanRunRecord {
+                        started_unix,
+                        outcome: AutocleanOutcome::Ok,
+                        detail: message.to_string(),
+                        freed,
+                    });
+                } else if freed.is_some() {
+                    records.last_mut().unwrap().freed = freed;
+                }
+            }
+        }
+    }
+
+    let mut standing = AutocleanStanding::default();
+    standing.runs_total = records.len();
+    let week_ago = now_unix.saturating_sub(7 * 86_400);
+    standing.runs_last_7d = records.iter().filter(|r| r.started_unix >= week_ago).count();
+
+    if let Some(last) = records.last() {
+        standing.last_run_unix = Some(last.started_unix);
+        standing.last_outcome = Some(last.outcome);
+        standing.last_detail = last.detail.clone();
+    }
+    // Most recent *reported* reclaim, not necessarily the newest run's: a
+    // failed run deleted nothing, and hiding the last known figure behind a
+    // `None` would make the standing strictly less informative.
+    standing.last_freed = records.iter().rev().find_map(|r| r.freed.clone());
+    standing.consecutive_failures =
+        records.iter().rev().take_while(|r| r.outcome == AutocleanOutcome::Failed).count();
+
+    standing
+}
+
+/// Renders and prints `autoclean status` (read-only).
+fn print_status() -> anyhow::Result<()> {
+    let log = log_dir()?.join("autoclean.log");
+    println!("Autoclean log: {}", log.display());
+
+    let lines: Vec<String> = match std::fs::read_to_string(&log) {
+        Ok(content) => content.lines().map(|l| l.to_string()).collect(),
+        Err(_) => {
+            println!("No runs recorded yet (no log file).");
+            return Ok(());
+        }
+    };
+    let borrowed: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+    let now = chrono::Utc::now().timestamp();
+    let s = summarize_log(&borrowed, now);
+
+    if s.runs_total == 0 {
+        println!("No runs recorded yet (log exists but is empty or unparsable).");
+        return Ok(());
+    }
+
+    let last_when = s
+        .last_run_unix
+        .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| "?".to_string());
+    println!("Runs recorded:   {} ({} in the last 7 days)", s.runs_total, s.runs_last_7d);
+    println!(
+        "Last run:        {} — {}",
+        last_when,
+        s.last_outcome.map(|o| o.to_string()).unwrap_or_else(|| "?".to_string())
+    );
+    if let Some(freed) = &s.last_freed {
+        println!("Last reclaim:    {freed}");
+    }
+    println!("  detail: {}", s.last_detail);
+    match read_last_trigger_unix() {
+        Some(t) => println!(
+            "Last pressure-trigger: {}",
+            chrono::DateTime::from_timestamp(t, 0)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| t.to_string())
+        ),
+        None => println!("Last pressure-trigger: never"),
+    }
+    if s.consecutive_failures >= 2 {
+        println!(
+            "⚠ {} consecutive failures — the unattended pipeline is broken; \
+             run the stages manually to see the error",
+            s.consecutive_failures
+        );
+    }
+    Ok(())
+}
+
+/// Sends a macOS notification about a run outcome. Non-fatal by contract: a
+/// notification failure must never turn an already-logged outcome into a
+/// run failure — the log line is the durable record, the banner is a
+/// convenience.
+fn notify_nonfatal(title: &str, body: &str) {
+    if let Err(e) = crate::integration::notify::send_notification(title, body) {
+        eprintln!("[autoclean] notification failed (non-fatal): {e}");
+    }
+}
+
+const NOTIFY_TITLE: &str = "osx-clnr autoclean";
 
 fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Result<()> {
     if !yes {
@@ -115,9 +480,17 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     // outside any path it might scan/delete (e.g. `/usr/local/bin`, never
     // a project `target/` dir it could nominate for cleanup itself).
     let exe = std::env::current_exe()?;
+    // launchd runs LaunchAgents with cwd=/ (unwritable, and no scan cache
+    // could ever live at the filesystem root). Anchor every subprocess to
+    // the home directory so workspace-relative state — the `.oclnr-cache`
+    // scan cache `plan build` maintains — lands somewhere usable, exactly
+    // as it does for interactive runs.
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    let home_ref: &std::path::Path = home.as_path();
 
     println!("[autoclean {ts}] building plan (ignore_recent_hours={ignore_recent_hours})...");
     let build = Command::new(&exe)
+        .current_dir(home_ref)
         .args([
             "plan",
             "build",
@@ -137,11 +510,12 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         );
         eprintln!("{msg}");
         append_log(&msg)?;
+        notify_nonfatal(NOTIFY_TITLE, "unattended run FAILED at plan build — see autoclean.log");
         anyhow::bail!("plan build failed");
     }
 
     let plan_content = std::fs::read_to_string(&plan_file)?;
-    let plan: crate::domain::plan::DeletionPlan = serde_json::from_str(&plan_content)?;
+    let mut plan: crate::domain::plan::DeletionPlan = serde_json::from_str(&plan_content)?;
     let total_bytes: u64 = plan.items.iter().map(|i| i.bytes).sum();
 
     if plan.items.is_empty() {
@@ -152,16 +526,47 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     }
 
     if exceeds_cap(total_bytes, max_reclaim_gb) {
+        // Cap as budget, not veto: a machine that genuinely accumulated more
+        // rebuildable artifacts than one run's cap (the machine this was
+        // diagnosed on: 106 GB plan vs 50 GB default cap) used to get NO
+        // cleanup at all — the whole run was refused. Instead, execute the
+        // largest-first subset that fits the cap and defer the rest to the
+        // next scheduled run. If nothing fits (a single item larger than the
+        // whole cap — the runaway-detection backstop), keep the original
+        // refuse-and-log behavior.
+        let (kept, deferred) =
+            trim_plan_items_to_cap(std::mem::take(&mut plan.items), max_reclaim_gb);
+        if kept.is_empty() {
+            let msg = format!(
+                "[autoclean {ts}] REFUSED: single plan item exceeds the {} GB safety cap — not \
+                 approving. Review manually: oclnr plan inspect --plan {}",
+                max_reclaim_gb,
+                plan_file.display()
+            );
+            eprintln!("{msg}");
+            append_log(&msg)?;
+            notify_nonfatal(
+                NOTIFY_TITLE,
+                "run REFUSED: single plan item exceeds the safety cap — review needed",
+            );
+            return Ok(());
+        }
+        let kept_bytes: u64 = kept.iter().map(|i| i.bytes).sum();
+        let deferred_bytes: u64 = deferred.iter().map(|i| i.bytes).sum();
+        plan.items = kept;
+        std::fs::write(&plan_file, serde_json::to_string_pretty(&plan)?)?;
         let msg = format!(
-            "[autoclean {ts}] REFUSED: plan claims {} which exceeds the {} GB safety cap — not \
-             approving. Review manually: oclnr plan inspect --plan {}",
+            "[autoclean {ts}] plan claims {} which exceeds the {} GB cap — executing largest-first \
+             {} ({} items) this run, deferring {} items ({}) to future runs",
             crate::integration::progress::human_bytes(total_bytes),
             max_reclaim_gb,
-            plan_file.display()
+            crate::integration::progress::human_bytes(kept_bytes),
+            plan.items.len(),
+            deferred.len(),
+            crate::integration::progress::human_bytes(deferred_bytes),
         );
-        eprintln!("{msg}");
+        println!("{msg}");
         append_log(&msg)?;
-        return Ok(());
     }
 
     // Never proceed past an Unknown/Irreversible item unattended — an
@@ -188,6 +593,10 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         );
         eprintln!("{msg}");
         append_log(&msg)?;
+        notify_nonfatal(
+            NOTIFY_TITLE,
+            "run SKIPPED: unknown-reversibility items need human review — see autoclean.log",
+        );
         return Ok(());
     }
 
@@ -197,6 +606,7 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         crate::integration::progress::human_bytes(total_bytes)
     );
     let approve = Command::new(&exe)
+        .current_dir(home_ref)
         .args(["plan", "approve", "--plan"])
         .arg(&plan_file)
         .args([
@@ -214,11 +624,13 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         );
         eprintln!("{msg}");
         append_log(&msg)?;
+        notify_nonfatal(NOTIFY_TITLE, "unattended run FAILED at plan approve — see autoclean.log");
         anyhow::bail!("plan approve failed");
     }
 
     println!("[autoclean {ts}] executing...");
     let execute = Command::new(&exe)
+        .current_dir(home_ref)
         .args(["delete", "execute", "--plan"])
         .arg(&plan_file)
         .args(["--receipt"])
@@ -240,10 +652,26 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         );
         eprintln!("{msg}");
         append_log(&msg)?;
+        notify_nonfatal(
+            NOTIFY_TITLE,
+            "unattended run FAILED at delete execute — see autoclean.log",
+        );
         anyhow::bail!("delete execute failed");
     }
 
+    // Record the measured reclaim in the log so `autoclean status` can show
+    // it without parsing the receipt: `delete execute` prints a
+    // `Freed:  X (measured)` line on success.
+    if let Some(freed_line) = exec_stdout.lines().find(|l| l.contains("Freed:")) {
+        let figure = freed_line.split("Freed:").nth(1).unwrap_or("").trim();
+        let figure = figure.trim_end_matches("(measured)").trim();
+        if !figure.is_empty() {
+            append_log(&format!("[autoclean {ts}] freed: {figure}"))?;
+        }
+    }
+
     let verify = Command::new(&exe)
+        .current_dir(home_ref)
         .args(["receipt", "verify", "--receipt"])
         .arg(&receipt_file)
         .args(["--plan"])
@@ -258,6 +686,7 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     );
     println!("{msg}");
     append_log(&msg)?;
+    notify_nonfatal(NOTIFY_TITLE, "unattended cleanup completed — details in autoclean.log");
 
     // Default posture for every cleaning run: local Time Machine snapshots
     // are thinned to only the single most recent one. File deletion alone
@@ -271,6 +700,7 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     // already-verified file cleanup report as failed.
     let snapshot_receipt = dir.join(format!("{ts}-snapshot-receipt.jsonocel"));
     let snapshot_thin = Command::new(&exe)
+        .current_dir(home_ref)
         .args(["snapshot", "delete", "--which", "keep-latest", "--receipt"])
         .arg(&snapshot_receipt)
         .output();
@@ -304,5 +734,36 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         }
     }
 
+    Ok(())
+}
+
+// ── Pressure-trigger coordination (used by `monitor --trigger-autoclean`) ─────
+//
+// The monitor may fire the same lawful autoclean pipeline on demand when the
+// disk is under pressure, bounded by a cooldown so a slow cleanup can never
+// be stacked on itself. The state file records when the last trigger fired;
+// it is written *before* the run starts, so a crashed or hung run still
+// holds the cooldown open instead of letting every monitor fire re-trigger.
+
+/// State file recording the last pressure-trigger time (Unix seconds):
+/// `~/.oclnr/last-autoclean-trigger`.
+fn trigger_state_path() -> anyhow::Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    Ok(home.join(".oclnr").join("last-autoclean-trigger"))
+}
+
+/// Unix seconds of the last monitor pressure-trigger, if any.
+pub fn read_last_trigger_unix() -> Option<i64> {
+    let path = trigger_state_path().ok()?;
+    std::fs::read_to_string(path).ok()?.trim().parse::<i64>().ok()
+}
+
+/// Records `now_unix` as the last pressure-trigger time.
+pub fn write_trigger_stamp(now_unix: i64) -> anyhow::Result<()> {
+    let path = trigger_state_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, format!("{now_unix}\n"))?;
     Ok(())
 }

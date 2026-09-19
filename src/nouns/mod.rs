@@ -194,6 +194,13 @@ pub enum Command {
         /// Poll interval in seconds, only used with --watch
         #[arg(long, default_value = "300")]
         interval_secs: u64,
+        /// When under pressure, run the same capped, receipted `autoclean
+        /// run --yes` pipeline on demand (cooldown-bounded; opt-in)
+        #[arg(long)]
+        trigger_autoclean: bool,
+        /// Minimum hours between pressure-triggered autoclean runs
+        #[arg(long, default_value = "6")]
+        autoclean_cooldown_hours: u64,
     },
 }
 
@@ -249,8 +256,20 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::Xcode { action } => xcode::handle(action),
         Command::Backup { action } => backup::handle(action),
         Command::Tools { action } => tools::handle(action),
-        Command::Monitor { threshold_gb, mount, watch, interval_secs } => {
-            monitor::handle(threshold_gb, mount, watch, interval_secs)
-        }
+        Command::Monitor {
+            threshold_gb,
+            mount,
+            watch,
+            interval_secs,
+            trigger_autoclean,
+            autoclean_cooldown_hours,
+        } => monitor::handle(
+            threshold_gb,
+            mount,
+            watch,
+            interval_secs,
+            trigger_autoclean,
+            autoclean_cooldown_hours,
+        ),
     }
 }
