@@ -32,6 +32,8 @@ use std::{path::PathBuf, process::Command};
 
 use clap::Subcommand;
 
+use crate::domain::ocel::{build_autoclean_run_ocel, AutocleanRunFacts};
+
 #[derive(Subcommand, Debug)]
 pub enum AutocleanAction {
     /// Run one safe cleanup pass: build a plan, approve it if (and only if)
@@ -488,6 +490,30 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
     let home_ref: &std::path::Path = home.as_path();
 
+    // Orchestration evidence: the run-level OCEL log relating this run to
+    // the plan/receipt/snapshot artifacts it produced (or refused to
+    // produce). Written at every terminal outcome — a refused or failed run
+    // is exactly when the evidence matters most. Non-fatal to write: the
+    // per-stage artifacts are the primary receipts; this is the run-level
+    // index over them.
+    let mut facts = AutocleanRunFacts {
+        run_id: ts.clone(),
+        trigger: std::env::var("OCLNR_AUTOCLEAN_TRIGGER").unwrap_or_else(|_| "scheduled".into()),
+        max_reclaim_gb,
+        ..Default::default()
+    };
+    let emit_run_ocel = |facts: &AutocleanRunFacts| {
+        let log = build_autoclean_run_ocel(facts);
+        let path = dir.join(format!("{}-autoclean-run.jsonocel", facts.run_id));
+        match serde_json::to_string_pretty(&log)
+            .map_err(anyhow::Error::from)
+            .and_then(|s| std::fs::write(&path, s).map_err(anyhow::Error::from))
+        {
+            Ok(()) => println!("[autoclean {ts}] run OCEL written: {}", path.display()),
+            Err(e) => eprintln!("[autoclean {ts}] warning: could not write run OCEL: {e}"),
+        }
+    };
+
     println!("[autoclean {ts}] building plan (ignore_recent_hours={ignore_recent_hours})...");
     let build = Command::new(&exe)
         .current_dir(home_ref)
@@ -504,6 +530,9 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         .arg(&plan_file)
         .output()?;
     if !build.status.success() {
+        facts.outcome = "failed".into();
+        facts.stage_failed = "plan_build".into();
+        emit_run_ocel(&facts);
         let msg = format!(
             "[autoclean {ts}] plan build FAILED: {}",
             String::from_utf8_lossy(&build.stderr)
@@ -517,8 +546,11 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     let plan_content = std::fs::read_to_string(&plan_file)?;
     let mut plan: crate::domain::plan::DeletionPlan = serde_json::from_str(&plan_content)?;
     let total_bytes: u64 = plan.items.iter().map(|i| i.bytes).sum();
+    facts.plan_path = Some(plan_file.display().to_string());
 
     if plan.items.is_empty() {
+        facts.outcome = "nothing_to_do".into();
+        emit_run_ocel(&facts);
         let msg = format!("[autoclean {ts}] nothing to clean this run.");
         println!("{msg}");
         append_log(&msg)?;
@@ -537,6 +569,8 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         let (kept, deferred) =
             trim_plan_items_to_cap(std::mem::take(&mut plan.items), max_reclaim_gb);
         if kept.is_empty() {
+            facts.outcome = "refused".into();
+            emit_run_ocel(&facts);
             let msg = format!(
                 "[autoclean {ts}] REFUSED: single plan item exceeds the {} GB safety cap — not \
                  approving. Review manually: oclnr plan inspect --plan {}",
@@ -554,6 +588,9 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         let kept_bytes: u64 = kept.iter().map(|i| i.bytes).sum();
         let deferred_bytes: u64 = deferred.iter().map(|i| i.bytes).sum();
         plan.items = kept;
+        facts.items_approved = plan.items.len() as i64;
+        facts.deferred_items = deferred.len() as i64;
+        facts.planned_bytes = kept_bytes as i64;
         std::fs::write(&plan_file, serde_json::to_string_pretty(&plan)?)?;
         let msg = format!(
             "[autoclean {ts}] plan claims {} which exceeds the {} GB cap — executing largest-first \
@@ -567,6 +604,12 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         );
         println!("{msg}");
         append_log(&msg)?;
+    }
+    // Under-cap path: the facts weren't touched by the trim branch, so
+    // record the whole approved plan.
+    if facts.planned_bytes == 0 {
+        facts.items_approved = plan.items.len() as i64;
+        facts.planned_bytes = total_bytes as i64;
     }
 
     // Never proceed past an Unknown/Irreversible item unattended — an
@@ -585,6 +628,8 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         })
         .count();
     if non_reversible_count > 0 {
+        facts.outcome = "skipped".into();
+        emit_run_ocel(&facts);
         let msg = format!(
             "[autoclean {ts}] SKIPPED: plan contains {non_reversible_count} unknown/irreversible-\
              reversibility item(s) — autoclean never overrides that unattended. Review manually: \
@@ -618,6 +663,9 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         ])
         .output()?;
     if !approve.status.success() {
+        facts.outcome = "failed".into();
+        facts.stage_failed = "plan_approve".into();
+        emit_run_ocel(&facts);
         let msg = format!(
             "[autoclean {ts}] plan approve FAILED: {}",
             String::from_utf8_lossy(&approve.stderr)
@@ -644,6 +692,9 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     // treating as one, not that prior false negative.
     let exec_stdout = String::from_utf8_lossy(&execute.stdout).to_string();
     if !execute.status.success() {
+        facts.outcome = "failed".into();
+        facts.stage_failed = "delete_execute".into();
+        emit_run_ocel(&facts);
         let msg = format!(
             "[autoclean {ts}] delete execute FAILED (exit {:?}): {}\n{}",
             execute.status.code(),
@@ -678,6 +729,8 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         .arg(&plan_file)
         .output()?;
 
+    facts.receipt_path = Some(receipt_file.display().to_string());
+    facts.outcome = "completed".into();
     let msg = format!(
         "[autoclean {ts}] done. plan={} receipt={} verify_exit={:?}",
         plan_file.display(),
@@ -734,6 +787,12 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
         }
     }
 
+    // Terminal evidence written last so the snapshot receipt — if the thin
+    // step produced one — is part of the run's OCEL graph.
+    if snapshot_receipt.exists() {
+        facts.snapshot_receipt_path = Some(snapshot_receipt.display().to_string());
+    }
+    emit_run_ocel(&facts);
     Ok(())
 }
 

@@ -294,6 +294,16 @@ advisories. LaunchAgent job output goes to the durable
 `~/Library/Logs/oclnr/*-launchd.{log,err}` — never `/tmp`, which is wiped
 on reboot.
 
+Every autoclean run emits OCEL v2 evidence of the *orchestration*:
+`{ts}-autoclean-run.jsonocel` next to the plan and receipt files, with an
+`autoclean_run` object related to the `deletion_plan`/`delete_receipt`/
+`snapshot_state` objects the run produced (or refused to produce), and
+events for the start, each stage's outcome, and the terminal outcome.
+Pressure-triggered runs carry `trigger: pressure` via the
+`OCLNR_AUTOCLEAN_TRIGGER` environment variable. A refused or failed run is
+exactly when this evidence matters most, so it is written at every
+terminal outcome and validated with `oclnr ocel validate --log <file>`.
+
 ### 4.3 CLI Layer Rule
 
 A CLI command may parse, validate, route, and format. It must not own policy.
@@ -432,6 +442,7 @@ OCEL v2 JSON is the external evidence format for audit, plan, delete, receipt, a
 | `delete_receipt` | Terminal receipt for delete execution |
 | `snapshot_state` | Time Machine/APFS snapshot state |
 | `tm_exclusion_plan` | Time Machine exclusion script or plan |
+| `autoclean_run` | One unattended autoclean orchestration run |
 
 ### 6.2 Event Types
 
@@ -455,6 +466,9 @@ OCEL v2 JSON is the external evidence format for audit, plan, delete, receipt, a
 | `snapshot_state_observed` | APFS/Time Machine state observed |
 | `snapshot_thin_requested` | Explicit thinning requested |
 | `tm_exclusion_plan_written` | Time Machine exclusions emitted |
+| `autoclean_run_started` | Unattended run began (trigger, safety cap) |
+| `autoclean_stage_outcome` | One pipeline stage finished (build/approve/execute/thin) |
+| `autoclean_run_completed` | Terminal outcome with approved/deferred counts |
 
 ### 6.3 Required OCEL Relationships
 
