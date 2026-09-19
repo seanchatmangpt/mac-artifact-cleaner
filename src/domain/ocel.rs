@@ -173,7 +173,10 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
         object_types: vec![
             OCELType {
                 name: "disk_audit".to_string(),
-                attributes: vec![attr_def("created_at", "string")],
+                // OCEL v2 has a native `time` type; the RFC3339 value
+                // deserializes to the Time variant, so declaring it
+                // "string" fails validation.
+                attributes: vec![attr_def("created_at", "time")],
             },
             OCELType {
                 name: "tool_root".to_string(),
@@ -197,6 +200,20 @@ pub fn build_tool_roots_ocel(tool_roots: &[ToolRootReport]) -> OCEL {
         events,
         objects,
     }
+}
+
+/// Returns the scan-root OCEL object id for the root containing `path`
+/// (same id derivation as the `scan_root` objects in
+/// [`build_disk_audit_ocel`]). Candidates always come from a scanned root,
+/// so the containment match holds in practice; with no match (empty roots
+/// — unreachable in the candidate loop) the id dangles and the validator
+/// fails closed.
+fn candidate_root_rel(roots: &[std::path::PathBuf], path: &std::path::Path) -> String {
+    roots
+        .iter()
+        .find(|r| path.starts_with(r))
+        .map(|r| stable_object_id("scan-root", &r.display().to_string()))
+        .unwrap_or_else(|| stable_object_id("scan-root", "/"))
 }
 
 fn stable_object_id(prefix: &str, path: &str) -> String {
@@ -302,7 +319,7 @@ pub fn build_disk_audit_ocel(
         id: audit_obj_id.clone(),
         object_type: "disk_audit".to_string(),
         attributes: vec![
-            timed_attr("created_at", &now, serde_json::json!(now)),
+            timed_attr("created_at", &now, serde_json::json!(now.to_rfc3339())),
             timed_attr("files_seen", &now, serde_json::json!(files_seen)),
             timed_attr("dirs_seen", &now, serde_json::json!(dirs_seen)),
             timed_attr("bytes_seen", &now, serde_json::json!(bytes_seen)),
@@ -433,6 +450,13 @@ pub fn build_disk_audit_ocel(
                     object_id: fs_obj_id.clone(),
                     qualifier: "targets-fs-object".to_string(),
                 },
+                // AGENTS.md §6.3: every candidate event must also relate to
+                // the scan_root it was found under — the validator enforces
+                // this and the old builder left it out.
+                OCELRelationship {
+                    object_id: candidate_root_rel(&roots, &c.path),
+                    qualifier: "scan-root".to_string(),
+                },
             ],
         });
     }
@@ -511,7 +535,9 @@ pub fn build_disk_audit_ocel(
             OCELType {
                 name: "disk_audit".to_string(),
                 attributes: vec![
-                    attr_def("created_at", "string"),
+                    // OCEL v2 native `time` type — see the matching note on
+                    // the tool-roots builder above.
+                    attr_def("created_at", "time"),
                     attr_def("files_seen", "integer"),
                     attr_def("dirs_seen", "integer"),
                     attr_def("bytes_seen", "integer"),
@@ -1012,7 +1038,10 @@ pub fn build_autoclean_run_ocel(facts: &AutocleanRunFacts) -> OCEL {
     );
     let approve_status = if facts.stage_failed == "plan_approve" {
         "failed"
-    } else if facts.plan_path.is_some() {
+    } else if facts.outcome == "completed" || facts.stage_failed == "delete_execute" {
+        // Approval actually ran only when the run reached (or passed) it —
+        // a refused or skipped run bailed *before* `plan approve`, and its
+        // evidence must not claim otherwise.
         "ok"
     } else {
         "not_attempted"
