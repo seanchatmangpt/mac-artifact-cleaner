@@ -113,6 +113,37 @@ impl Reversibility {
 ///     Reversibility::Reversible
 /// );
 ///
+/// // Positive: the artifact detector's dependency reasons ("node
+/// // dependencies", "elixir dependencies", …) are emitted only for
+/// // tool-regenerable dependency trees — they must classify Reversible, or
+/// // `autoclean` (which skips any plan containing an Unknown item) can
+/// // never clean a real machine: on the machine this was diagnosed on,
+/// // 266 of 330 plan items were Unknown purely from this vocabulary gap.
+/// assert_eq!(
+///     classify_reversibility(PlanItemKind::Dir, "node dependencies"),
+///     Reversibility::Reversible
+/// );
+/// assert_eq!(
+///     classify_reversibility(PlanItemKind::Dir, "elixir dependencies"),
+///     Reversibility::Reversible
+/// );
+/// assert_eq!(
+///     classify_reversibility(PlanItemKind::Dir, "pnpm content-addressable store"),
+///     Reversibility::Reversible
+/// );
+/// assert_eq!(
+///     classify_reversibility(PlanItemKind::Dir, "cargo registry unpacked sources"),
+///     Reversibility::Reversible
+/// );
+/// assert_eq!(
+///     classify_reversibility(PlanItemKind::Dir, "Xcode derived data"),
+///     Reversibility::Reversible
+/// );
+/// assert_eq!(
+///     classify_reversibility(PlanItemKind::Dir, "Playwright downloaded browsers"),
+///     Reversibility::Reversible
+/// );
+///
 /// // Positive: GitHub-kind items (recoverable via network re-fetch, but
 /// // not free/instant) classify Compensatable, not Reversible.
 /// assert_eq!(
@@ -124,6 +155,19 @@ impl Reversibility {
 /// // Reversible just because it's a Dir — that would falsify DCM §3.
 /// assert_eq!(
 ///     classify_reversibility(PlanItemKind::Dir, "unrecognized artifact type"),
+///     Reversibility::Unknown
+/// );
+///
+/// // Negative (the fence, deliberately kept): AI session logs and agent
+/// // scratch hold local-only history — regenerability is NOT established by
+/// // the detector's evidence, so they stay Unknown and autoclean keeps
+/// // skipping them unattended.
+/// assert_eq!(
+///     classify_reversibility(PlanItemKind::File, "massive ai session logs"),
+///     Reversibility::Unknown
+/// );
+/// assert_eq!(
+///     classify_reversibility(PlanItemKind::Dir, "ai agents dir"),
 ///     Reversibility::Unknown
 /// );
 ///
@@ -147,6 +191,14 @@ pub fn classify_reversibility(kind: PlanItemKind, reason: &str) -> Reversibility
         | PlanItemKind::GithubReleaseAsset => Reversibility::Compensatable,
         PlanItemKind::File | PlanItemKind::Dir => {
             let r = reason.to_ascii_lowercase();
+            // Signals are matched as substrings against the CONTROLLED
+            // reason vocabulary emitted by `artifact_candidates_from_snapshot`
+            // and `global_cache_candidates` — every reason naming a
+            // tool-regenerable dependency tree, build output, or download
+            // cache belongs here. When a new detector reason is added, its
+            // signal must be added in the same change or `autoclean`
+            // (which refuses plans containing Unknown items) silently
+            // loses the ability to clean it.
             const REGENERABLE_SIGNALS: &[&str] = &[
                 "target",
                 "node_modules",
@@ -159,6 +211,34 @@ pub fn classify_reversibility(kind: PlanItemKind, reason: &str) -> Reversibility
                 "pod",
                 "vendor/bundle",
                 "site-packages",
+                // dependency trees (npm/elixir/erlang/composer/ruby):
+                // re-created by the package manager on next install
+                "dependencies",
+                "vendor",
+                "bundled gems",
+                // virtualenvs ("virtualenv" does not contain "venv" as a
+                // substring — it had to be listed separately)
+                "virtualenv",
+                // build outputs ("nuxt output", "… dist output", …)
+                "output",
+                // content-addressed package stores & registries
+                "store",
+                "registry",
+                // Xcode build outputs
+                "derived data",
+                // tool-managed downloads
+                "downloaded browsers",
+                // test/coverage outputs
+                "coverage",
+                "egg-info",
+                // cmake / dotnet / erlang build outputs
+                "cmake",
+                "dotnet",
+                "beam",
+                // go aggressive-scope local bin
+                "go local bin",
+                // unreal aggressive-scope compiled binaries
+                "compiled binaries",
             ];
             if REGENERABLE_SIGNALS.iter().any(|sig| r.contains(sig)) {
                 Reversibility::Reversible
