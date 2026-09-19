@@ -5,8 +5,8 @@ use std::path::Path;
 use clap::Subcommand;
 
 use crate::domain::doctor::{
-    diagnose_architecture, diagnose_doctests, diagnose_domain_purity, diagnose_privacy,
-    diagnose_scan_delete_separation, diagnose_substrate,
+    diagnose_architecture, diagnose_daemon_health, diagnose_doctests, diagnose_domain_purity,
+    diagnose_privacy, diagnose_scan_delete_separation, diagnose_substrate, DaemonJobFacts,
 };
 
 #[derive(Subcommand, Debug)]
@@ -23,6 +23,10 @@ pub enum DoctorAction {
     DomainPurity,
     /// Assert the scanner-cannot-delete / deleter-cannot-scan invariant
     ScanDeleteSeparation,
+    /// Check the unattended-autonomy stack: launchd jobs installed, their
+    /// baked binary paths still valid, jobs loaded, and the autoclean run
+    /// standing (failure streaks, refused/skipped reviews)
+    Daemon,
 }
 
 pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
@@ -214,6 +218,82 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
                     "✅ Privacy check passed! No local user profiles or unredacted paths found."
                 );
             }
+        }
+        DoctorAction::Daemon => {
+            println!(
+                "Auditing unattended-autonomy stack (launchd jobs, baked binary paths, run standing)..."
+            );
+
+            let gather = |plist: &Path| -> DaemonJobFacts {
+                let label =
+                    plist.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                let plist_exists = plist.exists();
+                let plist_binary = crate::nouns::daemon::plist_program_arguments_binary(plist);
+                let binary_exists =
+                    plist_binary.as_ref().map(|b| Path::new(b).exists()).unwrap_or(false);
+                let launchd_loaded = plist_exists
+                    && std::process::Command::new("launchctl")
+                        .args(["list", &label])
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+                DaemonJobFacts { label, plist_exists, plist_binary, binary_exists, launchd_loaded }
+            };
+            let jobs = vec![
+                gather(&crate::nouns::daemon::plist_path()),
+                gather(&crate::nouns::daemon::autoclean_plist_path()),
+            ];
+
+            // Autoclean run standing from the durable log (same source as
+            // `autoclean status`): failure streak is blocking at ≥2, a
+            // refused/skipped last run is a review advisory.
+            let log = dirs::home_dir().map(|h| h.join("Library/Logs/oclnr/autoclean.log"));
+            let (consecutive_failures, last_outcome, last_detail) = log
+                .filter(|p| p.exists())
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .map(|content| {
+                    let lines: Vec<&str> = content.lines().collect();
+                    let now = chrono::Utc::now().timestamp();
+                    let s = crate::nouns::autoclean::summarize_log(&lines, now);
+                    let outcome = match s.last_outcome {
+                        Some(crate::nouns::autoclean::AutocleanOutcome::Skipped) => {
+                            Some("skipped".to_string())
+                        }
+                        Some(crate::nouns::autoclean::AutocleanOutcome::Refused) => {
+                            Some("refused".to_string())
+                        }
+                        _ => None,
+                    };
+                    (s.consecutive_failures, outcome, s.last_detail)
+                })
+                .unwrap_or((0, None, String::new()));
+
+            let report = diagnose_daemon_health(jobs, consecutive_failures, last_outcome);
+
+            for job in &report.jobs {
+                if job.issues.is_empty() {
+                    println!("- {}: OK", job.label);
+                } else {
+                    println!("- {}: ❌", job.label);
+                    for issue in &job.issues {
+                        println!("    - {issue}");
+                    }
+                }
+            }
+            if !last_detail.is_empty() {
+                println!("- last autoclean detail: {last_detail}");
+            }
+            for advisory in &report.advisories {
+                println!("- advisory: {advisory}");
+            }
+
+            if report.total_issues() > 0 {
+                anyhow::bail!(
+                    "Daemon health check failed with {} issue(s).\n\nSuggestions:\n  - Reinstall after moving the binary: `oclnr daemon install-autoclean --yes`\n  - Load a written-but-unloaded job: `launchctl load -w ~/Library/LaunchAgents/com.oclnr.autoclean.plist`\n  - Inspect run history: `oclnr autoclean status`",
+                    report.total_issues()
+                );
+            }
+            println!("✅ Daemon health check passed!");
         }
     }
     Ok(())

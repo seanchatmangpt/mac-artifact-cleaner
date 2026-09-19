@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use clap::Subcommand;
 use dialoguer::Confirm;
 
+use crate::nouns::autoclean;
+
 #[derive(Subcommand, Debug)]
 pub enum DaemonAction {
     /// Install the oclnr background monitor as a launchd LaunchAgent
@@ -17,6 +19,14 @@ pub enum DaemonAction {
         /// Check interval in seconds
         #[arg(long, default_value = "300")]
         interval_secs: u64,
+        /// When under pressure, run the same capped, receipted `autoclean
+        /// run --yes` pipeline on demand (cooldown-bounded). Off by default:
+        /// the plain monitor only ever notifies.
+        #[arg(long)]
+        trigger_autoclean: bool,
+        /// Minimum hours between pressure-triggered autoclean runs
+        #[arg(long, default_value = "6")]
+        autoclean_cooldown_hours: u64,
         /// Skip the confirmation prompt and load the LaunchAgent immediately
         #[arg(long)]
         yes: bool,
@@ -53,14 +63,21 @@ pub enum DaemonAction {
 const PLIST_LABEL: &str = "com.oclnr.monitor";
 const AUTOCLEAN_PLIST_LABEL: &str = "com.oclnr.autoclean";
 
-fn plist_path() -> PathBuf {
+/// Durable per-user log directory for the launchd jobs' stdout/stderr.
+/// `/tmp` (the previous location) is wiped on reboot and has silently
+/// swallowed unattended-job output.
+pub(crate) fn launchd_log_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("Library/Logs/oclnr")
+}
+
+pub(crate) fn plist_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("Library/LaunchAgents")
         .join(format!("{}.plist", PLIST_LABEL))
 }
 
-fn autoclean_plist_path() -> PathBuf {
+pub(crate) fn autoclean_plist_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("Library/LaunchAgents")
@@ -107,6 +124,11 @@ fn ensure_plist_dir(plist: &std::path::Path) -> anyhow::Result<()> {
 /// // element like every other flag, not implied.
 /// assert!(!plist.contains("StartInterval"));
 /// assert!(plist.contains("<string>--yes</string>"));
+///
+/// // Job output goes to the durable per-user log directory, never /tmp
+/// // (wiped on reboot, so a failed run's stderr would vanish).
+/// assert!(plist.contains("Library/Logs/oclnr/autoclean-launchd.log"));
+/// assert!(!plist.contains("/tmp/oclnr"));
 /// ```
 pub fn generate_autoclean_plist(
     max_reclaim_gb: f64,
@@ -115,6 +137,7 @@ pub fn generate_autoclean_plist(
     minute: u32,
 ) -> String {
     let binary = oclnr_binary_path();
+    let log_dir = launchd_log_dir();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -144,14 +167,15 @@ pub fn generate_autoclean_plist(
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>/tmp/oclnr-autoclean.log</string>
+    <string>{log_dir}/autoclean-launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/oclnr-autoclean.err</string>
+    <string>{log_dir}/autoclean-launchd.err</string>
 </dict>
 </plist>
 "#,
         label = AUTOCLEAN_PLIST_LABEL,
         binary = binary,
+        log_dir = log_dir.display(),
         max_reclaim_gb = max_reclaim_gb,
         ignore_recent_hours = ignore_recent_hours,
         hour = hour,
@@ -165,8 +189,24 @@ fn oclnr_binary_path() -> String {
         .unwrap_or_else(|_| "/usr/local/bin/oclnr".to_string())
 }
 
-fn generate_plist(threshold_gb: f64, interval_secs: u64) -> String {
+fn generate_plist(
+    threshold_gb: f64,
+    interval_secs: u64,
+    trigger_autoclean: bool,
+    autoclean_cooldown_hours: u64,
+) -> String {
     let binary = oclnr_binary_path();
+    let log_dir = launchd_log_dir();
+    let trigger_args = if trigger_autoclean {
+        format!(
+            r#"        <string>--trigger-autoclean</string>
+        <string>--autoclean-cooldown-hours</string>
+        <string>{autoclean_cooldown_hours}</string>
+"#
+        )
+    } else {
+        String::new()
+    };
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -181,31 +221,73 @@ fn generate_plist(threshold_gb: f64, interval_secs: u64) -> String {
         <string>monitor</string>
         <string>--threshold-gb</string>
         <string>{threshold}</string>
-    </array>
+{trigger_args}    </array>
     <key>StartInterval</key>
     <integer>{interval}</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/oclnr-monitor.log</string>
+    <string>{log_dir}/monitor-launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/oclnr-monitor.err</string>
+    <string>{log_dir}/monitor-launchd.err</string>
 </dict>
 </plist>
 "#,
         label = PLIST_LABEL,
         binary = binary,
         threshold = threshold_gb,
-        interval = interval_secs
+        interval = interval_secs,
+        trigger_args = trigger_args,
+        log_dir = log_dir.display()
     )
+}
+
+/// Extracts the binary path (first `<string>` under `ProgramArguments`) from
+/// a written plist, so `daemon status` can detect the silently-dead-job case:
+/// the plist bakes an absolute path at install time, and if the binary later
+/// moves or is deleted the job fails on every fire with nothing but a line
+/// in `/tmp/oclnr-*.err`.
+pub(crate) fn plist_program_arguments_binary(plist: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(plist).ok()?;
+    let idx = content.find("<key>ProgramArguments</key>")?;
+    let rest = &content[idx..];
+    let start = rest.find("<string>")? + "<string>".len();
+    let end = rest[start..].find("</string>")? + start;
+    Some(rest[start..end].to_string())
+}
+
+/// Warns (loudly) when the binary a plist points at no longer exists — the
+/// install-time fallback is `/usr/local/bin/oclnr`, which may simply not
+/// exist yet.
+fn warn_if_binary_missing(where_: &str, binary: &str) {
+    if !std::path::Path::new(binary).exists() {
+        eprintln!(
+            "⚠ {where_}: configured binary '{binary}' does not exist on this machine — \
+             the job will silently fail on every fire until it does (install oclnr there, \
+             or reinstall the daemon after installing the binary)."
+        );
+    }
 }
 
 pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
     match action {
-        DaemonAction::Install { threshold_gb, interval_secs, yes } => {
+        DaemonAction::Install {
+            threshold_gb,
+            interval_secs,
+            trigger_autoclean,
+            autoclean_cooldown_hours,
+            yes,
+        } => {
             let plist = plist_path();
             ensure_plist_dir(&plist)?;
-            let contents = generate_plist(threshold_gb, interval_secs);
+            std::fs::create_dir_all(launchd_log_dir())?;
+            warn_if_binary_missing("daemon install", &oclnr_binary_path());
+            let contents = generate_plist(
+                threshold_gb,
+                interval_secs,
+                trigger_autoclean,
+                autoclean_cooldown_hours,
+            );
             std::fs::write(&plist, &contents)?;
             println!("Wrote plist: {}", plist.display());
 
@@ -215,15 +297,21 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
             println!("{}", contents);
             println!("----------------------");
 
-            // launchctl load registers a persistent background job with
+            // launchd load registers a persistent background job with
             // launchd (RunAtLoad + StartInterval) — require explicit
             // confirmation before doing that, same as other destructive/
             // system-changing actions in this CLI (see `emergency --yes`).
             let proceed = yes
                 || Confirm::new()
                     .with_prompt(format!(
-                        "Load LaunchAgent '{}' now via `launchctl load -w`?",
-                        PLIST_LABEL
+                        "Load LaunchAgent '{}' now via `launchctl load -w`?{}",
+                        PLIST_LABEL,
+                        if trigger_autoclean {
+                            " This monitor CAN TRIGGER the capped autoclean pipeline under \
+                             disk pressure (cooldown-bounded)."
+                        } else {
+                            ""
+                        }
                     ))
                     .default(false)
                     .interact()
@@ -241,8 +329,15 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 .status()?;
             if status.success() {
                 println!(
-                    "Loaded: {} (threshold: {} GB, interval: {}s)",
-                    PLIST_LABEL, threshold_gb, interval_secs
+                    "Loaded: {} (threshold: {} GB, interval: {}s, autoclean trigger: {})",
+                    PLIST_LABEL,
+                    threshold_gb,
+                    interval_secs,
+                    if trigger_autoclean {
+                        format!("on (cooldown {autoclean_cooldown_hours}h)")
+                    } else {
+                        "off".to_string()
+                    }
                 );
             } else {
                 eprintln!("Warning: launchctl load failed — plist written but daemon not started.");
@@ -259,6 +354,8 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
         } => {
             let plist = autoclean_plist_path();
             ensure_plist_dir(&plist)?;
+            std::fs::create_dir_all(launchd_log_dir())?;
+            warn_if_binary_missing("daemon install-autoclean", &oclnr_binary_path());
             let contents =
                 generate_autoclean_plist(max_reclaim_gb, ignore_recent_hours, hour, minute);
             std::fs::write(&plist, &contents)?;
@@ -338,6 +435,20 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 println!("Monitor daemon ({}): not installed.", PLIST_LABEL);
             } else {
                 println!("Monitor plist: {} (exists)", plist.display());
+                match plist_program_arguments_binary(&plist) {
+                    Some(binary) => {
+                        if std::path::Path::new(&binary).exists() {
+                            println!("Monitor binary: {binary} (exists)");
+                        } else {
+                            eprintln!(
+                                "⚠ Monitor binary '{binary}' does NOT exist — the job is \
+                                 silently dead on every fire. Reinstall with \
+                                 `oclnr daemon install` after placing the binary."
+                            );
+                        }
+                    }
+                    None => println!("Monitor binary: (unparsable plist)"),
+                }
                 let output =
                     std::process::Command::new("launchctl").args(["list", PLIST_LABEL]).output()?;
                 if output.status.success() {
@@ -355,6 +466,20 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 println!("Autoclean daemon ({}): not installed.", AUTOCLEAN_PLIST_LABEL);
             } else {
                 println!("Autoclean plist: {} (exists)", autoclean_plist.display());
+                match plist_program_arguments_binary(&autoclean_plist) {
+                    Some(binary) => {
+                        if std::path::Path::new(&binary).exists() {
+                            println!("Autoclean binary: {binary} (exists)");
+                        } else {
+                            eprintln!(
+                                "⚠ Autoclean binary '{binary}' does NOT exist — the daily \
+                                 cleanup is silently dead. Reinstall with \
+                                 `oclnr daemon install-autoclean` after placing the binary."
+                            );
+                        }
+                    }
+                    None => println!("Autoclean binary: (unparsable plist)"),
+                }
                 let output = std::process::Command::new("launchctl")
                     .args(["list", AUTOCLEAN_PLIST_LABEL])
                     .output()?;
@@ -371,6 +496,46 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 match log {
                     Some(p) => println!("Autoclean log: {}", p.display()),
                     None => println!("Autoclean log: none yet (no run has completed)"),
+                }
+            }
+
+            // Last-run standing, same source `autoclean status` uses — a
+            // daemon that is "loaded" but has failed its last three runs is
+            // not healthy, and this is where that difference becomes visible.
+            println!();
+            match autoclean::read_last_trigger_unix() {
+                Some(t) => println!(
+                    "Last pressure-trigger: {}",
+                    chrono::DateTime::from_timestamp(t, 0)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_else(|| t.to_string())
+                ),
+                None => println!("Last pressure-trigger: never"),
+            }
+            let log = dirs::home_dir().map(|h| h.join("Library/Logs/oclnr/autoclean.log"));
+            if let Some(log) = log.filter(|p| p.exists()) {
+                if let Ok(content) = std::fs::read_to_string(&log) {
+                    let lines: Vec<&str> = content.lines().collect();
+                    let now = chrono::Utc::now().timestamp();
+                    let s = autoclean::summarize_log(&lines, now);
+                    if s.runs_total > 0 {
+                        println!(
+                            "Autoclean standing: {} run(s) ({} in last 7d), last: {}",
+                            s.runs_total,
+                            s.runs_last_7d,
+                            s.last_outcome.map(|o| o.to_string()).unwrap_or_else(|| "?".into())
+                        );
+                        if let Some(freed) = &s.last_freed {
+                            println!("  last measured reclaim: {freed}");
+                        }
+                        if s.consecutive_failures >= 2 {
+                            eprintln!(
+                                "⚠ {} consecutive autoclean failures — inspect with \
+                                 `oclnr autoclean status`",
+                                s.consecutive_failures
+                            );
+                        }
+                    }
                 }
             }
             Ok(())
