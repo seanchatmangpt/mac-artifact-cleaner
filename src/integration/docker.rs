@@ -1,7 +1,11 @@
 //! Docker container runtime integration layer.
 
+use std::{os::unix::fs::MetadataExt, path::Path};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::domain::docker_host::DockerHostFootprint;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DockerDiskUsage {
@@ -251,6 +255,65 @@ pub fn is_colima_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Measures Docker Desktop's host-side sparse disk image(s) under a home
+/// directory: `<home>/Library/Containers/com.docker.docker/Data/vms/*/data/`
+/// — files named `Docker.raw` (and the equivalent `Docker.raw` sibling
+/// `data.Docker.raw` some versions use), summed by logical size and physical
+/// allocation (blocks × 512, the number that actually consumes host disk).
+///
+/// Returns `None` when no image file exists (Docker Desktop not installed,
+/// or a different storage driver) — distinct from `Some(0..)`, which would
+/// falsely claim an image was measured. Read-only: never touches the files,
+/// only `symlink_metadata` (deliberately `symlink_` so a planted symlink is
+/// counted as its own tiny inode, never followed into whatever it targets).
+///
+/// The physical-vs-VM-internal divergence this surfaces is the core of the
+/// "cannot correctly clean up macOS" diagnosis: `docker system df` sees only
+/// inside the VM; the host blocks are what a disk cleaner must account for.
+pub fn docker_host_footprint_at(home: &Path) -> Option<DockerHostFootprint> {
+    let vms_dir = home.join("Library/Containers/com.docker.docker/Data/vms");
+    let entries = std::fs::read_dir(&vms_dir).ok()?;
+
+    let mut fp = DockerHostFootprint::default();
+    for entry in entries.flatten() {
+        let data_dir = entry.path().join("data");
+        let dir = match std::fs::read_dir(&data_dir) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        for f in dir.flatten() {
+            let name = f.file_name();
+            let name = name.to_string_lossy();
+            if name != "Docker.raw" && name != "data.Docker.raw" {
+                continue;
+            }
+            // symlink_metadata: never follow a planted symlink out of the
+            // container dir while measuring.
+            let Ok(meta) = std::fs::symlink_metadata(f.path()) else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            fp.docker_raw_count += 1;
+            fp.docker_raw_logical_bytes = fp.docker_raw_logical_bytes.saturating_add(meta.len());
+            fp.docker_raw_physical_bytes =
+                fp.docker_raw_physical_bytes.saturating_add(meta.blocks() * 512);
+        }
+    }
+
+    if fp.docker_raw_count == 0 {
+        None
+    } else {
+        Some(fp)
+    }
+}
+
+/// Convenience wrapper: measures Docker Desktop's sparse image under the
+/// current user's home directory. `None` when there is no home dir or no
+/// image file (see [`docker_host_footprint_at`]).
+pub fn docker_host_footprint() -> Option<DockerHostFootprint> {
+    dirs::home_dir().and_then(|home| docker_host_footprint_at(&home))
+}
+
 /// Runs `colima prune`, which removes cached downloaded VM assets (old
 /// Lima/QEMU images, stale layer downloads) without touching the running VM,
 /// its disk, or any containers inside it — unlike `colima delete`, which
@@ -305,5 +368,35 @@ mod tests {
     #[test]
     fn parse_empty_string() {
         assert_eq!(parse_size_str(""), 0);
+    }
+
+    #[test]
+    fn host_footprint_measures_docker_raw_physical_and_logical() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let vms = home.path().join("Library/Containers/com.docker.docker/Data/vms/0/data");
+        std::fs::create_dir_all(&vms).expect("mkdir");
+        std::fs::write(vms.join("Docker.raw"), vec![0u8; 4096]).expect("write raw");
+
+        let fp = docker_host_footprint_at(home.path()).expect("footprint found");
+        assert_eq!(fp.docker_raw_count, 1);
+        assert_eq!(fp.docker_raw_logical_bytes, 4096);
+        // Physical allocation of a real (non-sparse-in-test) file is at least
+        // its logical size, rounded up to block boundaries.
+        assert!(fp.docker_raw_physical_bytes >= 4096);
+        assert!(fp.docker_raw_physical_bytes % 512 == 0);
+    }
+
+    #[test]
+    fn host_footprint_is_none_without_docker_raw() {
+        let home = tempfile::tempdir().expect("tempdir");
+        // Home exists but has no Docker container dir at all.
+        assert!(docker_host_footprint_at(home.path()).is_none());
+
+        // A container dir whose vms/0/data exists but holds no Docker.raw
+        // (e.g. Docker Desktop freshly reset) is also None, not Some(0).
+        let vms = home.path().join("Library/Containers/com.docker.docker/Data/vms/0/data");
+        std::fs::create_dir_all(&vms).expect("mkdir");
+        std::fs::write(vms.join("unrelated.txt"), b"x").expect("write");
+        assert!(docker_host_footprint_at(home.path()).is_none());
     }
 }

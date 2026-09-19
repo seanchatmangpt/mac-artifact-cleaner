@@ -8,11 +8,16 @@ use std::path::PathBuf;
 use clap::Subcommand;
 
 use crate::{
-    domain::docker_receipt::DockerPruneReceipt,
+    domain::{
+        docker_host::{
+            prune_host_outcome, space_returned_to_host, DockerHostFootprint, PruneHostOutcome,
+        },
+        docker_receipt::DockerPruneReceipt,
+    },
     integration::{
         docker::{
-            colima_prune, docker_disk_usage, docker_prune_preview, docker_system_prune,
-            is_colima_available, is_docker_available,
+            colima_prune, docker_disk_usage, docker_host_footprint, docker_prune_preview,
+            docker_system_prune, is_colima_available, is_docker_available,
         },
         progress::human_bytes as fmt_bytes,
     },
@@ -53,7 +58,7 @@ fn print_disk_usage() -> anyhow::Result<()> {
 
     let usage = docker_disk_usage()?;
 
-    println!("Docker Disk Usage");
+    println!("Docker Disk Usage (VM-internal, per `docker system df`)");
     println!("  Images:      {} ({})", usage.images_count, fmt_bytes(usage.images_bytes));
     println!("  Containers:  {} ({})", usage.containers_count, fmt_bytes(usage.containers_bytes));
     println!("  Volumes:     {} ({})", usage.volumes_count, fmt_bytes(usage.volumes_bytes));
@@ -61,7 +66,35 @@ fn print_disk_usage() -> anyhow::Result<()> {
     println!("  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}");
     println!("  Total:            {}", fmt_bytes(usage.total_bytes));
 
+    print_host_footprint(&usage.total_bytes);
+
     Ok(())
+}
+
+/// Prints the host-side `Docker.raw` section: the sparse image's physical
+/// allocation (what actually consumes host disk), its logical (sparse)
+/// apparent size, and how many host blocks the VM-internal accounting above
+/// does not explain. Silent when no image is measurable.
+fn print_host_footprint(vm_total_bytes: &u64) {
+    if let Some(fp) = docker_host_footprint() {
+        println!();
+        println!("Host-side footprint (Docker.raw sparse image)");
+        println!("  Images found:        {}", fp.docker_raw_count);
+        println!(
+            "  Physical allocation: {}  <- blocks actually consumed on the host volume",
+            fmt_bytes(fp.docker_raw_physical_bytes)
+        );
+        println!("  Logical (sparse) size: {}", fmt_bytes(fp.docker_raw_logical_bytes));
+        let pinned = fp.host_pinned_beyond_vm(*vm_total_bytes);
+        println!("  Pinned beyond VM-visible usage: {}", fmt_bytes(pinned));
+        if pinned > 0 {
+            println!(
+                "  Note: this is space `docker system df` cannot see. Freeing it needs the VM-side \
+                 prune plus image compaction (Docker Desktop restart or a lower disk-image size \
+                 limit) — deleting files inside containers alone will not return it."
+            );
+        }
+    }
 }
 
 pub fn handle(action: DockerAction) -> anyhow::Result<()> {
@@ -85,6 +118,21 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
             println!("  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}");
             println!("  Total reclaimable:       {}", fmt_bytes(preview.total_reclaimable_bytes));
             println!();
+            // The prune preview is VM-internal. Say so next to the host
+            // footprint so nobody reads "Total reclaimable" as host space
+            // they will see after pruning.
+            if let Some(fp) = docker_host_footprint() {
+                println!(
+                    "  Host-side Docker.raw physical allocation: {} (logical/sparse: {})",
+                    fmt_bytes(fp.docker_raw_physical_bytes),
+                    fmt_bytes(fp.docker_raw_logical_bytes)
+                );
+                println!(
+                    "  Prune frees VM-side usage only — host blocks are returned when Docker \
+                     Desktop compacts the image (restart it, or lower its disk-image size)."
+                );
+            }
+            println!();
             println!(
                 "Run 'oclnr docker prune --confirm' or 'docker system prune -a --volumes' to \
                  actually reclaim this space."
@@ -103,11 +151,56 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
                 return handle(DockerAction::Plan);
             }
 
+            // Host-side sample BEFORE pruning, so the receipt can prove what
+            // the host volume actually got back (the VM-internal delta alone
+            // routinely overstates host reclaim: Docker.raw keeps its blocks
+            // until Docker Desktop compacts the image).
+            let host_before: Option<DockerHostFootprint> = docker_host_footprint();
+            let host_before_physical = host_before.as_ref().map(|fp| fp.docker_raw_physical_bytes);
+
             let result = docker_system_prune()?;
             println!("Docker Prune");
             println!("  Before: {}", fmt_bytes(result.before.total_bytes));
             println!("  After:  {}", fmt_bytes(result.after.total_bytes));
             println!("  Reclaimed: {}", fmt_bytes(result.reclaimed_bytes));
+
+            let host_after_physical =
+                docker_host_footprint().as_ref().map(|fp| fp.docker_raw_physical_bytes);
+            let host_returned = match (host_before_physical, host_after_physical) {
+                (Some(b), Some(a)) => Some(space_returned_to_host(b, a)),
+                _ => None,
+            };
+            match host_returned {
+                Some(returned) => {
+                    let still_pinned = host_after_physical
+                        .map(|after| after.saturating_sub(result.after.total_bytes))
+                        .unwrap_or(0);
+                    match prune_host_outcome(result.reclaimed_bytes, returned, still_pinned) {
+                        PruneHostOutcome::NothingToReclaim => {
+                            println!("  Host: nothing to reclaim this run");
+                        }
+                        PruneHostOutcome::HostReturned(bytes) => {
+                            println!(
+                                "  Host: {} returned to host volume (Docker.raw shrank)",
+                                fmt_bytes(bytes)
+                            );
+                        }
+                        PruneHostOutcome::HostStillPinned { still_pinned_bytes } => {
+                            println!(
+                                "  Host: 0 bytes returned — Docker.raw still pins {} of host \
+                                 blocks. Restart Docker Desktop (or lower its disk-image size \
+                                 limit) to compact the image and release them.",
+                                fmt_bytes(still_pinned_bytes)
+                            );
+                        }
+                    }
+                }
+                None => {
+                    println!(
+                        "  Host: no Docker.raw image measurable — nothing to verify host-side"
+                    );
+                }
+            }
 
             let mut colima_pruned: Option<bool> = None;
             if !skip_colima && is_colima_available() {
@@ -129,7 +222,7 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
             }
 
             if let Some(receipt_path) = receipt {
-                let docker_receipt = DockerPruneReceipt::new(
+                let mut docker_receipt = DockerPruneReceipt::new(
                     result.before.images_bytes,
                     result.after.images_bytes,
                     result.before.containers_bytes,
@@ -140,6 +233,7 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
                     result.after.build_cache_bytes,
                     colima_pruned,
                 );
+                docker_receipt.with_host_physical(host_before_physical, host_after_physical);
                 match serde_json::to_string_pretty(&docker_receipt)
                     .map_err(anyhow::Error::from)
                     .and_then(|json| {
