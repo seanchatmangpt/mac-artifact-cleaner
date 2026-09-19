@@ -242,17 +242,57 @@ complete audit -> plan -> delete.
 `autoclean run` orchestrates `plan build` -> `plan approve` -> `delete
 execute` -> `receipt verify` as subprocesses of the running binary, bounded
 by a hard `--max-reclaim-gb` cap (default 50; a plan claiming more is
-refused and logged, never deleted), skips any plan containing an
+trimmed largest-first to fit the cap — the remainder defers to the next
+scheduled run — and a plan whose single largest item alone exceeds the cap
+is refused and logged, never deleted), skips any plan containing an
 `Unknown`/`Irreversible`-reversibility item, defaults `--ignore-recent-hours`
 to 24, and never touches Docker/Colima or wholesale `~/Library/Caches`. Each
 run logs its plan/receipt files and a one-line summary to
 `~/Library/Logs/oclnr/autoclean.log`.
 
+`docker scan`/`docker summary` report both views: VM-internal usage (from
+`docker system df`) and the host-side `Docker.raw` sparse-image footprint
+(physical allocation vs. logical size, plus bytes pinned beyond what the VM
+accounts for). `docker prune` samples `Docker.raw` physical allocation
+before/after, records both samples in its receipt, and states plainly when
+the host volume got nothing back (freeing host blocks requires Docker
+Desktop to compact the image — restart it or lower its disk-image size
+limit).
+
 `daemon install-autoclean` / `daemon uninstall-autoclean` write and load a
 `com.oclnr.autoclean` launchd LaunchAgent running `autoclean run --yes`
 daily (default 04:15 local) — separate from the existing alert-only
 `com.oclnr.monitor` job (`daemon install`/`uninstall`), which only notifies
-and never deletes. `daemon status` reports both jobs.
+and never deletes. `daemon status` reports both jobs, verifies each plist's
+configured binary still exists (a moved/deleted binary otherwise leaves a
+silently-dead job), and shows the autoclean standing from the run log.
+
+Autoclean autonomy surface: every run appends a structured line to
+`~/Library/Logs/oclnr/autoclean.log` (including a `freed:` figure parsed
+from the measured delete output) and sends a macOS notification on every
+consequential outcome — success, skip (unknown-reversibility items), cap
+refusal, or stage failure; "nothing to clean" stays log-only to avoid
+alarm fatigue. `autoclean status` renders the run history (last outcome,
+last reclaim, consecutive-failure streak, 7-day count) without reading
+raw logs. All autoclean subprocesses are anchored to `$HOME`, so the
+workspace-relative `.oclnr-cache` scan cache works under launchd (whose
+jobs run with cwd=/).
+
+Pressure-triggered cleanup is opt-in: `daemon install --trigger-autoclean`
+(or `monitor --trigger-autoclean`) makes the monitor fire the same capped,
+receipted `autoclean run --yes` pipeline when the disk is under pressure,
+bounded by `--autoclean-cooldown-hours` (default 6). The trigger stamp
+(`~/.oclnr/last-autoclean-trigger`) is written *before* the run starts, so
+a crashed or hung run still holds the cooldown open; the plain monitor job
+remains notify-only unless the flag is given.
+
+`doctor daemon` is the verifier for the whole stack: it checks each launchd
+job (plist present, the binary baked into its `ProgramArguments` still
+exists, job loaded with launchd), the autoclean failure streak (≥2
+consecutive failures block), and surfaces refused/skipped last-run
+advisories. LaunchAgent job output goes to the durable
+`~/Library/Logs/oclnr/*-launchd.{log,err}` — never `/tmp`, which is wiped
+on reboot.
 
 ### 4.3 CLI Layer Rule
 
