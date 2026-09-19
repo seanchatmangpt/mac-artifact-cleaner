@@ -459,7 +459,35 @@ pub fn exclude_self_binary_ancestors(
 ///     "/Users/user/Library/Mobile Documents/com~apple~CloudDocs/Documents/notes.txt"
 /// )));
 ///
-/// // Negative case: typical user project folders are not marked.
+/// // Positive case: Photo library bundles are TCC-protected — walking into
+/// // one makes macOS raise a privacy prompt an unattended run can never
+/// // answer (observed live: the launchd autoclean's scan blocked on a
+/// // Photos permission request). They are matched by their package
+/// // extension wherever they live, so renamed libraries are covered too.
+/// assert!(is_macos_os_dir(Path::new(
+///     "/Users/user/Pictures/Photos Library.photoslibrary/originals/xx"
+/// )));
+/// assert!(is_macos_os_dir(Path::new("/Users/user/Pictures/Sean.photoslibrary")));
+///
+/// // Positive case: per-app sandbox containers are TCC-protected the same
+/// // way (walking `Library/Containers/com.apple.photolibraryd` — the Photos
+/// // daemon's container — produced plan items the scan had no business
+/// // reaching). The bare `Library/Containers` directory itself is NOT
+/// // fenced, so the walk can descend and reach the Docker container below.
+/// assert!(is_macos_os_dir(Path::new(
+///     "/Users/user/Library/Containers/com.apple.mediaanalysisd/Data/tmp"
+/// )));
+/// assert!(!is_macos_os_dir(Path::new("/Users/user/Library/Containers")));
+///
+/// // Negative case: the Docker Desktop container stays scannable (tool-root
+/// // accounting and the Docker.raw host footprint read it).
+/// assert!(!is_macos_os_dir(Path::new(
+///     "/Users/user/Library/Containers/com.docker.docker/Data/vms/0/data"
+/// )));
+///
+/// // Negative case: a plain Pictures directory (not a library bundle) and
+/// // typical user project folders are not marked.
+/// assert!(!is_macos_os_dir(Path::new("/Users/user/Pictures")));
 /// assert!(!is_macos_os_dir(Path::new("/Users/user/projects")));
 /// ```
 pub fn is_macos_os_dir(path: &Path) -> bool {
@@ -480,9 +508,24 @@ pub fn is_macos_os_dir(path: &Path) -> bool {
         // minutes with an open fd into a CloudDocs subdirectory). No
         // cleanup candidate legitimately lives there, so it's excluded
         // outright rather than merely deprioritized.
+        //
+        // `Library/Containers/<bundle>` (except Docker Desktop's, a
+        // deliberate tool-root target) and any `.photoslibrary` bundle are
+        // TCC-protected: a scan that touches them raises a macOS privacy
+        // prompt — observed live when the launchd autoclean's plan build
+        // hit the Photos library — that an unattended run can never
+        // answer, and the items found there were pure misclassifications.
+        // The trailing slash keeps the bare `Library/Containers` directory
+        // itself walkable so the scan can still descend to the Docker
+        // container. These fences apply to scans, nominations, and plan
+        // validation alike, so a candidate inside them can never be
+        // deleted either.
         if s.contains("/Library/Mobile Documents")
             || s.contains("/Library/Mail")
             || s.contains("/Library/Messages")
+            || (s.contains("/Library/Containers/")
+                && !s.contains("/Library/Containers/com.docker.docker"))
+            || s.contains(".photoslibrary")
         {
             return true;
         }
