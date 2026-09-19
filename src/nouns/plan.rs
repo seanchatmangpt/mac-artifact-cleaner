@@ -17,6 +17,7 @@ use crate::{
     integration::{
         fs::{physical_dir_size, scan_root, write_or_dump_on_full, WriteOutcome},
         progress::ProgressReporter,
+        scan_cache::ScanCache,
     },
 };
 
@@ -114,6 +115,22 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             let tool_defs = build_tool_root_defs();
             let tool_accs = Arc::new(DashMap::new());
 
+            // Share the workspace-relative scan cache `audit run` maintains
+            // (per-directory mtime + child-listing early cutoff): a repeat
+            // `plan build` on a mostly-unchanged home folds cached subtree
+            // totals instead of re-walking every byte. A cache-open failure
+            // must never fail the build — degrade to a full uncached walk.
+            // Cached candidates are only *replayed* here; every plan item is
+            // still sized live below, so a stale byte count can never reach
+            // the plan.
+            let scan_cache = match ScanCache::open(std::path::Path::new(".")) {
+                Ok(cache) => Some(Arc::new(cache)),
+                Err(e) => {
+                    eprintln!("warning: could not open scan cache, scanning without it: {e}");
+                    None
+                }
+            };
+
             for r in &roots {
                 scan_root(
                     r,
@@ -122,7 +139,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                     stats.clone(),
                     &tool_defs,
                     tool_accs.clone(),
-                    None,
+                    scan_cache.clone(),
                 )?;
             }
 
@@ -167,26 +184,26 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             // allowlist itself is the safety boundary.
             if include_global_caches {
                 if let Some(home) = dirs::home_dir() {
-                    // Reject/skip a global-cache candidate that exactly matches, is an
-                    // ancestor of, or is a descendant of, any already-known candidate
-                    // path. Exact-equality dedup alone (`known.contains`) is not enough:
-                    // an ancestor/descendant pair reaching the plan would still race
-                    // under the parallel deletion executor (mitigated defense-in-depth
-                    // by `partition_nested_items`, but best avoided at nomination time).
-                    let mut known: Vec<std::path::PathBuf> =
-                        candidate_vec.iter().map(|c| c.path.clone()).collect();
-                    for (path, reason) in crate::domain::artifact::global_cache_candidates(&home) {
-                        let overlaps = known
-                            .iter()
-                            .any(|k| *k == path || path.starts_with(k) || k.starts_with(&path));
-                        if path.exists()
-                            && !crate::domain::artifact::is_macos_os_dir(&path)
-                            && !overlaps
-                        {
-                            known.push(path.clone());
-                            candidate_vec.push(Candidate { path, reason });
-                        }
-                    }
+                    // Merge curated global-cache nominations into the scanned set
+                    // with ancestor preference (`merge_global_cache_candidates`):
+                    // a curated cache dir that contains scanned candidates keeps
+                    // the WHOLE cache dir and drops the sub-items (the historical
+                    // either-direction overlap veto here let a 0-byte scanned
+                    // `…/crate/lz4/build` item suppress the multi-GB
+                    // `~/.cargo/registry/src` nomination). Only candidates that
+                    // exist and are not macOS OS dirs are nominated; existence is
+                    // filtered below alongside the sizing pass.
+                    let global: Vec<(std::path::PathBuf, String)> =
+                        crate::domain::artifact::global_cache_candidates(&home)
+                            .into_iter()
+                            .filter(|(path, _)| {
+                                path.exists() && !crate::domain::artifact::is_macos_os_dir(path)
+                            })
+                            .collect();
+                    candidate_vec = crate::domain::artifact::merge_global_cache_candidates(
+                        candidate_vec,
+                        global,
+                    );
                 }
             }
 
