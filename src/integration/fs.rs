@@ -300,7 +300,14 @@ fn is_recently_active(project_root: &Path, hours: u64) -> bool {
         .git_ignore(false)
         .git_global(false)
         .git_exclude(false)
-        .max_depth(Some(4)) // Limit depth for speed
+        // Bounded depth keeps this cheap, but it must reach real source
+        // trees: at the previous limit of 4, sources at depth ≥5 — Elixir
+        // umbrella apps (`apps/<app>/lib/…`), workspace crates
+        // (`crates/<crate>/src/…`), monorepo packages — were invisible, so a
+        // project under active development could be judged stale and its
+        // build artifacts planned for deletion. 6 covers those layouts while
+        // artifact/barrier directories are pruned by the filter below.
+        .max_depth(Some(6))
         .filter_entry(|entry| {
             entry
                 .file_name()
@@ -364,6 +371,16 @@ pub fn scan_root(
     // changed but which turned out to be a real, walkable miss.
     let snapshot_memo: Arc<DashMap<PathBuf, DirSnapshot>> = Arc::new(DashMap::new());
     let snapshot_memo_for_filter = snapshot_memo.clone();
+
+    // Hardlink byte dedupe, shared across every worker thread of this root's
+    // walk: one inode under several names (cargo `target/debug` binaries,
+    // rustup toolchain executables) must add its physical blocks to
+    // `bytes_seen`/tool-root bytes once, not once per name. Files with the
+    // normal `nlink == 1` never touch the set, keeping the hot path
+    // lock-free. File *counts* stay per-name — each name is a real dirent.
+    let linked_seen: Arc<Mutex<std::collections::HashSet<(u64, u64)>>> =
+        Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let linked_seen_for_visitor = linked_seen.clone();
 
     // Bookkeeping consumed by `aggregate_subtrees` after the walk completes:
     // one `DirRecord` per freshly-visited directory (its own, non-recursive
@@ -458,6 +475,7 @@ pub fn scan_root(
         let scan_cache = scan_cache.clone();
         let snapshot_memo = snapshot_memo.clone();
         let dir_records = dir_records.clone();
+        let linked_seen = linked_seen_for_visitor.clone();
 
         Box::new(move |result| {
             let entry = match result {
@@ -485,11 +503,15 @@ pub fn scan_root(
                 if meta.is_file() {
                     let physical = meta.blocks() * 512;
                     stats.files_seen.fetch_add(1, Ordering::Relaxed);
-                    stats.bytes_seen.fetch_add(physical, Ordering::Relaxed);
+                    let count_bytes = meta.nlink() <= 1
+                        || linked_seen.lock().unwrap().insert((meta.dev(), meta.ino()));
+                    if count_bytes {
+                        stats.bytes_seen.fetch_add(physical, Ordering::Relaxed);
+                    }
                     if args_snapshot.tool_roots {
                         record_tool_root_file(
                             path,
-                            physical,
+                            if count_bytes { physical } else { 0 },
                             meta.mtime(),
                             &known_tool_defs,
                             &tool_accs,
@@ -899,6 +921,11 @@ pub fn find_cargo_target_dirs(root: &Path) -> anyhow::Result<Vec<(PathBuf, u64)>
 
 /// Computes physical disk usage of a directory tree (blocks × 512).
 ///
+/// Hardlinked files (one inode under several names) are attributed once —
+/// see [`physical_dir_size_impl`] — so a cargo `target/` with its customary
+/// `debug/foo` ↔ `debug/deps/foo-<hash>` hardlink pair no longer reports the
+/// binary's blocks twice.
+///
 /// Walks **serially** (`jwalk::Parallelism::Serial`) rather than spinning up
 /// its own rayon thread pool. This function is called from `plan::build`
 /// inside an outer `candidate_vec.par_iter()` across every plan candidate
@@ -936,7 +963,20 @@ pub fn physical_dir_size_parallel(path: &Path) -> u64 {
 }
 
 fn physical_dir_size_impl(path: &Path, parallelism: jwalk::Parallelism) -> u64 {
+    use std::collections::HashSet;
+
     use jwalk::WalkDir;
+
+    // One inode, several directory entries: cargo hardlinks
+    // `target/debug/foo` ↔ `target/debug/deps/foo-<hash>` and rustup
+    // hardlinks each toolchain's `cargo`/`rustc` binaries, so summing every
+    // name's blocks double/triple-counts the same physical allocation and
+    // plans over-claim reclaimable bytes. Attribute each linked inode's
+    // blocks once, at its first-seen name. Files with the normal
+    // `nlink == 1` — the overwhelming majority — never touch the shared
+    // set, so the hot path stays lock-free.
+    let linked_seen: Mutex<HashSet<(u64, u64)>> = Mutex::new(HashSet::new());
+
     WalkDir::new(path)
         .skip_hidden(false)
         .follow_links(false)
@@ -945,7 +985,12 @@ fn physical_dir_size_impl(path: &Path, parallelism: jwalk::Parallelism) -> u64 {
         .filter_map(|e| e.ok())
         .filter_map(|e| e.metadata().ok())
         .filter(|m| m.is_file())
-        .map(|m| m.blocks() * 512)
+        .map(|m| {
+            if m.nlink() > 1 && !linked_seen.lock().unwrap().insert((m.dev(), m.ino())) {
+                return 0;
+            }
+            m.blocks() * 512
+        })
         .sum()
 }
 
@@ -976,6 +1021,13 @@ pub fn find_large_files(
 
     let files_scanned = Arc::new(AtomicU64::new(0));
     let large_found = Arc::new(AtomicU64::new(0));
+
+    // Report each hardlinked inode once, at its first-seen name: a cargo
+    // `target/debug/foo` ↔ `deps/foo-<hash>` pair would otherwise appear as
+    // two multi-hundred-MB entries in the large-file listing for one shared
+    // allocation. Names with the normal `nlink == 1` never take the lock.
+    let linked_seen: Arc<Mutex<std::collections::HashSet<(u64, u64)>>> =
+        Arc::new(Mutex::new(std::collections::HashSet::new()));
 
     let files_scanned_cb = files_scanned.clone();
     let large_found_cb = large_found.clone();
@@ -1022,12 +1074,13 @@ pub fn find_large_files(
             // but only allocate the blocks they actually wrote.
             let physical = meta.blocks() * 512;
             files_scanned_cb.fetch_add(1, Ordering::Relaxed);
-            if physical >= min_bytes {
-                large_found_cb.fetch_add(1, Ordering::Relaxed);
-                Some((entry.path(), physical))
-            } else {
-                None
+            let already_seen =
+                meta.nlink() > 1 && !linked_seen.lock().unwrap().insert((meta.dev(), meta.ino()));
+            if already_seen || physical < min_bytes {
+                return None;
             }
+            large_found_cb.fetch_add(1, Ordering::Relaxed);
+            Some((entry.path(), physical))
         })
         .collect();
 
@@ -1341,10 +1394,13 @@ pub fn delete_dir_all_with_progress(
         );
     }
 
-    // Single walk, collecting each entry's path/kind/size up front so
-    // deletion order can be computed (deepest-first) without repeatedly
-    // re-walking the shrinking tree.
-    let mut entries: Vec<(PathBuf, bool, u64)> = Vec::new();
+    // Single walk, collecting each entry's path/kind up front so deletion
+    // order can be computed (deepest-first) without repeatedly re-walking
+    // the shrinking tree. Sizes are deliberately *not* captured here: the
+    // `on_bytes` report stats each file at the moment it is actually
+    // removed below, so the number reflects the file as it existed at
+    // removal time.
+    let mut entries: Vec<(PathBuf, bool)> = Vec::new();
     let builder = WalkBuilder::new(path)
         .hidden(false)
         .ignore(false)
@@ -1360,18 +1416,39 @@ pub fn delete_dir_all_with_progress(
             continue;
         }
         let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-        let size = if is_dir { 0 } else { entry.metadata().map(|m| m.len()).unwrap_or(0) };
-        entries.push((p, is_dir, size));
+        entries.push((p, is_dir));
     }
 
     // Deepest paths first: files (and empty subdirectories) are removed
     // before the directories that contain them.
     entries.sort_by(|a, b| b.0.components().count().cmp(&a.0.components().count()));
 
-    for (p, is_dir, size) in &entries {
-        let result = if *is_dir { std::fs::remove_dir(p) } else { std::fs::remove_file(p) };
-        if result.is_ok() && !*is_dir {
-            on_bytes(*size);
+    for (p, is_dir) in &entries {
+        if *is_dir {
+            // A removed directory releases no tracked bytes of its own —
+            // only files carry an `on_bytes` report.
+            let _ = std::fs::remove_dir(p);
+        } else {
+            // Attribute the file's physical allocation (blocks × 512 — the
+            // same measure every plan and audit number in this codebase
+            // uses; `len()` would overstate sparse files like VM images)
+            // only when this unlink actually releases it: a hardlinked file
+            // (cargo's `target/debug/foo` ↔ `deps/foo-<hash>` pair is the
+            // everyday case) frees nothing until its *last* name is
+            // removed. Stat immediately before the unlink so the removal of
+            // a sibling hardlink earlier in this same pass is reflected in
+            // `nlink` — the last-removed name reports the blocks, its
+            // earlier aliases report 0, and the sum is the true reclaim.
+            let freed = match std::fs::symlink_metadata(p) {
+                Ok(meta) if meta.nlink() <= 1 => meta.blocks() * 512,
+                Ok(_) => 0,
+                // Stat lost the race (file already gone) — the remove
+                // below fails the same way and nothing is reported.
+                Err(_) => 0,
+            };
+            if std::fs::remove_file(p).is_ok() {
+                on_bytes(freed);
+            }
         }
         // Errors here (permission, immutable flags, race with another
         // process) are not fatal to this pass — anything left over is
@@ -1504,11 +1581,31 @@ mod is_recently_active_tests {
 
         assert!(is_recently_active(root, 1));
     }
+
+    /// Source files below the old `max_depth(4)` cutoff — Elixir umbrella
+    /// apps (`apps/<app>/lib/…`, depth 4) and any deeper workspace layout —
+    /// must also count as recent activity. At the old depth limit a freshly
+    /// edited depth-5 source was invisible, an actively developed project
+    /// looked stale, and its build artifacts were planned for deletion.
+    #[test]
+    fn deep_umbrella_source_file_counts_as_recent_activity() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // Depth check: root(0) → apps(1) → api(2) → lib(3) → api(4) →
+        // file(5) — beyond the old depth-4 cutoff, inside the new one.
+        let deep = root.join("apps").join("api").join("lib").join("api");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("api.ex"), "defmodule Api do\nend").unwrap();
+        thread::sleep(Duration::from_millis(10));
+
+        assert!(is_recently_active(root, 1));
+    }
 }
 
 #[cfg(test)]
 mod physical_dir_size_tests {
-    use std::{fs, path::PathBuf};
+    use std::{fs, os::unix::fs::MetadataExt as _, path::PathBuf};
 
     use super::physical_dir_size;
 
@@ -1549,6 +1646,49 @@ mod physical_dir_size_tests {
     fn empty_dir_has_zero_size() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(physical_dir_size(dir.path()), 0);
+    }
+
+    /// A hardlinked pair laid out like cargo's `target/debug` (binary name at
+    /// the root, hashed original under `deps/`) must have its blocks counted
+    /// once, not once per name — the double-count made every plan overstate
+    /// the reclaim of any Rust project with a linked binary or test binary.
+    #[test]
+    fn counts_hardlinked_pair_once_across_subdirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("target");
+        fs::create_dir_all(root.join("deps")).unwrap();
+
+        fs::write(root.join("deps").join("app-abc123"), vec![9u8; 8192]).unwrap();
+        fs::hard_link(root.join("deps").join("app-abc123"), root.join("app")).unwrap();
+
+        let one_name = fs::metadata(root.join("app")).unwrap().blocks();
+        assert!(one_name > 0, "sanity: the file should occupy at least one block");
+
+        assert_eq!(
+            physical_dir_size(&root),
+            one_name * 512,
+            "two names for one inode must be attributed once"
+        );
+    }
+
+    /// The dedupe must not over-apply: two distinct files with identical
+    /// content are separate inodes and both are attributed. Contrast test
+    /// for `counts_hardlinked_pair_once_across_subdirs`.
+    #[test]
+    fn counts_distinct_files_with_identical_content_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(root.join("one.bin"), vec![3u8; 8192]).unwrap();
+        fs::write(root.join("two.bin"), vec![3u8; 8192]).unwrap();
+
+        let per_file = fs::metadata(root.join("one.bin")).unwrap().blocks();
+
+        assert_eq!(
+            physical_dir_size(root),
+            per_file * 512 * 2,
+            "same bytes, different inodes: each file is attributed separately"
+        );
     }
 
     /// A permission-denied subtree is a gap in this function's error handling
@@ -1717,6 +1857,67 @@ mod scan_root_tests {
 
         assert!(result.is_ok());
         assert!(candidates.is_empty());
+    }
+
+    /// One inode under two names — the rustup shape, where every installed
+    /// toolchain's `cargo`/`rustc` binaries are hardlinks of the same files —
+    /// must add its physical bytes to the scan totals once, not once per
+    /// name. Otherwise a home with several toolchains overstates its scanned
+    /// footprint by hundreds of MB of phantom bytes. File *counts* stay
+    /// per-name (each name is a real directory entry).
+    #[test]
+    fn hardlinked_files_count_bytes_once_in_scan_totals() {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // `files` is not a barrier name; `bin`/`deps` would be pruned.
+        for toolchain in ["toolchain-a", "toolchain-b"] {
+            fs::create_dir_all(root.join(toolchain).join("files")).unwrap();
+        }
+        fs::write(root.join("toolchain-a").join("files").join("cargo"), vec![1u8; 8192]).unwrap();
+        fs::hard_link(
+            root.join("toolchain-a").join("files").join("cargo"),
+            root.join("toolchain-b").join("files").join("cargo"),
+        )
+        .unwrap();
+        // An unrelated distinct file so the test proves attribution happens
+        // for ordinary files too, not just the deduped pair.
+        fs::write(root.join("toolchain-a").join("files").join("other"), vec![2u8; 4096]).unwrap();
+
+        let linked_bytes =
+            fs::metadata(root.join("toolchain-a").join("files").join("cargo")).unwrap().blocks()
+                * 512;
+        let distinct_bytes =
+            fs::metadata(root.join("toolchain-a").join("files").join("other")).unwrap().blocks()
+                * 512;
+
+        let args = ArgsSnapshot {
+            deps: false,
+            aggressive: false,
+            verbose: false,
+            tool_roots: false,
+            ignore_recent_hours: 0,
+            all_filesystems: false,
+        };
+        let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
+        let stats = Arc::new(Stats::default());
+        let tool_accs = Arc::new(DashMap::new());
+
+        scan_root(root, &args, candidates.clone(), stats.clone(), &[], tool_accs, None).unwrap();
+
+        assert_eq!(
+            stats.bytes_seen.load(std::sync::atomic::Ordering::Relaxed),
+            linked_bytes + distinct_bytes,
+            "hardlinked pair must contribute its blocks once (shared inode), \
+             the distinct file once"
+        );
+        assert_eq!(
+            stats.files_seen.load(std::sync::atomic::Ordering::Relaxed),
+            3,
+            "every directory entry is still counted as a file, deduped or not"
+        );
     }
 }
 
@@ -1938,7 +2139,7 @@ mod force_remove_dir_all_tests {
 
 #[cfg(test)]
 mod delete_dir_all_with_progress_tests {
-    use std::{fs, sync::Mutex};
+    use std::{fs, os::unix::fs::MetadataExt as _, sync::Mutex};
 
     use super::delete_dir_all_with_progress;
 
@@ -1956,6 +2157,13 @@ mod delete_dir_all_with_progress_tests {
         fs::write(root.join("a.bin"), vec![0u8; 100]).unwrap();
         fs::write(root.join("nested").join("b.bin"), vec![0u8; 250]).unwrap();
 
+        // The callback reports *physical* allocation (blocks × 512), the
+        // same measure every plan/audit number uses — not logical `len()`.
+        let expected: u64 = ["a.bin", "nested/b.bin"]
+            .iter()
+            .map(|f| fs::metadata(root.join(f)).unwrap().blocks() * 512)
+            .sum();
+
         let calls: Mutex<Vec<u64>> = Mutex::new(Vec::new());
         let result = delete_dir_all_with_progress(&root, |freed| {
             calls.lock().unwrap().push(freed);
@@ -1971,7 +2179,39 @@ mod delete_dir_all_with_progress_tests {
         // asserts real sub-item granularity instead.
         assert_eq!(calls.len(), 2, "expected one callback per file, got: {calls:?}");
         let total: u64 = calls.iter().sum();
-        assert_eq!(total, 350, "callback byte sum should equal real file bytes removed");
+        assert_eq!(total, expected, "callback byte sum should equal real physical bytes removed");
+    }
+
+    /// A hardlinked pair inside the deleted tree (cargo's everyday
+    /// `target/debug/foo` ↔ `target/debug/deps/foo-<hash>` layout) must have
+    /// its physical blocks reported exactly once: removing the first name
+    /// frees nothing (the second still pins the inode), and the last-removed
+    /// name reports the full allocation. Reporting both names' blocks would
+    /// overstate the receipt's measured `bytes_freed`.
+    #[test]
+    fn hardlinked_pair_reports_its_blocks_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("victim");
+        fs::create_dir_all(root.join("deps")).unwrap();
+        fs::write(root.join("deps").join("app-abc123"), vec![9u8; 8192]).unwrap();
+        fs::hard_link(root.join("deps").join("app-abc123"), root.join("app")).unwrap();
+
+        let one_name_blocks = fs::metadata(root.join("app")).unwrap().blocks();
+
+        let calls: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+        let result = delete_dir_all_with_progress(&root, |freed| {
+            calls.lock().unwrap().push(freed);
+        });
+
+        assert!(result.is_ok(), "expected success, got: {result:?}");
+        assert!(!root.exists(), "directory should be fully removed");
+
+        let total: u64 = calls.into_inner().unwrap().iter().sum();
+        assert_eq!(
+            total,
+            one_name_blocks * 512,
+            "two names, one inode: blocks must be reported once, at the last removal"
+        );
     }
 
     /// A path that is a file, not a directory, is refused rather than

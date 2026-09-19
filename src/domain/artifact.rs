@@ -550,6 +550,16 @@ pub fn is_global_cache(path: &Path) -> bool {
 /// // Positive case: a specific, named compiler cache is nominated, under home.
 /// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/john/Library/Caches/Mozilla.sccache")));
 ///
+/// // Positive case: the package-manager caches that actually dominate a real
+/// // macOS ~/Library/Caches are individually named (measured on a real
+/// // developer machine: Homebrew 3 GB, go-build 2 GB, ms-playwright 2 GB —
+/// // none of which the earlier allowlist covered).
+/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/john/Library/Caches/Homebrew")));
+/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/john/Library/Caches/go-build")));
+/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/john/Library/Caches/ms-playwright")));
+/// // `uv` caches under ~/Library/Caches on macOS (not ~/.cache/uv as on Linux).
+/// assert!(cands.iter().any(|(p, _)| p == Path::new("/Users/john/Library/Caches/uv")));
+///
 /// // Refusal case: nothing system-level (outside home) is ever nominated.
 /// assert!(cands.iter().all(|(p, _)| p.starts_with("/Users/john")));
 ///
@@ -566,6 +576,15 @@ pub fn global_cache_candidates(home: &Path) -> Vec<(std::path::PathBuf, String)>
         // compiler/package caches individually so each is auditable on its own
         // line in a plan, not buried inside one opaque multi-GB directory.
         ("Library/Caches/Mozilla.sccache", "sccache compiler cache"),
+        ("Library/Caches/Homebrew", "Homebrew downloaded-bottle cache"),
+        ("Library/Caches/go-build", "Go build cache"),
+        ("Library/Caches/ms-playwright", "Playwright downloaded browsers"),
+        ("Library/Caches/pip", "pip download/wheel cache"),
+        ("Library/Caches/uv", "uv package cache"),
+        ("Library/Caches/org.swift.swiftpm", "SwiftPM dependency cache"),
+        ("Library/Caches/JetBrains", "JetBrains IDE indexes/caches"),
+        ("Library/Caches/trivy", "trivy vulnerability-db cache"),
+        ("Library/Caches/Google", "Chrome browser cache"),
         ("Library/pnpm/store", "pnpm content-addressable store"),
         ("Library/Developer/Xcode/DerivedData", "Xcode derived data"),
         ("Library/Developer/CoreSimulator/Caches", "CoreSimulator cache"),
@@ -578,6 +597,96 @@ pub fn global_cache_candidates(home: &Path) -> Vec<(std::path::PathBuf, String)>
     .iter()
     .map(|(rel, reason)| (home.join(rel), reason.to_string()))
     .collect()
+}
+
+/// Merges curated global-cache nominations into the scanned candidate set with
+/// **ancestor preference**: when a global cache directory contains one or more
+/// already-scanned candidates, the *ancestor* (the whole cache directory) is
+/// kept and the strictly-smaller scanned candidates inside it are dropped —
+/// not the other way around.
+///
+/// This inverts the historical overlap rule, which skipped a global-cache
+/// nomination whenever it overlapped *any* known candidate path in either
+/// direction. That rule was written to avoid ancestor/descendant pairs racing
+/// under the parallel delete executor, but its descendant-suppresses-ancestor
+/// half had the priorities backwards: a 0-byte scanned sub-item (e.g. an
+/// `lz4/build` dir project-detection found inside an unpacked cargo crate at
+/// `~/.cargo/registry/src/index.crates.io-…/oxrocksdb-sys-0.5.11/lz4/build`)
+/// vetoed the multi-GB curated nomination of `~/.cargo/registry/src` itself.
+/// On the machine this was diagnosed on, that single inversion lost ~9.5 GB of
+/// `~/.cache` (suppressed by `.cache/tmp/*/deps` scan hits) and ~2 GB of the
+/// cargo registry per plan.
+///
+/// The remaining directions keep their original semantics:
+/// - an exact-equality duplicate is skipped (dedup), and
+/// - a known candidate that is a *proper ancestor* of the global path still
+///   suppresses the global nomination (the ancestor covers strictly more).
+///
+/// Pure: no filesystem access.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::{merge_global_cache_candidates, Candidate};
+/// use std::path::PathBuf;
+///
+/// // Ancestor preference: a scanned candidate INSIDE the cache dir is
+/// // swallowed by the cache-dir nomination, not vice versa.
+/// let known = vec![
+///     Candidate { path: PathBuf::from("/h/.cache/tmp/e2e/deps"), reason: "elixir dependencies".into() },
+/// ];
+/// let global = vec![(PathBuf::from("/h/.cache"), "generic user cache".to_string())];
+/// let merged = merge_global_cache_candidates(known, global);
+/// assert_eq!(merged.len(), 1);
+/// assert_eq!(merged[0].path, PathBuf::from("/h/.cache"));
+///
+/// // Proper ancestor still wins: a known candidate that CONTAINS the global
+/// // path suppresses it (deleting the ancestor frees the cache too).
+/// let known = vec![Candidate { path: PathBuf::from("/h/dev"), reason: "project".into() }];
+/// let global = vec![(PathBuf::from("/h/dev/.cache"), "cache".to_string())];
+/// let merged = merge_global_cache_candidates(known, global);
+/// assert_eq!(merged.len(), 1);
+/// assert_eq!(merged[0].path, PathBuf::from("/h/dev"));
+///
+/// // Exact equality dedups (scanned reason is preserved, no duplicate row).
+/// let known = vec![Candidate { path: PathBuf::from("/h/.npm/_cacache"), reason: "node dependencies".into() }];
+/// let global = vec![(PathBuf::from("/h/.npm/_cacache"), "npm content cache".to_string())];
+/// let merged = merge_global_cache_candidates(known, global);
+/// assert_eq!(merged.len(), 1);
+///
+/// // Disjoint paths are a plain union.
+/// let known = vec![Candidate { path: PathBuf::from("/h/dev/app/target"), reason: "rust target".into() }];
+/// let global = vec![(PathBuf::from("/h/.cache"), "generic user cache".to_string())];
+/// let merged = merge_global_cache_candidates(known, global);
+/// assert_eq!(merged.len(), 2);
+/// ```
+pub fn merge_global_cache_candidates(
+    known: Vec<Candidate>,
+    global: Vec<(PathBuf, String)>,
+) -> Vec<Candidate> {
+    let mut out: Vec<Candidate> = known;
+
+    for (path, reason) in global {
+        // Proper ancestor of the global path already present → it covers the
+        // cache dir; nominating both would be the nested-race pair the
+        // original rule existed to prevent.
+        let covered_by_ancestor = out.iter().any(|k| k.path != path && path.starts_with(&k.path));
+        if covered_by_ancestor {
+            continue;
+        }
+        if out.iter().any(|k| k.path == path) {
+            continue;
+        }
+        // Ancestor preference: drop strictly-smaller scanned candidates that
+        // live inside the cache dir — deleting the cache dir removes them and
+        // also captures every byte the scanner never nominated.
+        out.retain(|k| !(k.path != path && k.path.starts_with(&path)));
+        out.push(Candidate { path, reason });
+    }
+
+    out.sort();
+    out.dedup_by(|a, b| a.path == b.path);
+    out
 }
 
 /// Returns true when a directory name should be treated as a rebuildable

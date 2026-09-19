@@ -3,7 +3,7 @@
 //! **Noun layer rule**: This module parses, routes, and formats output only.
 //! All destructive filesystem operations are delegated to `integration::fs`.
 
-use std::path::PathBuf;
+use std::{os::unix::fs::MetadataExt, path::PathBuf};
 
 use clap::Subcommand;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -326,17 +326,25 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                                         },
                                     };
 
-                                    // Measure the file's real on-disk size right before
-                                    // it is removed — this is what "bytes freed" means
-                                    // for a single file, not the plan's stale `item.bytes`
-                                    // snapshot from `plan build` time (the file may have
-                                    // grown or shrunk since). Falls back to the planned
-                                    // size only if the stat itself fails (e.g. a race
-                                    // removed the file between the `.exists()` check
+                                    // Measure the file's real on-disk footprint right
+                                    // before it is removed — this is what "bytes freed"
+                                    // means for a single file, not the plan's stale
+                                    // `item.bytes` snapshot from `plan build` time (the
+                                    // file may have grown or shrunk since). Same
+                                    // measurement rule as `delete_dir_all_with_progress`:
+                                    // physical allocation (blocks × 512 — `len()` would
+                                    // overstate sparse files), and zero when this unlink
+                                    // does not release anything because another hardlink
+                                    // elsewhere still pins the inode. Falls back to the
+                                    // planned size only if the stat itself fails (e.g. a
+                                    // race removed the file between the `.exists()` check
                                     // above and here).
-                                    let measured_bytes = std::fs::metadata(&item.path)
-                                        .map(|m| m.len())
-                                        .unwrap_or(item.bytes);
+                                    let measured_bytes = match std::fs::symlink_metadata(&item.path)
+                                    {
+                                        Ok(m) if m.nlink() <= 1 => m.blocks() * 512,
+                                        Ok(_) => 0,
+                                        Err(_) => item.bytes,
+                                    };
 
                                     match delete_file(&item.path) {
                                         Ok(()) => DeletionResult {

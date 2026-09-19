@@ -559,3 +559,142 @@ pub fn diagnose_privacy(
         found_unredacted_paths,
     }
 }
+
+/// Facts gathered (integration/noun side) about one launchd job of the
+/// unattended autonomy stack. Pure data — no I/O happens here.
+#[derive(Debug, Clone)]
+pub struct DaemonJobFacts {
+    /// launchd label, e.g. `com.oclnr.autoclean`.
+    pub label: String,
+    /// Whether the job's plist exists under `~/Library/LaunchAgents`.
+    pub plist_exists: bool,
+    /// The binary path baked into the plist's `ProgramArguments`, if it
+    /// could be parsed.
+    pub plist_binary: Option<String>,
+    /// Whether that baked path exists on disk right now (a moved or deleted
+    /// binary leaves a job that fails silently on every fire).
+    pub binary_exists: bool,
+    /// Whether launchd currently has the job loaded.
+    pub launchd_loaded: bool,
+}
+
+/// Adjudicated finding for one job: empty `issues` means healthy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonJobFinding {
+    pub label: String,
+    pub issues: Vec<String>,
+}
+
+/// Report returned by [`diagnose_daemon_health`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonHealthReport {
+    pub jobs: Vec<DaemonJobFinding>,
+    /// Consecutive autoclean failures parsed from the run log (0 if none).
+    pub consecutive_failures: usize,
+    /// Non-blocking advisories (e.g. last run was refused/skipped and needs
+    /// human review, or the stack has never run).
+    pub advisories: Vec<String>,
+}
+
+impl DaemonHealthReport {
+    /// Total blocking issues across all jobs plus the failure streak.
+    pub fn total_issues(&self) -> usize {
+        let job_issues: usize = self.jobs.iter().map(|j| j.issues.len()).sum();
+        job_issues + if self.consecutive_failures >= 2 { 1 } else { 0 }
+    }
+}
+
+/// Adjudicates the autonomy stack's health from gathered facts.
+///
+/// A job is healthy when its plist exists, the binary baked into that plist
+/// still exists, and launchd has the job loaded. An installed job with a
+/// missing binary or an unloaded plist is a blocking issue (the job fails
+/// silently forever otherwise); a job that is simply not installed is an
+/// advisory, not an issue — installing the monitor is optional. A run
+/// history with ≥2 consecutive autoclean failures is one blocking issue;
+/// a last run of `refused`/`skipped` is an advisory (it needs human review
+/// but the pipeline behaved correctly).
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::doctor::{diagnose_daemon_health, DaemonJobFacts};
+///
+/// // Positive: installed, binary present, loaded — no issues.
+/// let healthy = vec![DaemonJobFacts {
+///     label: "com.oclnr.autoclean".into(),
+///     plist_exists: true,
+///     plist_binary: Some("/usr/local/bin/oclnr".into()),
+///     binary_exists: true,
+///     launchd_loaded: true,
+/// }];
+/// let report = diagnose_daemon_health(healthy, 0, None);
+/// assert_eq!(report.total_issues(), 0);
+/// assert!(report.advisories.is_empty());
+///
+/// // Refusal: a loaded job whose baked binary vanished is silently dead —
+/// // one blocking issue; and a 3-failure streak adds the standing issue.
+/// let broken = vec![DaemonJobFacts {
+///     label: "com.oclnr.autoclean".into(),
+///     plist_exists: true,
+///     plist_binary: Some("/usr/local/bin/oclnr".into()),
+///     binary_exists: false,
+///     launchd_loaded: true,
+/// }];
+/// let report = diagnose_daemon_health(broken, 3, None);
+/// assert_eq!(report.total_issues(), 2);
+/// assert!(report.jobs[0].issues.iter().any(|i| i.contains("does not exist")));
+///
+/// // Advisory, not issue: a refused last run needs review but behaved.
+/// let report = diagnose_daemon_health(Vec::new(), 0, Some("refused".into()));
+/// assert_eq!(report.total_issues(), 0);
+/// assert!(report.advisories.iter().any(|a| a.contains("REFUSED")));
+/// ```
+pub fn diagnose_daemon_health(
+    jobs: Vec<DaemonJobFacts>,
+    consecutive_failures: usize,
+    last_outcome: Option<String>,
+) -> DaemonHealthReport {
+    let mut findings = Vec::new();
+    let mut advisories = Vec::new();
+
+    for job in jobs {
+        let mut issues = Vec::new();
+        if !job.plist_exists {
+            advisories.push(format!("{}: not installed (no plist)", job.label));
+        } else {
+            if !job.launchd_loaded {
+                issues.push("plist exists but the job is not loaded with launchd".to_string());
+            }
+            match &job.plist_binary {
+                Some(binary) if !job.binary_exists => {
+                    issues.push(format!(
+                        "configured binary '{binary}' does not exist — the job fails \
+                         silently on every fire"
+                    ));
+                }
+                Some(_) => {}
+                None => issues.push("plist ProgramArguments could not be parsed".to_string()),
+            }
+        }
+        findings.push(DaemonJobFinding { label: job.label, issues });
+    }
+
+    if consecutive_failures >= 2 {
+        advisories.push(format!(
+            "{consecutive_failures} consecutive autoclean failures — run the stages \
+             manually to see the error"
+        ));
+    }
+    match last_outcome.as_deref() {
+        Some("refused") => advisories
+            .push("last autoclean run was REFUSED (cap backstop) — review the plan".to_string()),
+        Some("skipped") => advisories.push(
+            "last autoclean run was SKIPPED (unknown-reversibility items) — review the plan"
+                .to_string(),
+        ),
+        _ => {}
+    }
+
+    DaemonHealthReport { jobs: findings, consecutive_failures, advisories }
+}

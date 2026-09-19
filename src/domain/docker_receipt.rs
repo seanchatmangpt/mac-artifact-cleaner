@@ -36,6 +36,21 @@ pub struct DockerPruneReceipt {
     /// and failed (the failure text, if any, is not retained here — see
     /// the CLI's own stderr output for that, this is a summary record).
     pub colima_pruned: Option<bool>,
+    /// Host-side physical allocation of Docker Desktop's sparse disk
+    /// image(s), sampled immediately before the prune. `None` when no image
+    /// was measurable (Docker Desktop absent / different storage driver) —
+    /// distinct from `Some(n)`, which asserts a real sample was taken.
+    ///
+    /// VM-internal `reclaimed_bytes` alone can overstate host reclaim: the
+    /// `Docker.raw` sparse file frequently keeps its blocks until Docker
+    /// Desktop compacts it (typically on restart). These two fields let the
+    /// receipt prove what the *host* actually got back.
+    #[serde(default)]
+    pub host_physical_bytes_before: Option<u64>,
+    /// Host-side physical allocation after the prune (same sampling rules as
+    /// `host_physical_bytes_before`).
+    #[serde(default)]
+    pub host_physical_bytes_after: Option<u64>,
 }
 
 impl DockerPruneReceipt {
@@ -110,6 +125,43 @@ impl DockerPruneReceipt {
             total_bytes_after,
             reclaimed_bytes: total_bytes_before.saturating_sub(total_bytes_after),
             colima_pruned,
+            host_physical_bytes_before: None,
+            host_physical_bytes_after: None,
+        }
+    }
+
+    /// Records host-side `Docker.raw` physical allocation samples on an
+    /// already-built receipt, and returns the bytes actually returned to the
+    /// host (before − after, saturating; `None` when either sample is
+    /// missing).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::docker_receipt::DockerPruneReceipt;
+    ///
+    /// let mut receipt = DockerPruneReceipt::new(
+    ///     10_000, 4_000, // images before/after
+    ///     0, 0, 0, 0, 0, 0,
+    ///     None,
+    /// );
+    ///
+    /// // Positive: both samples present → host return is their delta.
+    /// let returned = receipt.with_host_physical(Some(129_000), Some(96_000));
+    /// assert_eq!(returned, Some(33_000));
+    /// assert_eq!(receipt.host_physical_bytes_before, Some(129_000));
+    /// assert_eq!(receipt.host_physical_bytes_after, Some(96_000));
+    ///
+    /// // Negative: a missing sample reports None, never a fabricated 0 delta.
+    /// let mut bare = DockerPruneReceipt::new(0, 0, 0, 0, 0, 0, 0, 0, None);
+    /// assert_eq!(bare.with_host_physical(None, Some(1)), None);
+    /// ```
+    pub fn with_host_physical(&mut self, before: Option<u64>, after: Option<u64>) -> Option<u64> {
+        self.host_physical_bytes_before = before;
+        self.host_physical_bytes_after = after;
+        match (before, after) {
+            (Some(b), Some(a)) => Some(b.saturating_sub(a)),
+            _ => None,
         }
     }
 }
