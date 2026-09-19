@@ -836,6 +836,289 @@ pub fn build_exclusion_plan_ocel(script_path: &str, candidate_count: usize) -> O
 
 // OcelValidationReport replaced by wasm4pm_compat::admission::Admit trait.
 
+/// Facts gathered from one unattended autoclean run (the orchestrator that
+/// chains `plan build` → `plan approve` → `delete execute` → snapshot
+/// thinning), for its OCEL v2 evidence. Pure data — the noun layer gathers,
+/// this layer adjudicates shapes.
+#[derive(Debug, Clone, Default)]
+pub struct AutocleanRunFacts {
+    /// Run tag, e.g. `20260918T111500Z` — also the artifact filename prefix.
+    pub run_id: String,
+    /// What fired the run: `scheduled` (launchd calendar) or `pressure`
+    /// (monitor trigger).
+    pub trigger: String,
+    /// The configured safety cap in GB for this run.
+    pub max_reclaim_gb: f64,
+    /// Terminal outcome: `completed` | `nothing_to_do` | `skipped` |
+    /// `refused` | `failed`.
+    pub outcome: String,
+    /// Stage that failed, when `outcome == failed`: `plan_build` |
+    /// `plan_approve` | `delete_execute`. Empty otherwise.
+    pub stage_failed: String,
+    /// Plan artifact path, when a plan was built.
+    pub plan_path: Option<String>,
+    /// Delete receipt path, when execution ran.
+    pub receipt_path: Option<String>,
+    /// Snapshot-thinning receipt path, when thinning ran.
+    pub snapshot_receipt_path: Option<String>,
+    /// Items approved for deletion (after any cap trim).
+    pub items_approved: i64,
+    /// Planned physical bytes of the approved items.
+    pub planned_bytes: i64,
+    /// Items deferred to future runs by the cap trim.
+    pub deferred_items: i64,
+}
+
+/// Builds the OCEL v2 evidence for one autoclean run: an `autoclean_run`
+/// object, the artifact objects it touched (`deletion_plan`,
+/// `delete_receipt`, `snapshot_state`), and events for the start, each
+/// stage's outcome, and the terminal outcome — every event related to the
+/// objects it concerns, per the AGENTS.md OCEL relationship rules.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::ocel::{build_autoclean_run_ocel, AutocleanRunFacts, OcelLogAdjudicator};
+/// use wasm4pm_compat::admission::Admit;
+/// use wasm4pm_compat::evidence::Evidence;
+///
+/// // Positive: a completed run with plan, receipt, and snapshot artifacts
+/// // validates structurally — every relationship points at a real object.
+/// let facts = AutocleanRunFacts {
+///     run_id: "20260918T111500Z".into(),
+///     trigger: "scheduled".into(),
+///     max_reclaim_gb: 50.0,
+///     outcome: "completed".into(),
+///     stage_failed: String::new(),
+///     plan_path: Some("/l/plan.json".into()),
+///     receipt_path: Some("/l/receipt.jsonocel".into()),
+///     snapshot_receipt_path: Some("/l/snap.jsonocel".into()),
+///     items_approved: 3,
+///     planned_bytes: 4096,
+///     deferred_items: 1,
+/// };
+/// let log = build_autoclean_run_ocel(&facts);
+/// assert!(OcelLogAdjudicator::admit(Evidence::raw(log.clone())).is_ok());
+/// assert_eq!(log.events[0].event_type, "autoclean_run_started");
+/// assert_eq!(
+///     log.events.last().unwrap().event_type,
+///     "autoclean_run_completed"
+/// );
+///
+/// // Refusal: deleting a referenced object breaks referential integrity —
+/// // the adjudicator must reject the log.
+/// let mut broken = log.clone();
+/// broken.objects.retain(|o| o.object_type != "deletion_plan");
+/// assert!(OcelLogAdjudicator::admit(Evidence::raw(broken)).is_err());
+/// ```
+pub fn build_autoclean_run_ocel(facts: &AutocleanRunFacts) -> OCEL {
+    let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
+    let run_obj_id = format!("autoclean-run-{}", facts.run_id);
+
+    let mut objects = vec![OCELObject {
+        id: run_obj_id.clone(),
+        object_type: "autoclean_run".to_string(),
+        attributes: vec![
+            timed_attr("run_id", &now, serde_json::json!(facts.run_id)),
+            timed_attr("trigger", &now, serde_json::json!(facts.trigger)),
+            timed_attr("outcome", &now, serde_json::json!(facts.outcome)),
+            timed_attr("max_reclaim_gb", &now, serde_json::json!(facts.max_reclaim_gb)),
+        ],
+        relationships: vec![],
+    }];
+
+    if let Some(plan) = &facts.plan_path {
+        objects.push(OCELObject {
+            id: format!("deletion-plan-{}", facts.run_id),
+            object_type: "deletion_plan".to_string(),
+            attributes: vec![timed_attr("path", &now, serde_json::json!(plan))],
+            relationships: vec![OCELRelationship {
+                object_id: run_obj_id.clone(),
+                qualifier: "produced-by".to_string(),
+            }],
+        });
+    }
+    if let Some(receipt) = &facts.receipt_path {
+        objects.push(OCELObject {
+            id: format!("delete-receipt-{}", facts.run_id),
+            object_type: "delete_receipt".to_string(),
+            attributes: vec![timed_attr("path", &now, serde_json::json!(receipt))],
+            relationships: vec![OCELRelationship {
+                object_id: run_obj_id.clone(),
+                qualifier: "produced-by".to_string(),
+            }],
+        });
+    }
+    if let Some(snapshot) = &facts.snapshot_receipt_path {
+        objects.push(OCELObject {
+            id: format!("snapshot-state-{}", facts.run_id),
+            object_type: "snapshot_state".to_string(),
+            attributes: vec![timed_attr("receipt_path", &now, serde_json::json!(snapshot))],
+            relationships: vec![OCELRelationship {
+                object_id: run_obj_id.clone(),
+                qualifier: "produced-by".to_string(),
+            }],
+        });
+    }
+
+    let mut events = vec![OCELEvent {
+        id: format!("event-autoclean-started-{}", facts.run_id),
+        event_type: "autoclean_run_started".to_string(),
+        time: now,
+        attributes: vec![
+            attr("run_id", serde_json::json!(facts.run_id)),
+            attr("trigger", serde_json::json!(facts.trigger)),
+            attr("max_reclaim_gb", serde_json::json!(facts.max_reclaim_gb)),
+        ],
+        relationships: vec![OCELRelationship {
+            object_id: run_obj_id.clone(),
+            qualifier: "run".to_string(),
+        }],
+    }];
+
+    let mut stage = |stage: &str, status: &str, mut rels: Vec<OCELRelationship>| {
+        rels.insert(
+            0,
+            OCELRelationship { object_id: run_obj_id.clone(), qualifier: "run".to_string() },
+        );
+        events.push(OCELEvent {
+            id: format!("event-autoclean-stage-{}-{}", stage, facts.run_id),
+            event_type: "autoclean_stage_outcome".to_string(),
+            time: now,
+            attributes: vec![
+                attr("stage", serde_json::json!(stage)),
+                attr("status", serde_json::json!(status)),
+            ],
+            relationships: rels,
+        });
+    };
+
+    let plan_rel = || {
+        facts
+            .plan_path
+            .as_ref()
+            .map(|_| OCELRelationship {
+                object_id: format!("deletion-plan-{}", facts.run_id),
+                qualifier: "plan".to_string(),
+            })
+            .into_iter()
+            .collect::<Vec<_>>()
+    };
+
+    stage(
+        "plan_build",
+        if facts.stage_failed == "plan_build" { "failed" } else { "ok" },
+        plan_rel(),
+    );
+    let approve_status = if facts.stage_failed == "plan_approve" {
+        "failed"
+    } else if facts.plan_path.is_some() {
+        "ok"
+    } else {
+        "not_attempted"
+    };
+    stage("plan_approve", approve_status, plan_rel());
+    let exec_status = if facts.stage_failed == "delete_execute" {
+        "failed"
+    } else if facts.receipt_path.is_some() {
+        "ok"
+    } else {
+        "not_attempted"
+    };
+    let exec_rels = plan_rel().into_iter().chain(
+        facts
+            .receipt_path
+            .as_ref()
+            .map(|_| OCELRelationship {
+                object_id: format!("delete-receipt-{}", facts.run_id),
+                qualifier: "receipt".to_string(),
+            })
+            .into_iter(),
+    );
+    stage("delete_execute", exec_status, exec_rels.collect());
+    let snapshot_status =
+        if facts.snapshot_receipt_path.is_some() { "ok" } else { "not_attempted" };
+    let snapshot_rels = facts
+        .snapshot_receipt_path
+        .as_ref()
+        .map(|_| OCELRelationship {
+            object_id: format!("snapshot-state-{}", facts.run_id),
+            qualifier: "snapshot-state".to_string(),
+        })
+        .into_iter()
+        .collect::<Vec<_>>();
+    stage("snapshot_thin", snapshot_status, snapshot_rels);
+
+    events.push(OCELEvent {
+        id: format!("event-autoclean-completed-{}", facts.run_id),
+        event_type: "autoclean_run_completed".to_string(),
+        time: now,
+        attributes: vec![
+            attr("outcome", serde_json::json!(facts.outcome)),
+            attr("stage_failed", serde_json::json!(facts.stage_failed)),
+            attr("items_approved", serde_json::json!(facts.items_approved)),
+            attr("planned_bytes", serde_json::json!(facts.planned_bytes)),
+            attr("deferred_items", serde_json::json!(facts.deferred_items)),
+        ],
+        relationships: vec![OCELRelationship {
+            object_id: run_obj_id.clone(),
+            qualifier: "run".to_string(),
+        }],
+    });
+
+    OCEL {
+        event_types: vec![
+            OCELType {
+                name: "autoclean_run_started".to_string(),
+                attributes: vec![
+                    attr_def("run_id", "string"),
+                    attr_def("trigger", "string"),
+                    attr_def("max_reclaim_gb", "float"),
+                ],
+            },
+            OCELType {
+                name: "autoclean_stage_outcome".to_string(),
+                attributes: vec![attr_def("stage", "string"), attr_def("status", "string")],
+            },
+            OCELType {
+                name: "autoclean_run_completed".to_string(),
+                attributes: vec![
+                    attr_def("outcome", "string"),
+                    attr_def("stage_failed", "string"),
+                    attr_def("items_approved", "integer"),
+                    attr_def("planned_bytes", "integer"),
+                    attr_def("deferred_items", "integer"),
+                ],
+            },
+        ],
+        object_types: vec![
+            OCELType {
+                name: "autoclean_run".to_string(),
+                attributes: vec![
+                    attr_def("run_id", "string"),
+                    attr_def("trigger", "string"),
+                    attr_def("outcome", "string"),
+                    attr_def("max_reclaim_gb", "float"),
+                ],
+            },
+            OCELType {
+                name: "deletion_plan".to_string(),
+                attributes: vec![attr_def("path", "string")],
+            },
+            OCELType {
+                name: "delete_receipt".to_string(),
+                attributes: vec![attr_def("path", "string")],
+            },
+            OCELType {
+                name: "snapshot_state".to_string(),
+                attributes: vec![attr_def("receipt_path", "string")],
+            },
+        ],
+        events,
+        objects,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditSummaryStats {
     pub created_at: String,

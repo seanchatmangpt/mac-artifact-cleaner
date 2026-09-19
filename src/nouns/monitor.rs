@@ -86,8 +86,13 @@ fn trigger_autoclean_run() -> anyhow::Result<()> {
     println!(
         "[oclnr monitor] under pressure — triggering `autoclean run --yes` (cooldown recorded)..."
     );
-    let status =
-        Command::new(&exe).current_dir(&home).args(["autoclean", "run", "--yes"]).status()?;
+    let status = Command::new(&exe)
+        .current_dir(&home)
+        .args(["autoclean", "run", "--yes"])
+        // Tag the run so its OCEL evidence records `trigger: pressure`
+        // rather than the default `scheduled`.
+        .env("OCLNR_AUTOCLEAN_TRIGGER", "pressure")
+        .status()?;
     if status.success() {
         println!("[oclnr monitor] triggered autoclean run finished OK");
     } else {
