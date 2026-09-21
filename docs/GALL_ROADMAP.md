@@ -58,7 +58,15 @@ This roadmap defines the remaining steps to transition `pentecost` from its curr
     - **Environment Neutrality**: Remove all hardcoded developer paths ('sac', 'john') from logic and tests.
     - **Gitignore Expansion**: Add `.agents/`, `.antigravitycli/`, and OCEL output patterns to `.gitignore`.
     - **CLI Implementation**: Build the `privacy` noun (`privacy scan`, `privacy redact`).
-    - **Auto-Redaction**: Integrate `src/domain/redaction.rs` into all serialization paths so `--redact` applies globally.
+    - **Auto-Redaction**: ✅ Done. `redact_serialized`/`RedactionLedger` in
+      `src/domain/redaction.rs`, `write_output_file` in `src/integration/fs.rs`
+      as the single write chokepoint, `--redact` on `oclnr audit run` and
+      `oclnr plan build`, and an optional `redact` param on the MCP
+      `audit(action: "scan")`/`plan(action: "build")` tools — all routing
+      through the same domain function, no separate MCP-only path. Deferred:
+      persisting the ledger as its own artifact (currently an inline stderr
+      summary) and `receipt verify --redact` (that verb is read-only today,
+      so there is no write path to redact).
 2.  **G9: Final Promotion (The Doctor)**:
     - Finalize `doctor architecture` to verify domain purity and layer isolation.
     - Implement `doctor privacy` as a pre-commit/pre-publish check.

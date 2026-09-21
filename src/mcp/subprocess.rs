@@ -125,6 +125,7 @@ impl OclnrRunner {
         ignore_recent_hours: u32,
         tool_roots: bool,
         all_filesystems: bool,
+        redact: bool,
     ) -> Result<SubprocessResult, ErrorResponse> {
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("audit")
@@ -155,6 +156,9 @@ impl OclnrRunner {
         }
         if all_filesystems {
             cmd.arg("--all-filesystems");
+        }
+        if redact {
+            cmd.arg("--redact");
         }
 
         // Write OCEL output to disk-audit.jsonocel
@@ -202,6 +206,7 @@ impl OclnrRunner {
     /// `plan build` re-scans (it does not read a saved audit file); the audit
     /// is used upstream to decide roots/flags and to gate the workflow state.
     #[allow(clippy::result_large_err)]
+    #[allow(clippy::too_many_arguments)]
     pub fn plan_create(
         &self,
         workspace: &PathBuf,
@@ -210,6 +215,7 @@ impl OclnrRunner {
         aggressive: bool,
         include_global_caches: bool,
         ignore_recent_hours: u32,
+        redact: bool,
     ) -> Result<SubprocessResult, ErrorResponse> {
         let output = workspace.join("cleanup-plan.json");
         let mut cmd = Command::new(&self.oclnr_path);
@@ -232,6 +238,9 @@ impl OclnrRunner {
         }
         if include_global_caches {
             cmd.arg("--include-global-caches");
+        }
+        if redact {
+            cmd.arg("--redact");
         }
         // Always forward: 0 is a meaningful override ("disable the recency
         // guard"), not "unset". See audit_run for the same rationale.

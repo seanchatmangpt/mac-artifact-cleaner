@@ -111,6 +111,8 @@ fn test_github_target_parsing_and_roundtrip() {
 #[test]
 fn test_github_discover_candidates() {
     let mock = MockCommandExecutor::new();
+    let recent = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    let fix = |s: &str| s.replace("@@RECENT@@", &recent);
 
     // 1. Mock repo list command
     let repo_list_json = r#"[
@@ -121,8 +123,8 @@ fn test_github_discover_candidates() {
             "isArchived": false,
             "isFork": false,
             "isEmpty": true,
-            "updatedAt": "2026-06-10T12:00:00Z",
-            "createdAt": "2026-06-10T12:00:00Z",
+            "updatedAt": "@@RECENT@@",
+            "createdAt": "@@RECENT@@",
             "diskUsage": 0,
             "visibility": "PUBLIC",
             "defaultBranchRef": null
@@ -148,9 +150,9 @@ fn test_github_discover_candidates() {
             "isArchived": false,
             "isFork": false,
             "isEmpty": false,
-            "pushedAt": "2026-06-14T12:00:00Z",
-            "updatedAt": "2026-06-14T12:00:00Z",
-            "createdAt": "2026-06-10T12:00:00Z",
+            "pushedAt": "@@RECENT@@",
+            "updatedAt": "@@RECENT@@",
+            "createdAt": "@@RECENT@@",
             "diskUsage": 200,
             "visibility": "PUBLIC",
             "defaultBranchRef": {
@@ -169,7 +171,7 @@ fn test_github_discover_candidates() {
             "name,nameWithOwner,owner,isArchived,isFork,isEmpty,pushedAt,updatedAt,createdAt,diskUsage,visibility,defaultBranchRef",
         ],
         0,
-        repo_list_json,
+        &fix(repo_list_json),
         "",
     );
 
@@ -194,8 +196,8 @@ fn test_github_discover_candidates() {
             "headBranch": "feature",
             "status": "in_progress",
             "conclusion": null,
-            "createdAt": "2026-06-14T12:00:00Z",
-            "updatedAt": "2026-06-14T12:00:00Z"
+            "createdAt": "@@RECENT@@",
+            "updatedAt": "@@RECENT@@"
         }
     ]"#;
     mock.add_response(
@@ -211,7 +213,7 @@ fn test_github_discover_candidates() {
             "databaseId,number,name,headBranch,status,conclusion,createdAt,updatedAt",
         ],
         0,
-        run_list_json,
+        &fix(run_list_json),
         "",
     );
 
@@ -237,7 +239,7 @@ fn test_github_discover_candidates() {
         "gh",
         &["api", "repos/my-org/active-repo/branches?per_page=100&page=1"],
         0,
-        branch_list_json,
+        &fix(branch_list_json),
         "",
     );
 
@@ -247,7 +249,7 @@ fn test_github_discover_candidates() {
         "gh",
         &["api", "repos/my-org/active-repo/compare/main...feature/merged"],
         0,
-        compare_merged_json,
+        &fix(compare_merged_json),
         "",
     );
 
@@ -257,7 +259,7 @@ fn test_github_discover_candidates() {
         "gh",
         &["api", "repos/my-org/active-repo/compare/main...feature/active"],
         0,
-        compare_active_json,
+        &fix(compare_active_json),
         "",
     );
 
@@ -268,7 +270,7 @@ fn test_github_discover_candidates() {
             "name": "Draft 1.0",
             "isDraft": true,
             "isPrerelease": false,
-            "createdAt": "2026-06-12T12:00:00Z",
+            "createdAt": "@@RECENT@@",
             "publishedAt": null,
             "assets": []
         },
@@ -277,8 +279,8 @@ fn test_github_discover_candidates() {
             "name": "Release 0.9",
             "isDraft": false,
             "isPrerelease": false,
-            "createdAt": "2026-06-13T12:05:00Z",
-            "publishedAt": "2026-06-13T12:05:00Z",
+            "createdAt": "@@RECENT@@",
+            "publishedAt": "@@RECENT@@",
             "assets": [
                 {
                     "id": 555,
@@ -306,7 +308,7 @@ fn test_github_discover_candidates() {
             "tagName,name,isDraft,isPrerelease,createdAt,publishedAt,assets",
         ],
         0,
-        release_list_json,
+        &fix(release_list_json),
         "",
     );
 
@@ -323,8 +325,8 @@ fn test_github_discover_candidates() {
             "id": 444,
             "key": "active-cache",
             "sizeInBytes": 2000,
-            "createdAt": "2026-06-13T12:00:00Z",
-            "lastAccessedAt": "2026-06-13T12:00:00Z"
+            "createdAt": "@@RECENT@@",
+            "lastAccessedAt": "@@RECENT@@"
         }
     ]"#;
     mock.add_response(
@@ -340,7 +342,7 @@ fn test_github_discover_candidates() {
             "id,key,sizeInBytes,createdAt,lastAccessedAt",
         ],
         0,
-        cache_list_json,
+        &fix(cache_list_json),
         "",
     );
 
@@ -378,7 +380,7 @@ fn test_github_discover_candidates() {
             "number,title,state,createdAt,updatedAt,labels",
         ],
         0,
-        issue_list_json,
+        &fix(issue_list_json),
         "",
     );
 
@@ -416,7 +418,7 @@ fn test_github_discover_candidates() {
             "number,title,state,createdAt,updatedAt,labels",
         ],
         0,
-        pr_list_json,
+        &fix(pr_list_json),
         "",
     );
 

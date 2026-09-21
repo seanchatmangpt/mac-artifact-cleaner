@@ -76,6 +76,19 @@ impl Reversibility {
     /// Human-readable label, used in `plan(inspect)` output and the
     /// deletion receipt so operators see the classification, not just the
     /// serialized enum tag.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::dcm::Reversibility;
+    ///
+    /// // Positive: a regenerable artifact is labelled reversible.
+    /// assert_eq!(Reversibility::Reversible.label(), "reversible");
+    /// // Negative: the label is the classification, never a different tier's.
+    /// assert_ne!(Reversibility::Reversible.label(), Reversibility::Irreversible.label());
+    /// // Refusal tier: unknown reversibility keeps its own distinct label.
+    /// assert_eq!(Reversibility::Unknown.label(), "unknown");
+    /// ```
     pub fn label(self) -> &'static str {
         match self {
             Reversibility::Reversible => "reversible",

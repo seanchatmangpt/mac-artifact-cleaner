@@ -6,7 +6,8 @@ use clap::Subcommand;
 
 use crate::domain::doctor::{
     diagnose_architecture, diagnose_daemon_health, diagnose_doctests, diagnose_domain_purity,
-    diagnose_privacy, diagnose_scan_delete_separation, diagnose_substrate, DaemonJobFacts,
+    diagnose_ocel, diagnose_privacy, diagnose_scan_delete_separation, diagnose_substrate,
+    DaemonJobFacts,
 };
 
 #[derive(Subcommand, Debug)]
@@ -19,6 +20,9 @@ pub enum DoctorAction {
     Doctests,
     /// Assert privacy and redaction rule compliance
     Privacy,
+    /// Assert every OCEL evidence log in the workspace, plus a freshly generated
+    /// one, passes OCEL v2 admission
+    Ocel,
     /// Assert src/domain/** has zero std::fs/std::process/OS calls
     DomainPurity,
     /// Assert the scanner-cannot-delete / deleter-cannot-scan invariant
@@ -218,6 +222,31 @@ pub fn handle(action: DoctorAction) -> anyhow::Result<()> {
                     "✅ Privacy check passed! No local user profiles or unredacted paths found."
                 );
             }
+        }
+        DoctorAction::Ocel => {
+            println!("Validating OCEL v2 evidence logs...");
+            let mut logs = crate::integration::doctor::read_ocel_logs(workspace_root);
+            let generated =
+                serde_json::to_string(&crate::domain::ocel::build_tool_roots_ocel(&[]))?;
+            logs.push(("<generated tool-roots log>".to_string(), generated));
+            let report = diagnose_ocel(&logs);
+            for v in &report.verdicts {
+                match &v.refusal {
+                    None if v.skipped_receipt => {
+                        println!("  ➖ {} (deletion receipt; use `oclnr receipt verify`)", v.name)
+                    }
+                    None => println!("  ✅ {}", v.name),
+                    Some(reason) => println!("  ❌ {} — {}", v.name, reason),
+                }
+            }
+            if report.failures() > 0 {
+                anyhow::bail!(
+                    "OCEL check failed: {} log(s) refused.\n\nSuggestions:\n  - Regenerate the flagged log with `oclnr audit run` / `oclnr delete execute`\n  - Re-run `oclnr doctor ocel` to confirm",
+                    report.failures()
+                );
+            }
+            let admitted = report.verdicts.iter().filter(|v| !v.skipped_receipt).count();
+            println!("✅ OCEL check passed! {} log(s) admitted.", admitted);
         }
         DoctorAction::Daemon => {
             println!(

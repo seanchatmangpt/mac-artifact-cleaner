@@ -454,7 +454,7 @@ pub fn build_disk_audit_ocel(
                 // the scan_root it was found under — the validator enforces
                 // this and the old builder left it out.
                 OCELRelationship {
-                    object_id: candidate_root_rel(&roots, &c.path),
+                    object_id: candidate_root_rel(roots, &c.path),
                     qualifier: "scan-root".to_string(),
                 },
             ],
@@ -1054,16 +1054,11 @@ pub fn build_autoclean_run_ocel(facts: &AutocleanRunFacts) -> OCEL {
     } else {
         "not_attempted"
     };
-    let exec_rels = plan_rel().into_iter().chain(
-        facts
-            .receipt_path
-            .as_ref()
-            .map(|_| OCELRelationship {
-                object_id: format!("delete-receipt-{}", facts.run_id),
-                qualifier: "receipt".to_string(),
-            })
-            .into_iter(),
-    );
+    let exec_rels =
+        plan_rel().into_iter().chain(facts.receipt_path.as_ref().map(|_| OCELRelationship {
+            object_id: format!("delete-receipt-{}", facts.run_id),
+            qualifier: "receipt".to_string(),
+        }));
     stage("delete_execute", exec_status, exec_rels.collect());
     let snapshot_status =
         if facts.snapshot_receipt_path.is_some() { "ok" } else { "not_attempted" };

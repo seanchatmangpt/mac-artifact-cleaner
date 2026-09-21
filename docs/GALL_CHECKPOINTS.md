@@ -107,7 +107,7 @@ This sequence proves the core architectural law of the project:
 
 ---
 
-## Current Status (June 2026)
+## Current Status (September 2026, v26.9.21)
 
 | Checkpoint | Status | Notes |
 |---|---|---|
@@ -119,8 +119,8 @@ This sequence proves the core architectural law of the project:
 | G5 Time Machine / Snapshots | ✅ Complete | `snapshot audit/thin/delete`, `emergency`, `check_reclaim` law |
 | G6 Root-Tool Aging Analysis | ✅ Complete | `tool-roots audit`, `recommend_tool_root`, `--include-global-caches` |
 | G7 OCEL v2 Reporting | ✅ Substantially complete | All operations emit OCEL; `snapshot_delete_requested` distinct from thin |
-| G8 Privacy / Redaction Gate | 🔄 In progress | `doctor privacy` exists; auto-redaction path not yet wired |
-| G9 Doctor / Self-Verification | 🔄 In progress | `doctor architecture/substrate/doctests` pass; full G9 promotion rule pending |
+| G8 Privacy / Redaction Gate | ✅ Complete | `--redact` wired through audit/plan/snapshot writers via `write_output_file`; `doctor privacy` passes with 0 violations (scan honors `.gitignore`, skips `vendor/`) |
+| G9 Doctor / Self-Verification | ✅ Promotion rule met | `doctor architecture`, `privacy` and `ocel` pass; `doctor ocel` is step 8 of `scripts/sanity.sh`. `doctor diagnose/plan-fix/apply-fix` remain UNSUPPORTED (not built) |
 | G10 Unattended Autoclean | ✅ Complete | `plan approve` (CLI), `autoclean run`, `daemon install-autoclean` (`com.oclnr.autoclean`), safety cap + reversibility gate + log receipt |
 
 ## Roadmap to G9

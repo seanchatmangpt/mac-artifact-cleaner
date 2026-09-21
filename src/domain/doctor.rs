@@ -598,6 +598,24 @@ pub struct DaemonHealthReport {
 
 impl DaemonHealthReport {
     /// Total blocking issues across all jobs plus the failure streak.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::doctor::DaemonHealthReport;
+    ///
+    /// // Positive: no jobs and no failures is zero issues.
+    /// let ok = DaemonHealthReport { jobs: vec![], consecutive_failures: 0, advisories: vec![] };
+    /// assert_eq!(ok.total_issues(), 0);
+    ///
+    /// // Negative: a failure streak of 2+ counts as one blocking issue.
+    /// let bad = DaemonHealthReport { jobs: vec![], consecutive_failures: 2, advisories: vec![] };
+    /// assert_eq!(bad.total_issues(), 1);
+    ///
+    /// // Refusal boundary: a single failure is below the blocking threshold.
+    /// let one = DaemonHealthReport { jobs: vec![], consecutive_failures: 1, advisories: vec![] };
+    /// assert_eq!(one.total_issues(), 0);
+    /// ```
     pub fn total_issues(&self) -> usize {
         let job_issues: usize = self.jobs.iter().map(|j| j.issues.len()).sum();
         job_issues + if self.consecutive_failures >= 2 { 1 } else { 0 }
@@ -697,4 +715,100 @@ pub fn diagnose_daemon_health(
     }
 
     DaemonHealthReport { jobs: findings, consecutive_failures, advisories }
+}
+
+/// Verdict for one OCEL log inspected by `diagnose_ocel`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OcelLogVerdict {
+    pub name: String,
+    /// `true` for a deletion receipt (`execution_record` document) that shares
+    /// the `.jsonocel` extension but is verified by `receipt verify`, not OCEL
+    /// admission.
+    pub skipped_receipt: bool,
+    /// `None` when the log was admitted; otherwise the refusal or parse reason.
+    pub refusal: Option<String>,
+}
+
+/// Report returned by `diagnose_ocel`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OcelReport {
+    pub verdicts: Vec<OcelLogVerdict>,
+}
+
+impl OcelReport {
+    /// Number of logs that were refused or failed to parse.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::doctor::{OcelLogVerdict, OcelReport};
+    ///
+    /// let v = |refusal: Option<&str>| OcelLogVerdict {
+    ///     name: "log".into(),
+    ///     skipped_receipt: false,
+    ///     refusal: refusal.map(String::from),
+    /// };
+    /// // Positive: admitted logs are not failures.
+    /// assert_eq!(OcelReport { verdicts: vec![v(None)] }.failures(), 0);
+    /// // Negative: a refused log is counted.
+    /// assert_eq!(OcelReport { verdicts: vec![v(None), v(Some("bad"))] }.failures(), 1);
+    /// // Refusal: an empty report has no failures.
+    /// assert_eq!(OcelReport { verdicts: vec![] }.failures(), 0);
+    /// ```
+    pub fn failures(&self) -> usize {
+        self.verdicts.iter().filter(|v| v.refusal.is_some()).count()
+    }
+}
+
+/// Admits each `(name, raw_json)` OCEL log through the OCEL adjudicator.
+///
+/// Pure: the caller supplies log contents. A log that is not valid OCEL JSON
+/// is reported as a refusal, never skipped.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::doctor::diagnose_ocel;
+/// use osx_clnr::domain::ocel::build_tool_roots_ocel;
+///
+/// // Positive: a well-formed generated log is admitted.
+/// let good = serde_json::to_string(&build_tool_roots_ocel(&[])).unwrap();
+/// let report = diagnose_ocel(&[("good".to_string(), good)]);
+/// assert_eq!(report.failures(), 0);
+///
+/// // Negative: malformed JSON is refused, not skipped.
+/// let report = diagnose_ocel(&[("bad".to_string(), "{not json".to_string())]);
+/// assert_eq!(report.failures(), 1);
+///
+/// // A deletion receipt is recognized and not counted as an OCEL failure.
+/// let receipt = r#"{"execution_record": {}}"#.to_string();
+/// let report = diagnose_ocel(&[("r.jsonocel".to_string(), receipt)]);
+/// assert_eq!(report.failures(), 0);
+/// assert!(report.verdicts[0].skipped_receipt);
+///
+/// // Refusal: no logs yields an empty report with zero failures.
+/// assert_eq!(diagnose_ocel(&[]).failures(), 0);
+/// ```
+pub fn diagnose_ocel(logs: &[(String, String)]) -> OcelReport {
+    use wasm4pm_compat::{admission::Admit, evidence::Evidence, ocel::OCEL};
+
+    let verdicts = logs
+        .iter()
+        .map(|(name, raw)| {
+            let is_receipt = serde_json::from_str::<serde_json::Value>(raw)
+                .ok()
+                .is_some_and(|v| v.get("execution_record").is_some());
+            if is_receipt {
+                return OcelLogVerdict { name: name.clone(), skipped_receipt: true, refusal: None };
+            }
+            let refusal = match serde_json::from_str::<OCEL>(raw) {
+                Err(e) => Some(format!("not valid OCEL JSON: {e}")),
+                Ok(log) => crate::domain::ocel::OcelLogAdjudicator::admit(Evidence::raw(log))
+                    .err()
+                    .map(|r| r.reason.to_string()),
+            };
+            OcelLogVerdict { name: name.clone(), skipped_receipt: false, refusal }
+        })
+        .collect();
+    OcelReport { verdicts }
 }

@@ -1367,8 +1367,8 @@ mod ai_project_false_positive_tests {
     /// (`.agents`, `.gemini`, `.claude`) must NOT be classified `ai_project`
     /// and must NOT produce "ai tool logs" / "ai agents dir" candidates.
     /// Mirrors real false positives seen on
-    /// `/Users/sac/ferroplan/plugins/chatman-ecosystem/{agents,logs}` and
-    /// `/Users/sac/mmdio/.agents` (that one *does* have `.agents`, see the
+    /// `/Users/<user>/ferroplan/plugins/chatman-ecosystem/{agents,logs}` and
+    /// `/Users/<user>/mmdio/.agents` (that one *does* have `.agents`, see the
     /// positive test below — the point is bare `logs`/`agents` alone must not
     /// trigger it).
     #[test]

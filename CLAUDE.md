@@ -24,7 +24,7 @@ cargo sanity    # fmt → clippy → test → 4 doctor checks
 cargo doctor-arch / doctor-sub / doctor-doc / doctor-priv
 ```
 
-`scripts/sanity.sh` runs the full 7-step pipeline.
+`scripts/sanity.sh` runs the full 8-step pipeline.
 
 **Tests:** unit/doctests inline in `src/**/*.rs`; integration in `tests/`.
 
@@ -184,5 +184,5 @@ oclnr receipt verify     →  deletion-receipt.jsonocel
 
 ## Gall Checkpoints
 
-G0–G7 and G10 complete. G8 (privacy gate) and G9 (doctor self-verification) in progress.  
+G0–G10 complete as of v26.9.21 (G9 promotion rule met; `doctor plan-fix`/`apply-fix` UNSUPPORTED).  
 See `docs/GALL_CHECKPOINTS.md`. Do not add capabilities without corresponding receipts.
