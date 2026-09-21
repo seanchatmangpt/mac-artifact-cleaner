@@ -378,8 +378,7 @@ pub fn summarize_log(lines: &[&str], now_unix: i64) -> AutocleanStanding {
         }
     }
 
-    let mut standing = AutocleanStanding::default();
-    standing.runs_total = records.len();
+    let mut standing = AutocleanStanding { runs_total: records.len(), ..Default::default() };
     let week_ago = now_unix.saturating_sub(7 * 86_400);
     standing.runs_last_7d = records.iter().filter(|r| r.started_unix >= week_ago).count();
 

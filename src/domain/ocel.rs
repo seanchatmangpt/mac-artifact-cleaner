@@ -454,7 +454,7 @@ pub fn build_disk_audit_ocel(
                 // the scan_root it was found under — the validator enforces
                 // this and the old builder left it out.
                 OCELRelationship {
-                    object_id: candidate_root_rel(&roots, &c.path),
+                    object_id: candidate_root_rel(roots, &c.path),
                     qualifier: "scan-root".to_string(),
                 },
             ],
@@ -1061,8 +1061,7 @@ pub fn build_autoclean_run_ocel(facts: &AutocleanRunFacts) -> OCEL {
             .map(|_| OCELRelationship {
                 object_id: format!("delete-receipt-{}", facts.run_id),
                 qualifier: "receipt".to_string(),
-            })
-            .into_iter(),
+            }),
     );
     stage("delete_execute", exec_status, exec_rels.collect());
     let snapshot_status =
