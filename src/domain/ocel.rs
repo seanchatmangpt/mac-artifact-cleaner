@@ -1054,15 +1054,11 @@ pub fn build_autoclean_run_ocel(facts: &AutocleanRunFacts) -> OCEL {
     } else {
         "not_attempted"
     };
-    let exec_rels = plan_rel().into_iter().chain(
-        facts
-            .receipt_path
-            .as_ref()
-            .map(|_| OCELRelationship {
-                object_id: format!("delete-receipt-{}", facts.run_id),
-                qualifier: "receipt".to_string(),
-            }),
-    );
+    let exec_rels =
+        plan_rel().into_iter().chain(facts.receipt_path.as_ref().map(|_| OCELRelationship {
+            object_id: format!("delete-receipt-{}", facts.run_id),
+            qualifier: "receipt".to_string(),
+        }));
     stage("delete_execute", exec_status, exec_rels.collect());
     let snapshot_status =
         if facts.snapshot_receipt_path.is_some() { "ok" } else { "not_attempted" };

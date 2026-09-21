@@ -84,6 +84,7 @@ pub fn handle() -> anyhow::Result<()> {
             bytes: "100GB".to_string(), // Request a large amount to clear old ones
             receipt: None,
             ocel: None,
+            redact: false,
         })?;
     }
 
