@@ -15,7 +15,7 @@ use crate::{
         tool_roots::build_tool_root_defs,
     },
     integration::{
-        fs::{physical_dir_size, scan_root, write_or_dump_on_full, WriteOutcome},
+        fs::{physical_dir_size, scan_root, write_output_file, WriteOutcome},
         progress::ProgressReporter,
         scan_cache::ScanCache,
     },
@@ -47,6 +47,10 @@ pub enum PlanAction {
         /// Verbose trace output
         #[arg(long)]
         verbose: bool,
+        /// Redact local usernames and credential-shaped values from the
+        /// written plan file before it hits disk.
+        #[arg(long)]
+        redact: bool,
     },
     /// Inspect a built deletion plan
     Inspect {
@@ -94,6 +98,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             output,
             include_global_caches,
             verbose,
+            redact,
         } => {
             let roots = if root.is_empty() { crate::nouns::default_scan_roots()? } else { root };
 
@@ -259,7 +264,8 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
 
             let plan = DeletionPlan::new(roots, deps, aggressive, items, vec![]);
             let serialized = serde_json::to_string_pretty(&plan)?;
-            let plan_write = write_or_dump_on_full(&output, &serialized, "deletion plan")?;
+            let (plan_write, ledger) =
+                write_output_file(&output, &serialized, redact, "deletion plan")?;
 
             match plan_write {
                 WriteOutcome::Written => {
@@ -271,6 +277,9 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                         output.display()
                     );
                 }
+            }
+            if let Some(ledger) = ledger {
+                eprintln!("redacted {} item(s) in {}", ledger.entries.len(), output.display());
             }
             println!("   Total deletion items: {}", plan.items.len());
             println!("   Estimated reclaim:    {}", human_bytes(plan_total));
