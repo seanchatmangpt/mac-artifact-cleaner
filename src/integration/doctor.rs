@@ -129,6 +129,7 @@ pub fn read_privacy_files(
 
     fn traverse(
         dir: &Path,
+        ignore: &ignore::gitignore::Gitignore,
         sensitive_files: &mut Vec<String>,
         files_to_scan: &mut Vec<(String, String)>,
     ) {
@@ -145,11 +146,15 @@ pub fn read_privacy_files(
                         || name == "node_modules"
                         || name == ".antigravitycli"
                         || name == ".agents"
+                        || name == "vendor"
                         || name.starts_with(".tmp")
                     {
                         continue;
                     }
-                    traverse(&path, sensitive_files, files_to_scan);
+                    if ignore.matched_path_or_any_parents(&path, true).is_ignore() {
+                        continue;
+                    }
+                    traverse(&path, ignore, sensitive_files, files_to_scan);
                 } else if path.is_file() {
                     let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
 
@@ -167,6 +172,11 @@ pub fn read_privacy_files(
                         sensitive_files.push(path.to_string_lossy().to_string());
                     }
 
+                    // Gitignored files never leave the machine, so a local path
+                    // inside one is not a leak.
+                    if ignore.matched_path_or_any_parents(&path, false).is_ignore() {
+                        continue;
+                    }
                     let ext = path.extension().map(|e| e.to_string_lossy().to_string());
                     if let Some(ref e) = ext {
                         if e == "rs"
@@ -186,7 +196,28 @@ pub fn read_privacy_files(
         }
     }
 
-    traverse(workspace_root, &mut found_sensitive_files, &mut files_to_scan);
+    let (ignore, _) = ignore::gitignore::Gitignore::new(workspace_root.join(".gitignore"));
+    traverse(workspace_root, &ignore, &mut found_sensitive_files, &mut files_to_scan);
 
     (gitignore_exists, gitignore_content, found_sensitive_files, files_to_scan)
+}
+
+/// Reads every `*.jsonocel` file directly under `workspace_root` (non-recursive)
+/// as `(file name, contents)`. Unreadable files are returned with the I/O error
+/// text as contents so the domain check reports them instead of skipping them.
+pub fn read_ocel_logs(workspace_root: &Path) -> Vec<(String, String)> {
+    let mut logs = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(workspace_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|e| e == "jsonocel") {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let contents =
+                    std::fs::read_to_string(&path).unwrap_or_else(|e| format!("unreadable: {e}"));
+                logs.push((name, contents));
+            }
+        }
+    }
+    logs.sort();
+    logs
 }

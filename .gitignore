@@ -61,3 +61,8 @@ maintenance-receipt.json
 
 # Claude Code session/worktree state (never published or tracked)
 .claude/
+
+# Local evidence archives and receipts (contain absolute paths)
+archive/
+archive-*/
+receipts/
