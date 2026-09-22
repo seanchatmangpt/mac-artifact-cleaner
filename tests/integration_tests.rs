@@ -1085,7 +1085,7 @@ fn test_repeat_scan_with_cache_matches_first_scan() {
     // only after the walk completes, via `insert_batch`) can never be picked
     // up as extra entries by a later scan of `root`.
     let cache_tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
-    let cache = Arc::new(ScanCache::open(cache_tmp.path()).unwrap());
+    let cache = Arc::new(ScanCache::open(cache_tmp.path(), "scan-it").unwrap());
 
     let root_tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
     let root = root_tmp.path();

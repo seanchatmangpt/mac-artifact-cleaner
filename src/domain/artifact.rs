@@ -305,6 +305,126 @@ pub struct ArgsSnapshot {
 
 // ── Scan cache (pure) ──────────────────────────────────────────────────────────
 
+/// Revision of the candidate-classification ruleset. Bump whenever
+/// `artifact_candidates_from_snapshot`, project detection, or any other rule
+/// that decides *which* paths become candidates changes meaning — the scan
+/// cache replays stored candidates verbatim, so a cache written under an older
+/// ruleset would otherwise keep re-nominating paths the current rules refuse.
+pub const CLASSIFIER_REVISION: u32 = 2;
+
+/// Namespace for the persistent scan cache: every input that changes what a
+/// directory's cached `candidates_list` would contain.
+///
+/// The cache stores *classified candidates*, not raw listings, so a hit is only
+/// sound when the classifier revision, crate version, and the flags that gate
+/// nomination (`deps`, `aggressive`, `tool_roots`) all match the run that wrote
+/// it. This happened for real: a cache written before the `logs`/`tmp` rules
+/// were removed kept replaying `…/opentelemetry_sdk-0.31.0/src/logs` (crate
+/// *source*) as "ai tool logs" into fresh plans weeks after the rule was gone.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::{scan_cache_fingerprint, ArgsSnapshot};
+///
+/// let base = ArgsSnapshot { deps: false, aggressive: false, verbose: false, tool_roots: false, ignore_recent_hours: 24, all_filesystems: false };
+///
+/// // Positive: identical nomination inputs share a namespace, even when
+/// // non-nominating flags (verbose, recency window) differ.
+/// let noisy = ArgsSnapshot { verbose: true, ignore_recent_hours: 1, ..base };
+/// assert_eq!(scan_cache_fingerprint(&base), scan_cache_fingerprint(&noisy));
+///
+/// // Negative: any nomination-gating flag splits the namespace.
+/// let deps = ArgsSnapshot { deps: true, ..base };
+/// let aggr = ArgsSnapshot { aggressive: true, ..base };
+/// let tools = ArgsSnapshot { tool_roots: true, ..base };
+/// assert_ne!(scan_cache_fingerprint(&base), scan_cache_fingerprint(&deps));
+/// assert_ne!(scan_cache_fingerprint(&base), scan_cache_fingerprint(&aggr));
+/// assert_ne!(scan_cache_fingerprint(&base), scan_cache_fingerprint(&tools));
+///
+/// // Refusal: the fingerprint always carries the current revision prefix, so
+/// // a legacy/unversioned namespace can never be mistaken for a current one.
+/// assert!(scan_cache_fingerprint(&base).starts_with(&osx_clnr::domain::artifact::scan_cache_revision_prefix()));
+/// ```
+pub fn scan_cache_fingerprint(args: &ArgsSnapshot) -> String {
+    format!(
+        "{}d{}a{}t{}",
+        scan_cache_revision_prefix(),
+        u8::from(args.deps),
+        u8::from(args.aggressive),
+        u8::from(args.tool_roots)
+    )
+}
+
+/// The ruleset-identity prefix shared by every current scan-cache namespace.
+/// Namespaces not starting with this prefix were written by an older
+/// classifier and are safe to drop wholesale.
+pub fn scan_cache_revision_prefix() -> String {
+    format!("scan-r{}-v{}-", CLASSIFIER_REVISION, env!("CARGO_PKG_VERSION"))
+}
+
+/// Returns true when `path` lies inside a package manager's unpacked store or
+/// an application bundle — trees whose contents are *someone else's shipped
+/// artifact*, not a local project's build output.
+///
+/// Project detection fires inside these stores (an unpacked crate has a
+/// `Cargo.toml`, a wheel in `site-packages` has a `.agents/` dir, an `.app`
+/// bundle ships a `node_modules/`), but deleting a sub-path corrupts the store
+/// entry rather than reclaiming a rebuildable cache: `…/opentelemetry_sdk-0.31.0/src/logs`
+/// is library source, `ZCode.app/Contents/Resources/…/node_modules` is part of
+/// a signed app. The *whole* store may still be nominated as a unit by
+/// `global_cache_candidates`; only piecemeal sub-path nominations are refused.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::is_inside_package_store;
+/// use std::path::Path;
+///
+/// // Positive: sub-paths of unpacked package stores and app bundles.
+/// assert!(is_inside_package_store(Path::new("/Users/j/.cargo/registry/src/index.crates.io-1/otel-0.31.0/src/logs")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.cargo/git/checkouts/foo-1/abc/target")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/go/pkg/mod/github.com/x/y@v1/logs")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/proj/.venv/lib/python3.13/site-packages/fastapi/.agents")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.cache/uv/archive-v0/abc/typer/.agents")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/Applications/Z.app/Contents/Resources/p/node_modules")));
+///
+/// // Negative: ordinary project build outputs and scratch runs.
+/// assert!(!is_inside_package_store(Path::new("/Users/j/wasm4pm/target")));
+/// assert!(!is_inside_package_store(Path::new("/Users/j/.cache/tmp/base-2/runs/x/_build")));
+/// assert!(!is_inside_package_store(Path::new("/Users/j/my.application/target")));
+///
+/// // Refusal boundary: the store roots themselves are not "inside" — whole-store
+/// // nomination stays the job of `global_cache_candidates`.
+/// assert!(!is_inside_package_store(Path::new("/Users/j/.cargo/registry/src")));
+/// assert!(!is_inside_package_store(Path::new("/Users/j/go/pkg/mod")));
+/// ```
+pub fn is_inside_package_store(path: &Path) -> bool {
+    let comps: Vec<&str> = path.components().filter_map(|c| c.as_os_str().to_str()).collect();
+    let n = comps.len();
+    for i in 0..n {
+        let rest = n - i - 1; // components strictly below index i
+        let c = comps[i];
+        let next = comps.get(i + 1).copied();
+        // Depth of the store root below `comps[i]`; only strictly deeper
+        // paths are "inside" the store.
+        let matched_depth = match (c, next) {
+            (".cargo", Some("registry" | "git")) => Some(2),
+            ("go", Some("pkg")) if comps.get(i + 2) == Some(&"mod") => Some(2),
+            ("site-packages", _) => Some(0),
+            (".cache", Some("uv")) => Some(1),
+            (app, Some("Contents")) if app.ends_with(".app") => Some(1),
+            _ => None,
+        };
+        if let Some(depth) = matched_depth {
+            if rest > depth {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// A cached record of a previously-scanned directory, used to skip re-descending
 /// into unchanged subtrees on repeat scans.
 ///
@@ -1336,6 +1456,10 @@ pub fn artifact_candidates_from_snapshot(
         }
     }
 
+    // Project detection legitimately fires inside unpacked package stores and
+    // app bundles; a sub-path nomination there corrupts the store instead of
+    // reclaiming a rebuildable cache. See `is_inside_package_store`.
+    out.retain(|c| !is_inside_package_store(&c.path));
     out
 }
 
