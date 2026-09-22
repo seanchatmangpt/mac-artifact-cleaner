@@ -10,6 +10,7 @@ pub mod delete;
 pub mod docker_host;
 pub mod docker_receipt;
 pub mod doctor;
+pub mod git_worktree;
 pub mod github;
 pub mod ocel;
 pub mod ocl;
