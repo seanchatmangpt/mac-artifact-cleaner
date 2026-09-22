@@ -307,6 +307,79 @@ pub fn docker_host_footprint_at(home: &Path) -> Option<DockerHostFootprint> {
     }
 }
 
+/// Measures Colima/Lima's host-side VM disk images under a home directory:
+/// the shared data disk `<home>/.colima/_lima/_disks/<profile>/datadisk`
+/// (where Docker images/volumes/build cache live) and each profile's root
+/// disk `<home>/.colima/_lima/<profile>/{disk,diffdisk,basedisk}`.
+///
+/// Same contract as [`docker_host_footprint_at`]: `None` when no image file
+/// exists, `symlink_metadata` only, never follows symlinks (Colima plants an
+/// `in_use_by` symlink next to `datadisk`). Exists because the Docker Desktop
+/// probe alone reported 12 GB physical on a machine whose Colima `datadisk`
+/// pinned 53.6 GB of host blocks against 15 GB of VM-visible Docker usage.
+pub fn colima_host_footprint_at(home: &Path) -> Option<DockerHostFootprint> {
+    let lima = home.join(".colima/_lima");
+    let mut fp = DockerHostFootprint::default();
+
+    let mut measure = |path: &Path| {
+        let Ok(meta) = std::fs::symlink_metadata(path) else { return };
+        if !meta.is_file() {
+            return;
+        }
+        fp.docker_raw_count += 1;
+        fp.docker_raw_logical_bytes = fp.docker_raw_logical_bytes.saturating_add(meta.len());
+        fp.docker_raw_physical_bytes =
+            fp.docker_raw_physical_bytes.saturating_add(meta.blocks() * 512);
+    };
+
+    if let Ok(disks) = std::fs::read_dir(lima.join("_disks")) {
+        for d in disks.flatten() {
+            measure(&d.path().join("datadisk"));
+        }
+    }
+    if let Ok(profiles) = std::fs::read_dir(&lima) {
+        for p in profiles.flatten() {
+            if p.file_name().to_string_lossy().starts_with('_') {
+                continue;
+            }
+            for name in ["disk", "diffdisk", "basedisk"] {
+                measure(&p.path().join(name));
+            }
+        }
+    }
+
+    if fp.docker_raw_count == 0 {
+        None
+    } else {
+        Some(fp)
+    }
+}
+
+/// Convenience wrapper for [`colima_host_footprint_at`] under the current
+/// user's home directory.
+pub fn colima_host_footprint() -> Option<DockerHostFootprint> {
+    dirs::home_dir().and_then(|home| colima_host_footprint_at(&home))
+}
+
+/// Runs `fstrim -av` inside the Colima VM so the guest discards blocks its
+/// filesystems no longer use, letting the host punch holes in the sparse
+/// disk images. Data-preserving: only blocks the guest filesystem already
+/// considers free are discarded — no image, container, or volume is removed.
+/// Returns fstrim's stdout (per-mount "N bytes trimmed" lines).
+pub fn colima_fstrim() -> Result<String> {
+    if !is_colima_available() {
+        anyhow::bail!("Colima not available");
+    }
+    let output = std::process::Command::new("colima")
+        .args(["ssh", "--", "sudo", "fstrim", "-av"])
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("colima fstrim failed: {}", stderr.trim());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Convenience wrapper: measures Docker Desktop's sparse image under the
 /// current user's home directory. `None` when there is no home dir or no
 /// image file (see [`docker_host_footprint_at`]).
@@ -384,6 +457,35 @@ mod tests {
         // its logical size, rounded up to block boundaries.
         assert!(fp.docker_raw_physical_bytes >= 4096);
         assert!(fp.docker_raw_physical_bytes % 512 == 0);
+    }
+
+    #[test]
+    fn colima_footprint_measures_datadisk_and_root_disk_not_symlinks() {
+        let home = tempfile::tempdir().expect("tempdir");
+        let lima = home.path().join(".colima/_lima");
+        let disks = lima.join("_disks/colima");
+        let profile = lima.join("colima");
+        std::fs::create_dir_all(&disks).expect("mkdir disks");
+        std::fs::create_dir_all(&profile).expect("mkdir profile");
+        std::fs::create_dir_all(lima.join("_config")).expect("mkdir config");
+        std::fs::write(disks.join("datadisk"), vec![1u8; 8192]).expect("write datadisk");
+        std::fs::write(profile.join("disk"), vec![1u8; 4096]).expect("write disk");
+        std::os::unix::fs::symlink(&profile, disks.join("in_use_by")).expect("symlink");
+        // `_config` holds no disk and must not count.
+        std::fs::write(lima.join("_config/disk"), vec![1u8; 4096]).expect("write decoy");
+
+        let fp = colima_host_footprint_at(home.path()).expect("footprint found");
+        assert_eq!(fp.docker_raw_count, 2);
+        assert_eq!(fp.docker_raw_logical_bytes, 8192 + 4096);
+        assert!(fp.docker_raw_physical_bytes >= 8192 + 4096);
+    }
+
+    #[test]
+    fn colima_footprint_is_none_without_images() {
+        let home = tempfile::tempdir().expect("tempdir");
+        assert!(colima_host_footprint_at(home.path()).is_none());
+        std::fs::create_dir_all(home.path().join(".colima/_lima/_disks/colima")).expect("mkdir");
+        assert!(colima_host_footprint_at(home.path()).is_none());
     }
 
     #[test]
