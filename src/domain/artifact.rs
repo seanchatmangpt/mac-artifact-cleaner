@@ -387,6 +387,7 @@ pub fn scan_cache_revision_prefix() -> String {
 /// assert!(is_inside_package_store(Path::new("/Users/j/go/pkg/mod/github.com/x/y@v1/logs")));
 /// assert!(is_inside_package_store(Path::new("/Users/j/proj/.venv/lib/python3.13/site-packages/fastapi/.agents")));
 /// assert!(is_inside_package_store(Path::new("/Users/j/.cache/uv/archive-v0/abc/typer/.agents")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/x/toolchain/uv-cache/archive-v0/abc/fastapi/.agents")));
 /// assert!(is_inside_package_store(Path::new("/Users/j/Applications/Z.app/Contents/Resources/p/node_modules")));
 ///
 /// // Negative: ordinary project build outputs and scratch runs.
@@ -411,7 +412,7 @@ pub fn is_inside_package_store(path: &Path) -> bool {
         let matched_depth = match (c, next) {
             (".cargo", Some("registry" | "git")) => Some(2),
             ("go", Some("pkg")) if comps.get(i + 2) == Some(&"mod") => Some(2),
-            ("site-packages", _) => Some(0),
+            ("site-packages" | "uv-cache", _) => Some(0),
             (".cache", Some("uv")) => Some(1),
             (app, Some("Contents")) if app.ends_with(".app") => Some(1),
             _ => None,

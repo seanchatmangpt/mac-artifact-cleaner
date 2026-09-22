@@ -194,6 +194,15 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                     && !crate::domain::artifact::is_inside_package_store(&c.path)
             });
 
+            // Directory names can't distinguish regenerable output from
+            // committed content (`~/.cache/act/<action>/dist`, checked-in
+            // `.agents/`); a candidate holding any git-tracked file is not a
+            // cache. See `integration::git_tracked`.
+            candidate_vec = candidate_vec
+                .into_par_iter()
+                .filter(|c| !crate::integration::git_tracked::contains_git_tracked_files(&c.path))
+                .collect();
+
             candidate_vec.sort();
 
             // Optionally nominate large user-level caches the per-project scanner

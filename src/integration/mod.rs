@@ -7,6 +7,7 @@ pub mod docker;
 pub mod doctor;
 pub mod fs;
 pub mod git_health;
+pub mod git_tracked;
 pub mod github;
 pub mod monitor;
 pub mod notify;
