@@ -3,6 +3,7 @@
 pub mod backup;
 pub mod brew;
 pub mod config;
+pub mod dedupe;
 pub mod docker;
 pub mod doctor;
 pub mod fs;

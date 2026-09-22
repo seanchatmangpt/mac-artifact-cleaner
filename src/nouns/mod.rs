@@ -7,6 +7,7 @@ pub mod backup;
 pub mod brew;
 pub mod completion;
 pub mod daemon;
+pub mod dedupe;
 pub mod delete;
 pub mod dev;
 pub mod docker;
@@ -108,6 +109,11 @@ pub enum Command {
         /// Optional receipt path (written only if space allows afterward)
         #[arg(long)]
         receipt: Option<PathBuf>,
+    },
+    /// Duplicate-file measurement for APFS clone dedupe (read-only)
+    Dedupe {
+        #[command(subcommand)]
+        action: dedupe::DedupeAction,
     },
     /// Exclusion actions
     Exclusion {
@@ -243,6 +249,7 @@ pub fn handle_cli() -> anyhow::Result<()> {
         Command::Doctor { action } => doctor::handle(action),
         Command::Snapshot { action } => snapshot::handle(action),
         Command::Emergency { mount, yes, receipt } => emergency::handle(mount, yes, receipt),
+        Command::Dedupe { action } => dedupe::handle(action),
         Command::Exclusion { action } => exclusion::handle(action),
         Command::ToolRoots { action } => tool_roots::handle(action),
         Command::Ocel { action } => ocel::handle(action),
