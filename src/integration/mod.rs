@@ -15,6 +15,7 @@ pub mod notify;
 pub mod ocl_store;
 pub mod pressure;
 pub mod progress;
+pub mod r_projection;
 pub mod scan_cache;
 pub mod tmutil;
 pub mod toolchain;

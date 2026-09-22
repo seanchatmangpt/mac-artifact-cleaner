@@ -66,3 +66,6 @@ maintenance-receipt.json
 archive/
 archive-*/
 receipts/
+
+# R-projection receipts (machine-local paths)
+*.r.json

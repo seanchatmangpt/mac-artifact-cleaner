@@ -181,6 +181,11 @@ fn pressure_tick(mount: &str, threshold_gb: f64, cfg: &ReclaimConfig) -> anyhow:
                 Some(&receipt),
                 Some(&ocel),
                 false,
+                &format!(
+                    "pressure-policy: free {free} B < threshold {threshold_bytes} B \
+                     (monitor --reclaim snapshots, urgency {})",
+                    cfg.urgency
+                ),
             ) {
                 Ok(r) => println!(
                     "[oclnr monitor] pressure thin done: {} snapshot(s) removed, receipt {}",

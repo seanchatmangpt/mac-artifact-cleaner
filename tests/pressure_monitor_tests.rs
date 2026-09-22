@@ -81,7 +81,17 @@ fn live_build_process_cwd_excludes_its_target_dir() {
 
     // A real process standing in for `cargo build`, with cwd = project root.
     let mut child = Command::new("sleep").arg("30").current_dir(&busy).spawn().unwrap();
-    let cwds = osx_clnr::integration::pressure::live_process_cwds();
+    // `spawn` returns before the child is guaranteed visible to `lsof`; under a
+    // loaded parallel test run a single immediate sample raced and missed it.
+    // Poll (bounded) until the child's cwd is observed.
+    let mut cwds = osx_clnr::integration::pressure::live_process_cwds();
+    for _ in 0..50 {
+        if cwds.as_ref().map(|c| c.iter().any(|p| p == &busy)).unwrap_or(false) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        cwds = osx_clnr::integration::pressure::live_process_cwds();
+    }
     let _ = child.kill();
     let _ = child.wait();
     let home = dirs::home_dir().unwrap();

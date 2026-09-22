@@ -582,6 +582,32 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             match receipt_write {
                 WriteOutcome::Written => {
                     println!("\nReceipt written to: {}", receipt_path.display());
+                    // Fleet R-projection beside the native receipt; the plan's
+                    // HMAC-verified approval is the authority reference.
+                    let (actor, grant) = match &plan.approval {
+                        Some(a) => (
+                            a.approver.clone(),
+                            format!(
+                                "plan-approval hmac:{} plan_hash:{} reason:{}",
+                                a.hmac_signature, a.plan_hash, a.approval_reason
+                            ),
+                        ),
+                        None => ("oclnr".to_string(), String::new()),
+                    };
+                    let ctx = crate::integration::r_projection::context_for(
+                        &receipt_path,
+                        &actor,
+                        &grant,
+                        0,
+                    )?;
+                    let r = crate::domain::r_projection::project_deletion(&receipt, &ctx);
+                    let out =
+                        crate::integration::r_projection::write_projection(&receipt_path, &r)?;
+                    println!(
+                        "R-projection written to: {} (standing {})",
+                        out.display(),
+                        r.standing.value
+                    );
                 }
                 WriteOutcome::DumpedToStdout => {
                     println!(

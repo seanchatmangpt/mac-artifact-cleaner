@@ -163,6 +163,7 @@ pub fn thin_and_seal(
     receipt: Option<&Path>,
     ocel: Option<&Path>,
     redact: bool,
+    grant: &str,
 ) -> anyhow::Result<SnapshotThinReceipt> {
     println!(
         "Thinning local snapshots on {} to reclaim {} bytes (urgency {})...",
@@ -203,6 +204,13 @@ pub fn thin_and_seal(
             r_path,
             crate::domain::affidavit_integration::build_snapshot_thin_affidavit,
         )?;
+
+        // Fleet R-projection (identity/authority/consequence/replay/standing)
+        // beside the native receipt — see `domain::r_projection`.
+        let ctx = crate::integration::r_projection::context_for(r_path, "oclnr", grant, 0)?;
+        let r = crate::domain::r_projection::project_snapshot_thin(&receipt_obj, &ctx);
+        let out = crate::integration::r_projection::write_projection(r_path, &r)?;
+        println!("R-projection written to: {} (standing {})", out.display(), r.standing.value);
     }
 
     if let Some(o_path) = ocel {
@@ -257,7 +265,15 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
         SnapshotAction::Thin { mount, bytes, receipt, ocel, redact } => {
             let parsed_bytes = parse_size_in_bytes(&bytes)
                 .map_err(|e| anyhow::anyhow!("Invalid size format: {}", e))?;
-            thin_and_seal(&mount, parsed_bytes, 1, receipt.as_deref(), ocel.as_deref(), redact)?;
+            thin_and_seal(
+                &mount,
+                parsed_bytes,
+                1,
+                receipt.as_deref(),
+                ocel.as_deref(),
+                redact,
+                "operator-invocation: `oclnr snapshot thin` run directly by its caller",
+            )?;
         }
         SnapshotAction::Delete { mount, which, oldest_n, receipt, ocel, redact } => {
             let before = list_local_snapshots(&mount)?;

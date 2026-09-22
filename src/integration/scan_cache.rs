@@ -45,8 +45,25 @@ impl ScanCache {
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("creating cache dir {}", dir.display()))?;
         let db_path = dir.join("scan.sled");
-        let db = sled::open(&db_path)
-            .with_context(|| format!("opening scan cache at {}", db_path.display()))?;
+        // sled holds an exclusive file lock that its background flusher can
+        // keep for a moment after the previous handle drops, and concurrent
+        // oclnr processes (MCP server, pressure daemon, autoclean) share this
+        // one cache. Retry briefly instead of degrading straight to an
+        // uncached scan on transient lock contention.
+        let mut attempt = 0;
+        let db = loop {
+            match sled::open(&db_path) {
+                Ok(db) => break db,
+                Err(_) if attempt < 40 => {
+                    attempt += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(e) => {
+                    return Err(anyhow::Error::new(e))
+                        .with_context(|| format!("opening scan cache at {}", db_path.display()))
+                }
+            }
+        };
 
         let prefix = crate::domain::artifact::scan_cache_revision_prefix();
         db.clear().context("clearing legacy unnamespaced scan cache")?;
