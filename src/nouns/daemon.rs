@@ -52,6 +52,26 @@ pub enum DaemonAction {
         #[arg(long)]
         yes: bool,
     },
+    /// Install `oclnr monitor --watch --reclaim ...` as a long-running
+    /// launchd LaunchAgent (`com.oclnr.pressure`): samples free space every
+    /// `--interval-secs` and, below `--threshold-gb`, thins local snapshots
+    /// (and optionally reclaims build dirs) through the receipted paths.
+    InstallPressureMonitor {
+        /// Free-space threshold in GB that triggers reclaim
+        #[arg(long)]
+        threshold_gb: f64,
+        /// Sample interval in seconds
+        #[arg(long, default_value = "60")]
+        interval_secs: u64,
+        /// Reclaim strategies: `snapshots` or `snapshots,builds`
+        #[arg(long, default_value = "snapshots", value_parser = parse_reclaim_value)]
+        reclaim: String,
+        /// Skip the confirmation prompt and load the LaunchAgent immediately
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Uninstall the pressure-monitor launchd LaunchAgent
+    UninstallPressureMonitor,
     /// Uninstall the launchd LaunchAgent
     Uninstall,
     /// Uninstall the autoclean launchd LaunchAgent
@@ -62,6 +82,112 @@ pub enum DaemonAction {
 
 const PLIST_LABEL: &str = "com.oclnr.monitor";
 const AUTOCLEAN_PLIST_LABEL: &str = "com.oclnr.autoclean";
+/// launchd label of the pressure-reclaim monitor.
+pub const PRESSURE_PLIST_LABEL: &str = "com.oclnr.pressure";
+
+/// Validates `--reclaim` through the same domain parser `monitor` uses, then
+/// keeps the canonical string for the plist.
+fn parse_reclaim_value(value: &str) -> Result<String, String> {
+    let modes = crate::domain::pressure::parse_reclaim_modes(value)?;
+    Ok(match (modes.snapshots, modes.builds) {
+        (true, true) => "snapshots,builds",
+        (true, false) => "snapshots",
+        _ => "builds",
+    }
+    .to_string())
+}
+
+pub(crate) fn pressure_plist_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("Library/LaunchAgents")
+        .join(format!("{}.plist", PRESSURE_PLIST_LABEL))
+}
+
+/// Generates the pressure-monitor plist. The job is a single long-running
+/// `monitor --watch` process (`KeepAlive`, `RunAtLoad`) rather than a
+/// `StartInterval` re-fire, so the in-loop cooldown and the persisted
+/// last-action stamps both apply; launchd restarts it if it exits.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::nouns::daemon::generate_pressure_plist;
+/// use std::path::Path;
+///
+/// let plist = generate_pressure_plist(
+///     "/usr/local/bin/oclnr", 20.0, 60, "snapshots,builds", Path::new("/Users/me/Library/Logs/oclnr"),
+/// );
+///
+/// // Positive: label, watch loop, threshold, interval, strategies, keep-alive.
+/// assert!(plist.contains("<string>com.oclnr.pressure</string>"));
+/// assert!(plist.contains("<string>monitor</string>"));
+/// assert!(plist.contains("<string>--watch</string>"));
+/// assert!(plist.contains("<string>--threshold-gb</string>\n        <string>20</string>"));
+/// assert!(plist.contains("<string>--interval-secs</string>\n        <string>60</string>"));
+/// assert!(plist.contains("<string>--reclaim</string>\n        <string>snapshots,builds</string>"));
+/// assert!(plist.contains("<key>KeepAlive</key>"));
+/// assert!(plist.contains("/Users/me/Library/Logs/oclnr/pressure-launchd.log"));
+///
+/// // Negative: it is not the re-fired monitor shape.
+/// assert!(!plist.contains("StartInterval"));
+///
+/// // Refusal: never bounded by --max-iterations (a bounded loop under
+/// // KeepAlive would just restart-spin).
+/// assert!(!plist.contains("--max-iterations"));
+/// ```
+pub fn generate_pressure_plist(
+    binary: &str,
+    threshold_gb: f64,
+    interval_secs: u64,
+    reclaim: &str,
+    log_dir: &std::path::Path,
+) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{label}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{binary}</string>
+        <string>monitor</string>
+        <string>--watch</string>
+        <string>--threshold-gb</string>
+        <string>{threshold_gb}</string>
+        <string>--interval-secs</string>
+        <string>{interval_secs}</string>
+        <string>--reclaim</string>
+        <string>{reclaim}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>{log_dir}/pressure-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>{log_dir}/pressure-launchd.err</string>
+</dict>
+</plist>
+"#,
+        label = PRESSURE_PLIST_LABEL,
+        log_dir = log_dir.display(),
+    )
+}
+
+/// Writes a plist to `path`, creating its parent directory. Split from the
+/// `launchctl load` step so it can be exercised against a tempdir.
+pub fn write_plist(path: &std::path::Path, contents: &str) -> anyhow::Result<()> {
+    ensure_plist_dir(path)?;
+    std::fs::write(path, contents)?;
+    Ok(())
+}
 
 /// Durable per-user log directory for the launchd jobs' stdout/stderr.
 /// `/tmp` (the previous location) is wiped on reboot and has silently
@@ -403,6 +529,75 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        DaemonAction::InstallPressureMonitor { threshold_gb, interval_secs, reclaim, yes } => {
+            let plist = pressure_plist_path();
+            let log_dir = launchd_log_dir();
+            std::fs::create_dir_all(&log_dir)?;
+            let binary = oclnr_binary_path();
+            warn_if_binary_missing("daemon install-pressure-monitor", &binary);
+            let contents =
+                generate_pressure_plist(&binary, threshold_gb, interval_secs, &reclaim, &log_dir);
+            write_plist(&plist, &contents)?;
+            println!("Wrote plist: {}", plist.display());
+
+            println!("--- plist content ---");
+            println!("{}", contents);
+            println!("----------------------");
+
+            // This agent thins local snapshots (and with `builds`, deletes
+            // build dirs through the plan-bound pipeline) unattended —
+            // explicit confirmation before registering it, same as the
+            // other installers.
+            let proceed = yes
+                || Confirm::new()
+                    .with_prompt(format!(
+                        "Load LaunchAgent '{}' now via `launchctl load -w`? Below {} GB free it \
+                         WILL thin local snapshots{} (cooldown-bounded, receipted).",
+                        PRESSURE_PLIST_LABEL,
+                        threshold_gb,
+                        if reclaim.contains("builds") {
+                            " and delete regenerable build dirs"
+                        } else {
+                            ""
+                        }
+                    ))
+                    .default(false)
+                    .interact()
+                    .unwrap_or(false);
+
+            if !proceed {
+                println!("Skipped launchctl load (pass --yes to load immediately).");
+                println!("Run manually: launchctl load -w {}", plist.display());
+                return Ok(());
+            }
+
+            let status = std::process::Command::new("launchctl")
+                .args(["load", "-w", &plist.to_string_lossy()])
+                .status()?;
+            if status.success() {
+                println!(
+                    "Loaded: {} (threshold: {} GB, interval: {}s, reclaim: {})",
+                    PRESSURE_PLIST_LABEL, threshold_gb, interval_secs, reclaim
+                );
+            } else {
+                eprintln!("Warning: launchctl load failed — plist written but daemon not started.");
+                eprintln!("Run: launchctl load -w {}", plist.display());
+            }
+            Ok(())
+        }
+        DaemonAction::UninstallPressureMonitor => {
+            let plist = pressure_plist_path();
+            if plist.exists() {
+                let _ = std::process::Command::new("launchctl")
+                    .args(["unload", "-w", &plist.to_string_lossy()])
+                    .status();
+                std::fs::remove_file(&plist)?;
+                println!("Uninstalled {}", PRESSURE_PLIST_LABEL);
+            } else {
+                println!("Pressure monitor not installed (plist not found: {})", plist.display());
+            }
+            Ok(())
+        }
         DaemonAction::UninstallAutoclean => {
             let plist = autoclean_plist_path();
             if plist.exists() {
@@ -499,6 +694,23 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 }
             }
 
+            println!();
+            let pressure_plist = pressure_plist_path();
+            if !pressure_plist.exists() {
+                println!("Pressure monitor ({}): not installed.", PRESSURE_PLIST_LABEL);
+            } else {
+                println!("Pressure plist: {} (exists)", pressure_plist.display());
+                let output = std::process::Command::new("launchctl")
+                    .args(["list", PRESSURE_PLIST_LABEL])
+                    .output()?;
+                if output.status.success() {
+                    println!("Pressure monitor status: loaded");
+                } else {
+                    println!("Pressure monitor status: not loaded");
+                    println!("Run: launchctl load -w {}", pressure_plist.display());
+                }
+            }
+
             // Last-run standing, same source `autoclean status` uses — a
             // daemon that is "loaded" but has failed its last three runs is
             // not healthy, and this is where that difference becomes visible.
@@ -540,5 +752,39 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
             }
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Writes the pressure plist into a real tempdir (never
+    /// `~/Library/LaunchAgents`, never `launchctl load`) and checks it is a
+    /// well-formed property list via the system `plutil -lint`.
+    #[test]
+    fn pressure_plist_written_to_tempdir_lints() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("LaunchAgents").join(format!("{PRESSURE_PLIST_LABEL}.plist"));
+        let contents =
+            generate_pressure_plist("/usr/local/bin/oclnr", 15.5, 30, "snapshots", dir.path());
+        write_plist(&path, &contents).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+
+        match std::process::Command::new("plutil").arg("-lint").arg(&path).output() {
+            Ok(out) => assert!(
+                out.status.success(),
+                "plutil -lint failed: {}",
+                String::from_utf8_lossy(&out.stdout)
+            ),
+            Err(_) => eprintln!("SKIP: plutil not available"),
+        }
+    }
+
+    #[test]
+    fn reclaim_value_is_validated_and_canonicalized() {
+        assert_eq!(parse_reclaim_value("builds,snapshots").unwrap(), "snapshots,builds");
+        assert_eq!(parse_reclaim_value("snapshots").unwrap(), "snapshots");
+        assert!(parse_reclaim_value("docker").is_err());
     }
 }

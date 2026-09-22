@@ -201,7 +201,42 @@ pub enum Command {
         /// Minimum hours between pressure-triggered autoclean runs
         #[arg(long, default_value = "6")]
         autoclean_cooldown_hours: u64,
+        /// Pressure-triggered reclaim strategies: `snapshots` (thin local
+        /// APFS snapshots via the receipted `snapshot thin` path) and/or
+        /// `builds` (plan-bound pipeline over regenerable build dirs, live
+        /// cwds and recently-modified dirs excluded). Comma-separated.
+        #[arg(long, value_parser = parse_reclaim_arg)]
+        reclaim: Option<crate::domain::pressure::ReclaimModes>,
+        /// Headroom above the threshold to reclaim toward (hysteresis)
+        #[arg(long, default_value = "5")]
+        margin_gb: f64,
+        /// Minimum seconds between pressure-triggered snapshot thins
+        #[arg(long, default_value = "600")]
+        snapshot_cooldown_secs: u64,
+        /// Minimum seconds between pressure-triggered build reclaims
+        #[arg(long, default_value = "3600")]
+        builds_cooldown_secs: u64,
+        /// `tmutil thinlocalsnapshots` urgency (1-4) for pressure thins
+        #[arg(long, default_value = "4", value_parser = clap::value_parser!(u8).range(1..=4))]
+        urgency: u8,
+        /// Directory for pressure-reclaim receipts (default:
+        /// ~/Library/Logs/oclnr/pressure)
+        #[arg(long)]
+        receipt_dir: Option<PathBuf>,
+        /// Per-run cap (GB) for the builds reclaim
+        #[arg(long, default_value = "50")]
+        builds_max_reclaim_gb: f64,
+        /// Skip build dirs modified within this many hours
+        #[arg(long, default_value = "2")]
+        builds_ignore_recent_hours: u64,
+        /// Stop after this many samples (bounded --watch loop, for testing)
+        #[arg(long)]
+        max_iterations: Option<u64>,
     },
+}
+
+fn parse_reclaim_arg(value: &str) -> Result<crate::domain::pressure::ReclaimModes, String> {
+    crate::domain::pressure::parse_reclaim_modes(value)
 }
 
 /// Returns the default list of roots to scan for developer artifacts.
@@ -263,6 +298,15 @@ pub fn handle_cli() -> anyhow::Result<()> {
             interval_secs,
             trigger_autoclean,
             autoclean_cooldown_hours,
+            reclaim,
+            margin_gb,
+            snapshot_cooldown_secs,
+            builds_cooldown_secs,
+            urgency,
+            receipt_dir,
+            builds_max_reclaim_gb,
+            builds_ignore_recent_hours,
+            max_iterations,
         } => monitor::handle(
             threshold_gb,
             mount,
@@ -270,6 +314,17 @@ pub fn handle_cli() -> anyhow::Result<()> {
             interval_secs,
             trigger_autoclean,
             autoclean_cooldown_hours,
+            reclaim.map(|modes| monitor::ReclaimConfig {
+                modes,
+                margin_gb,
+                snapshot_cooldown_secs,
+                builds_cooldown_secs,
+                urgency,
+                receipt_dir: receipt_dir.unwrap_or_else(monitor::default_pressure_receipt_dir),
+                builds_max_reclaim_gb,
+                builds_ignore_recent_hours,
+            }),
+            max_iterations,
         ),
     }
 }

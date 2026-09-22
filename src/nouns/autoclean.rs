@@ -50,6 +50,18 @@ pub enum AutocleanAction {
         /// Required: this command can delete files.
         #[arg(long)]
         yes: bool,
+        /// Restrict the plan to regenerable build dirs only (rust `target`,
+        /// elixir `_build`/`deps`, `node_modules`, python `.venv`); global
+        /// caches are never nominated. Used by `monitor --reclaim builds`.
+        #[arg(long)]
+        builds_only: bool,
+        /// Skip any candidate that is an ancestor of, or inside, a live
+        /// process cwd (`lsof -a -d cwd -Fn`), and any candidate whose own
+        /// tree (2 levels deep) was modified within `--ignore-recent-hours`.
+        /// If live cwds cannot be read, the run refuses rather than proceed
+        /// without the exclusion.
+        #[arg(long)]
+        exclude_live_cwds: bool,
     },
     /// Show the standing of unattended runs, parsed from
     /// `~/Library/Logs/oclnr/autoclean.log`: last outcome, freed bytes,
@@ -59,9 +71,19 @@ pub enum AutocleanAction {
 
 pub fn handle(action: AutocleanAction) -> anyhow::Result<()> {
     match action {
-        AutocleanAction::Run { max_reclaim_gb, ignore_recent_hours, yes } => {
-            run(max_reclaim_gb, ignore_recent_hours, yes)
-        }
+        AutocleanAction::Run {
+            max_reclaim_gb,
+            ignore_recent_hours,
+            yes,
+            builds_only,
+            exclude_live_cwds,
+        } => run(RunOptions {
+            max_reclaim_gb,
+            ignore_recent_hours,
+            yes,
+            builds_only,
+            exclude_live_cwds,
+        }),
         AutocleanAction::Status => print_status(),
     }
 }
@@ -464,7 +486,64 @@ fn notify_nonfatal(title: &str, body: &str) {
 
 const NOTIFY_TITLE: &str = "osx-clnr autoclean";
 
-fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Result<()> {
+/// Options for one `autoclean run` pass. The daily job uses the defaults
+/// (full plan, no live-cwd exclusion); `monitor --reclaim builds` sets
+/// `builds_only` + `exclude_live_cwds` with a 2 h recency window.
+#[derive(Debug, Clone, Copy)]
+pub struct RunOptions {
+    pub max_reclaim_gb: f64,
+    pub ignore_recent_hours: u64,
+    pub yes: bool,
+    pub builds_only: bool,
+    pub exclude_live_cwds: bool,
+}
+
+/// Narrows a freshly built plan for the pressure path: keep only regenerable
+/// build dirs, then drop anything touching a live process cwd, then drop
+/// anything whose own tree is younger than `ignore_recent_hours`. Returns a
+/// human summary of what was dropped, for the log.
+fn narrow_plan_items(
+    items: Vec<crate::domain::plan::PlanItem>,
+    opts: &RunOptions,
+) -> anyhow::Result<(Vec<crate::domain::plan::PlanItem>, String)> {
+    use crate::domain::pressure::{
+        exclude_live_cwds, exclude_recent, retain_regenerable_build_dirs, significant_cwds,
+    };
+    let mut notes = Vec::new();
+    let mut items = items;
+    if opts.builds_only {
+        let (kept, dropped) = retain_regenerable_build_dirs(items);
+        notes.push(format!("{} non-build item(s) dropped", dropped.len()));
+        items = kept;
+    }
+    if opts.exclude_live_cwds {
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+        let cwds = significant_cwds(crate::integration::pressure::live_process_cwds()?, &home);
+        let (kept, excluded) = exclude_live_cwds(items, &cwds);
+        notes.push(format!(
+            "{} item(s) excluded as live-cwd related ({} significant cwds)",
+            excluded.len(),
+            cwds.len()
+        ));
+        let mtimes: Vec<Option<i64>> = kept
+            .iter()
+            .map(|i| crate::integration::pressure::newest_mtime_shallow(&i.path, 2))
+            .collect();
+        let now = chrono::Utc::now().timestamp();
+        let (kept, recent) =
+            exclude_recent(kept, &mtimes, now, opts.ignore_recent_hours.saturating_mul(3600));
+        notes.push(format!(
+            "{} item(s) excluded as modified within {}h",
+            recent.len(),
+            opts.ignore_recent_hours
+        ));
+        items = kept;
+    }
+    Ok((items, notes.join(", ")))
+}
+
+fn run(opts: RunOptions) -> anyhow::Result<()> {
+    let RunOptions { max_reclaim_gb, ignore_recent_hours, yes, .. } = opts;
     if !yes {
         anyhow::bail!(
             "Refusing to run without --yes (this can delete files). The launchd job always \
@@ -514,20 +593,19 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
     };
 
     println!("[autoclean {ts}] building plan (ignore_recent_hours={ignore_recent_hours})...");
-    let build = Command::new(&exe)
-        .current_dir(home_ref)
-        .args([
-            "plan",
-            "build",
-            "--deps",
-            "--aggressive",
-            "--ignore-recent-hours",
-            &ignore_recent_hours.to_string(),
-            "--include-global-caches",
-            "--output",
-        ])
-        .arg(&plan_file)
-        .output()?;
+    let mut build_cmd = Command::new(&exe);
+    build_cmd.current_dir(home_ref).args([
+        "plan",
+        "build",
+        "--deps",
+        "--aggressive",
+        "--ignore-recent-hours",
+        &ignore_recent_hours.to_string(),
+    ]);
+    if !opts.builds_only {
+        build_cmd.arg("--include-global-caches");
+    }
+    let build = build_cmd.arg("--output").arg(&plan_file).output()?;
     if !build.status.success() {
         facts.outcome = "failed".into();
         facts.stage_failed = "plan_build".into();
@@ -544,6 +622,28 @@ fn run(max_reclaim_gb: f64, ignore_recent_hours: u64, yes: bool) -> anyhow::Resu
 
     let plan_content = std::fs::read_to_string(&plan_file)?;
     let mut plan: crate::domain::plan::DeletionPlan = serde_json::from_str(&plan_content)?;
+    if opts.builds_only || opts.exclude_live_cwds {
+        match narrow_plan_items(std::mem::take(&mut plan.items), &opts) {
+            Ok((kept, notes)) => {
+                plan.items = kept;
+                std::fs::write(&plan_file, serde_json::to_string_pretty(&plan)?)?;
+                let msg = format!("[autoclean {ts}] narrowed plan: {notes}");
+                println!("{msg}");
+                append_log(&msg)?;
+            }
+            Err(e) => {
+                facts.outcome = "refused".into();
+                emit_run_ocel(&facts);
+                let msg = format!(
+                    "[autoclean {ts}] REFUSED: could not establish live-cwd exclusion ({e}) — \
+                     not deleting build dirs blind"
+                );
+                eprintln!("{msg}");
+                append_log(&msg)?;
+                return Ok(());
+            }
+        }
+    }
     let total_bytes: u64 = plan.items.iter().map(|i| i.bytes).sum();
     facts.plan_path = Some(plan_file.display().to_string());
 

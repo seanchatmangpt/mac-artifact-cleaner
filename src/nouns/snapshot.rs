@@ -150,6 +150,85 @@ pub enum SnapshotAction {
     },
 }
 
+/// The `snapshot thin` operation as a reusable function: list → `tmutil
+/// thinlocalsnapshots <mount> <bytes> <urgency>` → list, then write and seal
+/// the [`SnapshotThinReceipt`] (affidavit core/v1 sidecar) and optional OCEL
+/// log. `snapshot thin` (urgency 1) and the pressure monitor (`monitor
+/// --reclaim snapshots`, urgency configurable) both go through this, so a
+/// pressure-triggered thin carries exactly the receipts a manual one does.
+pub fn thin_and_seal(
+    mount: &str,
+    parsed_bytes: u64,
+    urgency: u8,
+    receipt: Option<&Path>,
+    ocel: Option<&Path>,
+    redact: bool,
+) -> anyhow::Result<SnapshotThinReceipt> {
+    println!(
+        "Thinning local snapshots on {} to reclaim {} bytes (urgency {})...",
+        mount, parsed_bytes, urgency
+    );
+
+    let before = list_local_snapshots(mount)?;
+    let output = thin_local_snapshots(mount, parsed_bytes, urgency)?;
+    println!("{}", output);
+
+    let after = list_local_snapshots(mount)?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let receipt_obj = SnapshotThinReceipt::new(
+        mount.to_string(),
+        parsed_bytes,
+        now,
+        before.clone(),
+        after.clone(),
+    );
+
+    println!("Thinned {} snapshots successfully.", receipt_obj.snapshots_thinned.len());
+    for s in &receipt_obj.snapshots_thinned {
+        println!("  - {}", s);
+    }
+
+    if let Some(r_path) = receipt {
+        let serialized = serde_json::to_string_pretty(&receipt_obj)?;
+        std::fs::write(r_path, serialized)?;
+        println!("Wrote thinning receipt to: {}", r_path.display());
+
+        seal_snapshot_receipt(
+            &receipt_obj,
+            r_path,
+            crate::domain::affidavit_integration::build_snapshot_thin_affidavit,
+        )?;
+    }
+
+    if let Some(o_path) = ocel {
+        let ocel_log = build_snapshot_thin_ocel(
+            mount,
+            parsed_bytes,
+            &before,
+            &after,
+            &receipt_obj.snapshots_thinned,
+        );
+        let serialized = serde_json::to_string_pretty(&ocel_log)?;
+        let (_outcome, ledger) = crate::integration::fs::write_output_file(
+            o_path,
+            &serialized,
+            redact,
+            "snapshot thin OCEL log",
+        )?;
+        if let Some(ledger) = ledger {
+            eprintln!("redacted {} item(s) in {}", ledger.entries.len(), o_path.display());
+        }
+        println!("Wrote snapshot thin OCEL v2 log to: {}", o_path.display());
+    }
+
+    Ok(receipt_obj)
+}
+
 pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
     match action {
         SnapshotAction::Audit { mount, ocel, redact } => {
@@ -178,65 +257,7 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
         SnapshotAction::Thin { mount, bytes, receipt, ocel, redact } => {
             let parsed_bytes = parse_size_in_bytes(&bytes)
                 .map_err(|e| anyhow::anyhow!("Invalid size format: {}", e))?;
-
-            println!("Thinning local snapshots on {} to reclaim {} bytes...", mount, parsed_bytes);
-
-            let before = list_local_snapshots(&mount)?;
-            let output = thin_local_snapshots(&mount, parsed_bytes, 1)?;
-            println!("{}", output);
-
-            let after = list_local_snapshots(&mount)?;
-
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-
-            let receipt_obj = SnapshotThinReceipt::new(
-                mount.clone(),
-                parsed_bytes,
-                now,
-                before.clone(),
-                after.clone(),
-            );
-
-            println!("Thinned {} snapshots successfully.", receipt_obj.snapshots_thinned.len());
-            for s in &receipt_obj.snapshots_thinned {
-                println!("  - {}", s);
-            }
-
-            if let Some(r_path) = receipt {
-                let serialized = serde_json::to_string_pretty(&receipt_obj)?;
-                std::fs::write(&r_path, serialized)?;
-                println!("Wrote thinning receipt to: {}", r_path.display());
-
-                seal_snapshot_receipt(
-                    &receipt_obj,
-                    &r_path,
-                    crate::domain::affidavit_integration::build_snapshot_thin_affidavit,
-                )?;
-            }
-
-            if let Some(o_path) = ocel {
-                let ocel_log = build_snapshot_thin_ocel(
-                    &mount,
-                    parsed_bytes,
-                    &before,
-                    &after,
-                    &receipt_obj.snapshots_thinned,
-                );
-                let serialized = serde_json::to_string_pretty(&ocel_log)?;
-                let (_outcome, ledger) = crate::integration::fs::write_output_file(
-                    &o_path,
-                    &serialized,
-                    redact,
-                    "snapshot thin OCEL log",
-                )?;
-                if let Some(ledger) = ledger {
-                    eprintln!("redacted {} item(s) in {}", ledger.entries.len(), o_path.display());
-                }
-                println!("Wrote snapshot thin OCEL v2 log to: {}", o_path.display());
-            }
+            thin_and_seal(&mount, parsed_bytes, 1, receipt.as_deref(), ocel.as_deref(), redact)?;
         }
         SnapshotAction::Delete { mount, which, oldest_n, receipt, ocel, redact } => {
             let before = list_local_snapshots(&mount)?;
