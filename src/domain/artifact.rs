@@ -310,7 +310,7 @@ pub struct ArgsSnapshot {
 /// that decides *which* paths become candidates changes meaning — the scan
 /// cache replays stored candidates verbatim, so a cache written under an older
 /// ruleset would otherwise keep re-nominating paths the current rules refuse.
-pub const CLASSIFIER_REVISION: u32 = 2;
+pub const CLASSIFIER_REVISION: u32 = 3;
 
 /// Namespace for the persistent scan cache: every input that changes what a
 /// directory's cached `candidates_list` would contain.
@@ -389,11 +389,19 @@ pub fn scan_cache_revision_prefix() -> String {
 /// assert!(is_inside_package_store(Path::new("/Users/j/.cache/uv/archive-v0/abc/typer/.agents")));
 /// assert!(is_inside_package_store(Path::new("/Users/j/x/toolchain/uv-cache/archive-v0/abc/fastapi/.agents")));
 /// assert!(is_inside_package_store(Path::new("/Users/j/Applications/Z.app/Contents/Resources/p/node_modules")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.vscode/extensions/antfu.slidev-53.0.0/dist")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.cursor/extensions/vitest.explorer-1.52.0/dist")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.zcode/cli/plugins/cache/official/computer-use/0.5.14/node_modules")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.cache/.bun/install/cache/yaml@2.9.0@@@1/dist")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.cache/pre-commit/repoabc/build")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.cache/act/actions-cache@v6/dist")));
 ///
 /// // Negative: ordinary project build outputs and scratch runs.
 /// assert!(!is_inside_package_store(Path::new("/Users/j/wasm4pm/target")));
 /// assert!(!is_inside_package_store(Path::new("/Users/j/.cache/tmp/base-2/runs/x/_build")));
 /// assert!(!is_inside_package_store(Path::new("/Users/j/my.application/target")));
+/// // A project that merely has an `extensions/` source dir is not a store.
+/// assert!(!is_inside_package_store(Path::new("/Users/j/proj/extensions/foo/dist")));
 ///
 /// // Refusal boundary: the store roots themselves are not "inside" — whole-store
 /// // nomination stays the job of `global_cache_candidates`.
@@ -413,7 +421,12 @@ pub fn is_inside_package_store(path: &Path) -> bool {
             (".cargo", Some("registry" | "git")) => Some(2),
             ("go", Some("pkg")) if comps.get(i + 2) == Some(&"mod") => Some(2),
             ("site-packages" | "uv-cache", _) => Some(0),
-            (".cache", Some("uv")) => Some(1),
+            (".cache", Some("uv" | "pre-commit" | "act")) => Some(1),
+            (".bun", Some("install")) => Some(2),
+            // Installed editor extensions: ~/.vscode/extensions, ~/.cursor/extensions, …
+            (dot, Some("extensions")) if dot.starts_with('.') => Some(1),
+            // Installed plugin caches: ~/.zcode/cli/plugins/cache, ~/.claude/plugins/cache, …
+            ("plugins", Some("cache")) => Some(1),
             (app, Some("Contents")) if app.ends_with(".app") => Some(1),
             _ => None,
         };
