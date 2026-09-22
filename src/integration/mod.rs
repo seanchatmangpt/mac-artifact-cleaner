@@ -13,6 +13,7 @@ pub mod github;
 pub mod monitor;
 pub mod notify;
 pub mod ocl_store;
+pub mod pressure;
 pub mod progress;
 pub mod scan_cache;
 pub mod tmutil;

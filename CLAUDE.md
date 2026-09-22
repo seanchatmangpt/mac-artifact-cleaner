@@ -144,6 +144,8 @@ Always drive cleanup through the MCP server. Never use `rm -rf`, `find -delete`,
 | `doctor` | `doctor` |
 | `privacy` | `redaction` |
 | `autoclean run` | orchestrates `plan build` → `plan approve` → `delete execute` → `receipt verify` as subprocesses; hard `--max-reclaim-gb` cap (default 50), refuses over-cap plans, skips Unknown/Irreversible-reversibility items, `--ignore-recent-hours` defaults to 24h, never touches Docker/Colima or wholesale `~/Library/Caches` |
+| `monitor --watch --reclaim snapshots[,builds]` | `pressure` (`decide_reclaim`: Idle/Thin/Cooldown with margin + per-strategy cooldown stamps in `~/.oclnr/`); snapshots via `snapshot::thin_and_seal` (same sealed receipt as `snapshot thin`); builds via `autoclean run --builds-only --exclude-live-cwds` (regenerable build dirs only, `lsof` live-cwd + 2h recency exclusions) |
+| `daemon install-pressure-monitor/uninstall-pressure-monitor` | writes/loads a `com.oclnr.pressure` KeepAlive LaunchAgent running `monitor --watch --reclaim ...` |
 | `daemon install-autoclean/uninstall-autoclean/status` | writes/loads a `com.oclnr.autoclean` launchd LaunchAgent running `autoclean run --yes` daily (default 04:15 local) — separate from the existing alert-only `com.oclnr.monitor` job |
 
 ### Execution pipeline
