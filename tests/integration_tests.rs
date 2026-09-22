@@ -413,17 +413,47 @@ fn test_receipt_verification_and_plan_correlation() {
         None,
         None,
     );
-    let report = consistent_receipt.verify(Some(&plan));
+    let report =
+        osx_clnr::integration::fs::verify_receipt_on_disk(&consistent_receipt, Some(&plan));
     assert!(report.is_consistent);
     assert!(report.issues.is_empty());
 
-    // 2. Inconsistent receipt case: file is marked as Deleted, but still exists on disk
+    // 2a. File recreated after execution started (execution_started_unix is in
+    // 2024, the file is born now) — a live process regenerated it. The
+    // deletion happened; the receipt stays consistent with an informational
+    // PathRecreated issue.
     fs::write(&file_to_delete, "some content").unwrap();
-    let report2 = consistent_receipt.verify(Some(&plan));
-    assert!(!report2.is_consistent);
+    let report2 =
+        osx_clnr::integration::fs::verify_receipt_on_disk(&consistent_receipt, Some(&plan));
+    assert!(report2.is_consistent);
     assert_eq!(report2.issues.len(), 1);
-    assert_eq!(report2.issues[0].issue_type, IssueType::PathStillExists);
+    assert_eq!(report2.issues[0].issue_type, IssueType::PathRecreated);
     assert_eq!(report2.issues[0].path, file_to_delete);
+
+    // 2b. Inconsistent receipt case: the object at the path predates execution
+    // start — the delete never happened.
+    let future_start =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+            + 3_600;
+    let lying_receipt = DeletionReceipt::new(
+        plan.created_unix,
+        future_start,
+        future_start + 100,
+        vec![DeletionResult {
+            path: file_to_delete.clone(),
+            status: DeletionStatus::Deleted,
+            error: None,
+            blake3_hash: None,
+            bytes_freed: 0,
+            reversibility: Default::default(),
+        }],
+        None,
+        None,
+    );
+    let report2b = osx_clnr::integration::fs::verify_receipt_on_disk(&lying_receipt, Some(&plan));
+    assert!(!report2b.is_consistent);
+    assert_eq!(report2b.issues.len(), 1);
+    assert_eq!(report2b.issues[0].issue_type, IssueType::PathStillExists);
 
     // 3. Plan mismatch case: extra receipt item not in plan
     fs::remove_file(&file_to_delete).unwrap();
@@ -452,7 +482,8 @@ fn test_receipt_verification_and_plan_correlation() {
         None,
         None,
     );
-    let report3 = mismatched_receipt.verify(Some(&plan));
+    let report3 =
+        osx_clnr::integration::fs::verify_receipt_on_disk(&mismatched_receipt, Some(&plan));
     assert!(!report3.is_consistent);
     assert!(report3.issues.iter().any(|i| i.issue_type == IssueType::ExtraReceiptItem));
 }
@@ -480,7 +511,7 @@ fn test_bytes_freed_mismatch_on_zero_movement() {
         Some(5_000_000_000),
     );
 
-    let report = receipt.verify(None);
+    let report = osx_clnr::integration::fs::verify_receipt_on_disk(&receipt, None);
     assert!(!report.is_consistent);
     let issue = report
         .issues
@@ -516,7 +547,7 @@ fn test_no_false_positive_within_tolerance() {
         Some(13_000_000_000), // delta = +3 GB == 75% of 4 GB claim
     );
 
-    let report = receipt.verify(None);
+    let report = osx_clnr::integration::fs::verify_receipt_on_disk(&receipt, None);
     assert!(
         report.is_consistent,
         "within-tolerance delta must stay consistent, got issues: {:?}",
@@ -549,7 +580,7 @@ fn test_back_compat_none_samples_no_mismatch() {
         None, // available_after
     );
 
-    let report = receipt.verify(None);
+    let report = osx_clnr::integration::fs::verify_receipt_on_disk(&receipt, None);
     assert!(
         report.is_consistent,
         "old receipt with None samples must stay consistent, got issues: {:?}",
@@ -625,7 +656,7 @@ fn test_bytes_freed_mismatch_plan_bound_deleted_results() {
         Some(7_000_000_000), // delta = 0, claim = 3 GB
     );
 
-    let report = receipt.verify(Some(&plan));
+    let report = osx_clnr::integration::fs::verify_receipt_on_disk(&receipt, Some(&plan));
     assert!(!report.is_consistent);
     let issue = report
         .issues
@@ -843,7 +874,7 @@ fn test_verify_unsupported_version() {
     let mut receipt = DeletionReceipt::new(0, 1, 2, vec![], None, None);
     receipt.execution_record.version = 2;
 
-    let report = receipt.verify(None);
+    let report = osx_clnr::integration::fs::verify_receipt_on_disk(&receipt, None);
     assert!(!report.is_consistent);
     assert!(report.issues.iter().any(|i| i.issue_type == IssueType::UnsupportedVersion));
 }
@@ -855,7 +886,7 @@ fn test_verify_invalid_timestamps() {
     // completed (1) before started (2) is an impossible lifecycle.
     let receipt = DeletionReceipt::new(0, 2, 1, vec![], None, None);
 
-    let report = receipt.verify(None);
+    let report = osx_clnr::integration::fs::verify_receipt_on_disk(&receipt, None);
     assert!(!report.is_consistent);
     assert!(report.issues.iter().any(|i| i.issue_type == IssueType::InvalidTimestamps));
 }
@@ -885,7 +916,7 @@ fn test_verify_missing_plan_item() {
     );
     let receipt = DeletionReceipt::new(0, 1, 2, vec![], None, None);
 
-    let report = receipt.verify(Some(&plan));
+    let report = osx_clnr::integration::fs::verify_receipt_on_disk(&receipt, Some(&plan));
     assert!(!report.is_consistent);
     assert!(report.issues.iter().any(|i| i.issue_type == IssueType::MissingPlanItem));
 }
