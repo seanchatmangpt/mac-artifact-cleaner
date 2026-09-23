@@ -508,24 +508,27 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
             }
 
             // Load with launchctl
-            let status = std::process::Command::new("launchctl")
-                .args(["load", "-w", &plist.to_string_lossy()])
-                .status()?;
-            if status.success() {
-                println!(
-                    "Loaded: {} (threshold: {} GB, interval: {}s, autoclean trigger: {})",
-                    PLIST_LABEL,
-                    threshold_gb,
-                    interval_secs,
-                    if trigger_autoclean {
-                        format!("on (cooldown {autoclean_cooldown_hours}h)")
-                    } else {
-                        "off".to_string()
-                    }
-                );
-            } else {
-                eprintln!("Warning: launchctl load failed — plist written but daemon not started.");
-                eprintln!("Run: launchctl load -w {}", plist.display());
+            match crate::integration::daemon_binary::reload_agent(PLIST_LABEL, &plist) {
+                Ok(program) => {
+                    println!(
+                        "Loaded: {} (threshold: {} GB, interval: {}s, autoclean trigger: {})",
+                        PLIST_LABEL,
+                        threshold_gb,
+                        interval_secs,
+                        if trigger_autoclean {
+                            format!("on (cooldown {autoclean_cooldown_hours}h)")
+                        } else {
+                            "off".to_string()
+                        }
+                    );
+                    println!("Verified running program: {program}");
+                }
+                Err(e) => {
+                    anyhow::bail!(
+                        "plist written to {} but the agent was NOT (re)loaded: {e}",
+                        plist.display()
+                    );
+                }
             }
             Ok(())
         }
@@ -573,17 +576,20 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            let status = std::process::Command::new("launchctl")
-                .args(["load", "-w", &plist.to_string_lossy()])
-                .status()?;
-            if status.success() {
-                println!(
-                    "Loaded: {} (daily at {:02}:{:02}, cap: {} GB, ignore-recent: {}h)",
-                    AUTOCLEAN_PLIST_LABEL, hour, minute, max_reclaim_gb, ignore_recent_hours
-                );
-            } else {
-                eprintln!("Warning: launchctl load failed — plist written but daemon not started.");
-                eprintln!("Run: launchctl load -w {}", plist.display());
+            match crate::integration::daemon_binary::reload_agent(AUTOCLEAN_PLIST_LABEL, &plist) {
+                Ok(program) => {
+                    println!(
+                        "Loaded: {} (daily at {:02}:{:02}, cap: {} GB, ignore-recent: {}h)",
+                        AUTOCLEAN_PLIST_LABEL, hour, minute, max_reclaim_gb, ignore_recent_hours
+                    );
+                    println!("Verified running program: {program}");
+                }
+                Err(e) => {
+                    anyhow::bail!(
+                        "plist written to {} but the agent was NOT (re)loaded: {e}",
+                        plist.display()
+                    );
+                }
             }
             Ok(())
         }
@@ -629,17 +635,20 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            let status = std::process::Command::new("launchctl")
-                .args(["load", "-w", &plist.to_string_lossy()])
-                .status()?;
-            if status.success() {
-                println!(
-                    "Loaded: {} (threshold: {} GB, interval: {}s, reclaim: {})",
-                    PRESSURE_PLIST_LABEL, threshold_gb, interval_secs, reclaim
-                );
-            } else {
-                eprintln!("Warning: launchctl load failed — plist written but daemon not started.");
-                eprintln!("Run: launchctl load -w {}", plist.display());
+            match crate::integration::daemon_binary::reload_agent(PRESSURE_PLIST_LABEL, &plist) {
+                Ok(program) => {
+                    println!(
+                        "Loaded: {} (threshold: {} GB, interval: {}s, reclaim: {})",
+                        PRESSURE_PLIST_LABEL, threshold_gb, interval_secs, reclaim
+                    );
+                    println!("Verified running program: {program}");
+                }
+                Err(e) => {
+                    anyhow::bail!(
+                        "plist written to {} but the agent was NOT (re)loaded: {e}",
+                        plist.display()
+                    );
+                }
             }
             Ok(())
         }

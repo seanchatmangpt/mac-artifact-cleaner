@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::domain::daemon_preflight::{missing_flags, program_arguments, requirements};
+use crate::domain::daemon_preflight::{
+    launchctl_print_program, missing_flags, program_arguments, requirements,
+};
 
 /// Where agent binaries live: `~/.oclnr/bin/oclnr`.
 pub fn installed_binary_path() -> PathBuf {
@@ -63,6 +65,88 @@ pub fn preflight_plist(plist_contents: &str) -> anyhow::Result<Vec<String>> {
         );
     }
     Ok(missing_flags(&String::from_utf8_lossy(&out.stdout), &flags))
+}
+
+/// Current user's uid via `id -u` (the workspace forbids `unsafe`, so no
+/// direct `getuid`). Falls back to the owner of `$HOME`.
+fn current_uid() -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+        .or_else(|| dirs::home_dir().and_then(|h| std::fs::metadata(h).ok()).map(|m| m.uid()))
+        .unwrap_or(501)
+}
+
+fn gui_target(label: &str) -> String {
+    format!("gui/{}/{label}", current_uid())
+}
+
+/// `launchctl print gui/<uid>/<label>` stdout, or `None` when not loaded.
+pub fn launchctl_print(label: &str) -> Option<String> {
+    let out = std::process::Command::new("launchctl")
+        .args(["print", &gui_target(label)])
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// (Re)loads a LaunchAgent so the running instance reflects `plist`:
+/// `bootout` the label if it is loaded (waiting until launchd drops it),
+/// `bootstrap` the plist, then read back `launchctl print` and require its
+/// `program` to equal the plist's binary. Returns that verified program.
+///
+/// Replaces `launchctl load -w`, which exits 0 when the label is already
+/// loaded and leaves the old instance running: on 2026-09-22 a reinstall
+/// printed "Loaded:" while pid 88657 kept running the previous binary.
+pub fn reload_agent(label: &str, plist: &Path) -> anyhow::Result<String> {
+    let contents = std::fs::read_to_string(plist)
+        .with_context(|| format!("reading plist {}", plist.display()))?;
+    let expected =
+        program_arguments(&contents).into_iter().next().context("plist has no ProgramArguments")?;
+    let target = gui_target(label);
+
+    if launchctl_print(label).is_some() {
+        let st = std::process::Command::new("launchctl").args(["bootout", &target]).status()?;
+        if !st.success() {
+            anyhow::bail!("launchctl bootout {target} failed ({st})");
+        }
+        let mut gone = false;
+        for _ in 0..50 {
+            if launchctl_print(label).is_none() {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if !gone {
+            anyhow::bail!("{target} still loaded 5s after bootout; old instance not replaced");
+        }
+    }
+
+    let out = std::process::Command::new("launchctl")
+        .args(["bootstrap", &format!("gui/{}", current_uid())])
+        .arg(plist)
+        .output()?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "launchctl bootstrap {} failed: {}",
+            plist.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+
+    let printed = launchctl_print(label)
+        .with_context(|| format!("{target} not visible to launchctl after bootstrap"))?;
+    let program = launchctl_print_program(&printed)
+        .with_context(|| format!("no `program =` in launchctl print {target}"))?;
+    if program != expected {
+        anyhow::bail!("{target} runs {program}, expected {expected} from the plist");
+    }
+    Ok(program)
 }
 
 #[cfg(test)]

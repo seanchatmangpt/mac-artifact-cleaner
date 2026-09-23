@@ -98,3 +98,30 @@ pub fn missing_flags(help: &str, flags: &[String]) -> Vec<String> {
         .collect();
     flags.iter().filter(|f| !tokens.contains(f.as_str())).cloned().collect()
 }
+
+/// The service's `program` path from `launchctl print gui/<uid>/<label>`
+/// output — only the top-level service block's line (one tab deep), never a
+/// nested block's.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::daemon_preflight::launchctl_print_program;
+/// let out = "gui/501/com.oclnr.pressure = {\n\tactive count = 1\n\tstate = running\n\n\
+///            \tprogram = /Users/me/.oclnr/bin/oclnr\n\targuments = {\n\t\t/Users/me/.oclnr/bin/oclnr\n\t}\n}\n";
+/// assert_eq!(launchctl_print_program(out).as_deref(), Some("/Users/me/.oclnr/bin/oclnr"));
+///
+/// // Negative: a nested (two-tab) `program =` is not the service's program.
+/// assert_eq!(launchctl_print_program("svc = {\n\t\tprogram = /x\n}\n"), None);
+///
+/// // Refusal: error text from an unloaded label yields None.
+/// assert_eq!(launchctl_print_program("Could not find service \"x\" in domain for user gui: 501"), None);
+/// ```
+pub fn launchctl_print_program(print_output: &str) -> Option<String> {
+    print_output.lines().find_map(|l| {
+        l.strip_prefix('\t')
+            .filter(|rest| !rest.starts_with('\t'))
+            .and_then(|rest| rest.strip_prefix("program = "))
+            .map(|p| p.trim().to_string())
+    })
+}
