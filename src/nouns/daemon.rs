@@ -262,7 +262,24 @@ pub fn generate_autoclean_plist(
     hour: u32,
     minute: u32,
 ) -> String {
-    let binary = oclnr_binary_path();
+    generate_autoclean_plist_for(
+        &oclnr_binary_path(),
+        max_reclaim_gb,
+        ignore_recent_hours,
+        hour,
+        minute,
+    )
+}
+
+/// [`generate_autoclean_plist`] for an explicit binary path (used by
+/// preflight tests against the binary under test).
+pub fn generate_autoclean_plist_for(
+    binary: &str,
+    max_reclaim_gb: f64,
+    ignore_recent_hours: u64,
+    hour: u32,
+    minute: u32,
+) -> String {
     let log_dir = launchd_log_dir();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -309,10 +326,48 @@ pub fn generate_autoclean_plist(
     )
 }
 
+/// The binary launchd agents run: the oclnr-owned copy at
+/// `~/.oclnr/bin/oclnr` that `daemon install-*` refreshes from the running
+/// executable — never whatever `which oclnr` happens to resolve (a stale
+/// `~/.local/bin/oclnr` crash-looped `com.oclnr.pressure` on 2026-09-22).
 fn oclnr_binary_path() -> String {
-    which::which("oclnr")
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "/usr/local/bin/oclnr".to_string())
+    crate::integration::daemon_binary::installed_binary_path().to_string_lossy().to_string()
+}
+
+/// `daemon status` check: would the installed agent's binary accept the
+/// command line its plist passes? Catches the stale-binary crash loop
+/// (`unexpected argument '--reclaim'`) without reading launchd logs.
+fn report_preflight(name: &str, plist: &std::path::Path) {
+    let Ok(contents) = std::fs::read_to_string(plist) else { return };
+    match crate::integration::daemon_binary::preflight_plist(&contents) {
+        Ok(missing) if missing.is_empty() => {
+            println!("{name} preflight: binary accepts the plist's command line");
+        }
+        Ok(missing) => eprintln!(
+            "⚠ {name} preflight FAILED: binary does not accept {} — the job crash-loops on \
+             every fire. Reinstall with the matching `oclnr daemon install-*`.",
+            missing.join(", ")
+        ),
+        Err(e) => eprintln!("⚠ {name} preflight FAILED: {e}"),
+    }
+}
+
+/// Installs the running binary for launchd and refuses when it would not
+/// accept the exact command line in `plist_contents`.
+fn install_and_preflight(where_: &str, plist_contents: &str) -> anyhow::Result<()> {
+    let installed = crate::integration::daemon_binary::install_self()?;
+    println!("Installed agent binary: {}", installed.display());
+    let missing = crate::integration::daemon_binary::preflight_plist(plist_contents)
+        .map_err(|e| anyhow::anyhow!("{where_}: preflight failed, refusing to install: {e}"))?;
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "{where_}: refusing to install — {} does not accept {} (the job would \
+             crash-loop under launchd)",
+            installed.display(),
+            missing.join(", ")
+        );
+    }
+    Ok(())
 }
 
 fn generate_plist(
@@ -321,7 +376,23 @@ fn generate_plist(
     trigger_autoclean: bool,
     autoclean_cooldown_hours: u64,
 ) -> String {
-    let binary = oclnr_binary_path();
+    generate_monitor_plist_for(
+        &oclnr_binary_path(),
+        threshold_gb,
+        interval_secs,
+        trigger_autoclean,
+        autoclean_cooldown_hours,
+    )
+}
+
+/// The alert-only monitor plist for an explicit binary path.
+pub fn generate_monitor_plist_for(
+    binary: &str,
+    threshold_gb: f64,
+    interval_secs: u64,
+    trigger_autoclean: bool,
+    autoclean_cooldown_hours: u64,
+) -> String {
     let log_dir = launchd_log_dir();
     let trigger_args = if trigger_autoclean {
         format!(
@@ -382,19 +453,6 @@ pub(crate) fn plist_program_arguments_binary(plist: &std::path::Path) -> Option<
     Some(rest[start..end].to_string())
 }
 
-/// Warns (loudly) when the binary a plist points at no longer exists — the
-/// install-time fallback is `/usr/local/bin/oclnr`, which may simply not
-/// exist yet.
-fn warn_if_binary_missing(where_: &str, binary: &str) {
-    if !std::path::Path::new(binary).exists() {
-        eprintln!(
-            "⚠ {where_}: configured binary '{binary}' does not exist on this machine — \
-             the job will silently fail on every fire until it does (install oclnr there, \
-             or reinstall the daemon after installing the binary)."
-        );
-    }
-}
-
 pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
     match action {
         DaemonAction::Install {
@@ -407,13 +465,13 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
             let plist = plist_path();
             ensure_plist_dir(&plist)?;
             std::fs::create_dir_all(launchd_log_dir())?;
-            warn_if_binary_missing("daemon install", &oclnr_binary_path());
             let contents = generate_plist(
                 threshold_gb,
                 interval_secs,
                 trigger_autoclean,
                 autoclean_cooldown_hours,
             );
+            install_and_preflight("daemon install", &contents)?;
             std::fs::write(&plist, &contents)?;
             println!("Wrote plist: {}", plist.display());
 
@@ -481,9 +539,9 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
             let plist = autoclean_plist_path();
             ensure_plist_dir(&plist)?;
             std::fs::create_dir_all(launchd_log_dir())?;
-            warn_if_binary_missing("daemon install-autoclean", &oclnr_binary_path());
             let contents =
                 generate_autoclean_plist(max_reclaim_gb, ignore_recent_hours, hour, minute);
+            install_and_preflight("daemon install-autoclean", &contents)?;
             std::fs::write(&plist, &contents)?;
             println!("Wrote plist: {}", plist.display());
 
@@ -534,9 +592,9 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
             let log_dir = launchd_log_dir();
             std::fs::create_dir_all(&log_dir)?;
             let binary = oclnr_binary_path();
-            warn_if_binary_missing("daemon install-pressure-monitor", &binary);
             let contents =
                 generate_pressure_plist(&binary, threshold_gb, interval_secs, &reclaim, &log_dir);
+            install_and_preflight("daemon install-pressure-monitor", &contents)?;
             write_plist(&plist, &contents)?;
             println!("Wrote plist: {}", plist.display());
 
@@ -644,6 +702,7 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                     }
                     None => println!("Monitor binary: (unparsable plist)"),
                 }
+                report_preflight("Monitor", &plist);
                 let output =
                     std::process::Command::new("launchctl").args(["list", PLIST_LABEL]).output()?;
                 if output.status.success() {
@@ -675,6 +734,7 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                     }
                     None => println!("Autoclean binary: (unparsable plist)"),
                 }
+                report_preflight("Autoclean", &autoclean_plist);
                 let output = std::process::Command::new("launchctl")
                     .args(["list", AUTOCLEAN_PLIST_LABEL])
                     .output()?;
@@ -700,6 +760,10 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                 println!("Pressure monitor ({}): not installed.", PRESSURE_PLIST_LABEL);
             } else {
                 println!("Pressure plist: {} (exists)", pressure_plist.display());
+                if let Some(binary) = plist_program_arguments_binary(&pressure_plist) {
+                    println!("Pressure binary: {binary}");
+                }
+                report_preflight("Pressure", &pressure_plist);
                 let output = std::process::Command::new("launchctl")
                     .args(["list", PRESSURE_PLIST_LABEL])
                     .output()?;

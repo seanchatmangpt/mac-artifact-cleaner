@@ -4,6 +4,7 @@ pub mod affidavit_integration;
 pub mod artifact;
 pub mod audit;
 pub mod crypto;
+pub mod daemon_preflight;
 pub mod dcm;
 pub mod dedupe;
 pub mod delete;
