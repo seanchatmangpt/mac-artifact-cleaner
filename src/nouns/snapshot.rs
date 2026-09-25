@@ -207,7 +207,15 @@ pub fn thin_and_seal(
 
         // Fleet R-projection (identity/authority/consequence/replay/standing)
         // beside the native receipt — see `domain::r_projection`.
-        let ctx = crate::integration::r_projection::context_for(r_path, "oclnr", grant, 0)?;
+        // Work order: the pressure policy when the monitor acted, otherwise the
+        // operator's own invocation.
+        let work_order = if grant.starts_with("pressure-policy") {
+            format!("oclnr-pressure-policy:{mount}")
+        } else {
+            format!("oclnr-snapshot-thin:operator:{mount}")
+        };
+        let ctx =
+            crate::integration::r_projection::context_for(r_path, "oclnr", grant, &work_order, 0)?;
         let r = crate::domain::r_projection::project_snapshot_thin(&receipt_obj, &ctx);
         let out = crate::integration::r_projection::write_projection(r_path, &r)?;
         println!("R-projection written to: {} (standing {})", out.display(), r.standing.value);

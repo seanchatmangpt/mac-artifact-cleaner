@@ -26,6 +26,7 @@ pub fn context_for(
     native: &Path,
     actor: &str,
     grant: &str,
+    work_order_id: &str,
     exit: i32,
 ) -> anyhow::Result<ProjectionContext> {
     let bytes = std::fs::read(native)
@@ -44,6 +45,7 @@ pub fn context_for(
         exit,
         native_sha256: hex::encode(Sha256::digest(&bytes)),
         native_path: native_path.display().to_string(),
+        work_order_id: work_order_id.to_string(),
     })
 }
 
@@ -68,7 +70,7 @@ mod tests {
         let bytes = serde_json::to_vec_pretty(&receipt).unwrap();
         std::fs::write(&native, &bytes).unwrap();
 
-        let ctx = context_for(&native, "test", "test-grant", 0).unwrap();
+        let ctx = context_for(&native, "test", "test-grant", "wo-test", 0).unwrap();
         assert_eq!(ctx.native_sha256, hex::encode(Sha256::digest(&bytes)));
         let out = write_projection(&native, &project_snapshot_thin(&receipt, &ctx)).unwrap();
         assert_eq!(out, dir.path().join("thin-receipt.r.json"));
@@ -76,11 +78,13 @@ mod tests {
         let back: RReceipt = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
         assert_eq!(back.replay.commands[0].output_sha256, ctx.native_sha256);
         assert_eq!(back.identity.subject_sha, BUILD_SHA);
+        assert_eq!(back.work_order_id, "wo-test");
+        assert_eq!(back.provider_execution_id, format!("oclnr:sha256:{}", ctx.native_sha256));
     }
 
     #[test]
     fn missing_native_receipt_is_an_error_not_a_blank_hash() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(context_for(&dir.path().join("absent.json"), "a", "g", 0).is_err());
+        assert!(context_for(&dir.path().join("absent.json"), "a", "g", "wo", 0).is_err());
     }
 }

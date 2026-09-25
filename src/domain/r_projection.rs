@@ -14,6 +14,10 @@
 //! references it by `output_sha256` so the two can never silently diverge. The
 //! integration layer writes the result next to the native file as
 //! `<stem>.r.json`. Zero `std::fs`/`std::process` here.
+//!
+//! Schema v2 (2026-09-25) adds the ALOOP execution provenance fields
+//! `work_order_id`, `origin_authority`, `provider`, `provider_execution_id`;
+//! v1-only projections are REFUSED by `validate_receipt.py`.
 
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +51,13 @@ pub struct ProjectionContext {
     pub native_sha256: String,
     /// Path of the native receipt file.
     pub native_path: String,
+    /// The work order this execution discharged (e.g. `oclnr-plan:<plan_hash>`).
+    /// Empty means no admitted order: the projection is REFUSED.
+    pub work_order_id: String,
 }
+
+/// Name of the execution provider every oclnr projection reports.
+pub const PROVIDER_NAME: &str = "oclnr";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RIdentity {
@@ -94,7 +104,15 @@ pub struct RStanding {
     pub broken_term: Option<String>,
 }
 
-/// A receipt in the fleet `R = receipt(A)` shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RProvider {
+    pub name: String,
+    pub transport: String,
+    pub authority_ceiling: String,
+    pub receipt_protocol: String,
+}
+
+/// A receipt in the fleet `R = receipt(A)` shape (schema v2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RReceipt {
     pub identity: RIdentity,
@@ -102,6 +120,15 @@ pub struct RReceipt {
     pub consequence: RConsequence,
     pub replay: RReplay,
     pub standing: RStanding,
+    pub work_order_id: String,
+    /// Authority the execution request originated under; identical to
+    /// `authority` because oclnr has no intermediate relay that could narrow it.
+    pub origin_authority: RAuthority,
+    pub provider: RProvider,
+    /// `oclnr:sha256:<native receipt sha256>` — unique per execution (the
+    /// native receipt carries its own timestamps) and joins this projection to
+    /// the native receipt and its OCEL log.
+    pub provider_execution_id: String,
 }
 
 fn is_sha40(s: &str) -> bool {
@@ -121,8 +148,15 @@ fn assemble(
         ("REFUSED(unidentified-build)".to_string(), Some("R_missing_identity".to_string()))
     } else if ctx.grant.trim().is_empty() {
         ("REFUSED(no-grant)".to_string(), Some("R_missing_authority".to_string()))
+    } else if ctx.work_order_id.trim().is_empty() {
+        ("REFUSED(no-work-order)".to_string(), Some("R_missing_authority".to_string()))
     } else {
         (standing.0.to_string(), standing.1.map(str::to_string))
+    };
+    let authority = RAuthority {
+        ceiling: "DO".to_string(),
+        grant: if ctx.grant.trim().is_empty() { "NONE".into() } else { ctx.grant.clone() },
+        actor: ctx.actor.clone(),
     };
     RReceipt {
         identity: RIdentity {
@@ -135,11 +169,7 @@ fn assemble(
             subject_sha: ctx.build_sha.clone(),
             base_sha: ctx.build_sha.clone(),
         },
-        authority: RAuthority {
-            ceiling: "DO".to_string(),
-            grant: if ctx.grant.trim().is_empty() { "NONE".into() } else { ctx.grant.clone() },
-            actor: ctx.actor.clone(),
-        },
+        authority: authority.clone(),
         consequence: RConsequence {
             commits: vec![],
             files_changed: vec![],
@@ -167,6 +197,19 @@ fn assemble(
             value,
             broken_term,
         },
+        work_order_id: if ctx.work_order_id.trim().is_empty() {
+            "NONE".into()
+        } else {
+            ctx.work_order_id.clone()
+        },
+        origin_authority: authority,
+        provider: RProvider {
+            name: PROVIDER_NAME.to_string(),
+            transport: "local-process".to_string(),
+            authority_ceiling: "DO".to_string(),
+            receipt_protocol: "oclnr-native+affidavit-core/v1+r-projection/v2".to_string(),
+        },
+        provider_execution_id: format!("{PROVIDER_NAME}:sha256:{}", ctx.native_sha256),
     }
 }
 
@@ -187,6 +230,7 @@ fn assemble(
 ///     repo: "/src/osx-clnr".into(), build_sha: "a".repeat(40), build_dirty: false, actor: "alice".into(),
 ///     grant: "plan-approval:alice".into(), cmd: "oclnr delete execute".into(),
 ///     cwd: "/w".into(), exit: 0, native_sha256: "b".repeat(64), native_path: "/w/r.jsonocel".into(),
+///     work_order_id: "oclnr-plan:p1".into(),
 /// };
 /// let item = |status| DeletionResult { path: "/p/target".into(), status, error: None,
 ///     blake3_hash: None, bytes_freed: 10, reversibility: Default::default() };
@@ -196,6 +240,9 @@ fn assemble(
 /// assert_eq!(r.standing.value, "ALIVE");
 /// assert_eq!(r.replay.commands[0].output_sha256, "b".repeat(64));
 /// assert!(r.consequence.remote_effects[0].contains("deleted 1/1"));
+/// assert_eq!(r.work_order_id, "oclnr-plan:p1");
+/// assert_eq!(r.provider_execution_id, format!("oclnr:sha256:{}", "b".repeat(64)));
+/// assert_eq!(r.origin_authority, r.authority);
 ///
 /// // Negative: a failure alongside a deletion → PARTIAL_ALIVE.
 /// let mixed = DeletionReceipt::new(0, 1, 2, vec![item(DeletionStatus::Deleted), item(DeletionStatus::Failed)], None, None);
@@ -211,6 +258,12 @@ fn assemble(
 /// let anon = ProjectionContext { build_sha: "unknown".into(), ..ctx.clone() };
 /// let a = project_deletion(&DeletionReceipt::new(0, 1, 2, vec![item(DeletionStatus::Deleted)], None, None), &anon);
 /// assert!(a.standing.value.starts_with("REFUSED"));
+///
+/// // Refusal: no admitted work order → REFUSED, never a blank id.
+/// let orphan = ProjectionContext { work_order_id: "".into(), ..ctx.clone() };
+/// let o = project_deletion(&DeletionReceipt::new(0, 1, 2, vec![item(DeletionStatus::Deleted)], None, None), &orphan);
+/// assert_eq!(o.standing.value, "REFUSED(no-work-order)");
+/// assert_eq!(o.work_order_id, "NONE");
 /// ```
 pub fn project_deletion(receipt: &DeletionReceipt, ctx: &ProjectionContext) -> RReceipt {
     let results = &receipt.execution_record.results;
@@ -270,6 +323,7 @@ pub fn project_deletion(receipt: &DeletionReceipt, ctx: &ProjectionContext) -> R
 ///     repo: "/src/osx-clnr".into(), build_sha: "c".repeat(40), build_dirty: true, actor: "com.oclnr.pressure".into(),
 ///     grant: "pressure-policy:threshold=20GB".into(), cmd: "oclnr monitor --watch".into(),
 ///     cwd: "/".into(), exit: 0, native_sha256: "d".repeat(64), native_path: "/l/thin.json".into(),
+///     work_order_id: "oclnr-pressure-policy:/".into(),
 /// };
 ///
 /// // Positive: two snapshots thinned.
