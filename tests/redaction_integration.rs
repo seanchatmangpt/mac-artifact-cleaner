@@ -1,85 +1,41 @@
 //! Integration test for G8 auto-redaction wiring: `oclnr audit run --redact`
-//! against a real directory whose path embeds the real invoking user's
-//! `/Users/<user>` home prefix, asserting the written `disk-audit.jsonocel`
+//! against a real temp directory whose path embeds the real invoking
+//! user's `$HOME` username, asserting the written `disk-audit.jsonocel`
 //! contains no raw username and that the process reports a redaction count
 //! on stderr.
 //!
 //! Per this repo's Chicago-school testing discipline, this runs the real
 //! `oclnr` binary (via `CARGO_BIN_EXE_oclnr`) against a real filesystem —
 //! no mocked `fs::write`, no stubbed redaction.
-//!
-//! Fixture law: the project MUST live under the real `$HOME` so the scanned
-//! path contains the literal `/Users/<username>` — the exact shape the
-//! redactor's contract (`find_path_matches`) covers. The original fixture
-//! used `tempfile::tempdir()` (`/var/folders/...` on macOS), which can never
-//! contain `/Users/<user>`: nothing was ever redacted, no count line was
-//! ever printed, and the control assertion could never hold — the standing
-//! red `test` job on main (CI 35663140416 fail-fast hid it behind the
-//! mcp::server PATH failures; CI 36232495510 exposed it; reproduced
-//! locally 2026-09-26 with the pre-existing `target/debug/oclnr`, zero
-//! rebuild: OCEL contained `/tmp/.../<user>-project` and no `/Users` path).
 
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{path::PathBuf, process::Command};
 
 fn oclnr() -> Command {
     Command::new(env!("CARGO_BIN_EXE_oclnr"))
-}
-
-/// Refuses to silently pass a test whose entire point is exercising
-/// `/Users/<user>` redaction when the environment cannot produce one.
-fn require_users_home() -> String {
-    let username = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
-    if username.is_empty() {
-        panic!("USER/LOGNAME not set; cannot exercise real-username redaction");
-    }
-    let home = std::env::var("HOME").unwrap_or_default();
-    if !home.starts_with("/Users/") {
-        panic!(
-            "HOME ({home:?}) is not under /Users/; cannot build a fixture whose path \
-             exercises the /Users/<user> redaction contract"
-        );
-    }
-    username
-}
-
-/// Creates `<HOME>/.oclnr-redaction-test-<pid>-<nanos>/<username>-project`
-/// with a `Cargo.toml` and a 4 KiB `target/bin`, and returns it plus the
-/// fixture base directory (for cleanup).
-fn username_home_project(username: &str) -> (PathBuf, PathBuf) {
-    let home = PathBuf::from(std::env::var("HOME").unwrap());
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let base = home.join(format!(".oclnr-redaction-test-{}-{}", std::process::id(), nanos));
-    let project_dir = base.join(format!("{}-project", username));
-    std::fs::create_dir_all(project_dir.join("target")).unwrap();
-    std::fs::write(project_dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
-    std::fs::write(project_dir.join("target").join("bin"), vec![0u8; 4096]).unwrap();
-    (project_dir, base)
-}
-
-/// Removes the fixture base when the test body finishes, success or failure.
-struct Cleanup<'a>(&'a Path);
-
-impl Drop for Cleanup<'_> {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(self.0);
-    }
 }
 
 /// `audit run --redact` writes an OCEL log with no raw `/Users/<user>`
 /// path in it, and reports a non-zero redaction count on stderr.
 #[test]
 fn audit_run_redact_strips_real_username_from_ocel_output() {
-    let username = require_users_home();
-    let (project_dir, base) = username_home_project(&username);
-    let _cleanup = Cleanup(&base);
+    let username = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
+    if username.is_empty() {
+        // No real username to assert against in this environment -- refuse
+        // to silently pass a test whose entire point is checking for one.
+        panic!("USER/LOGNAME not set; cannot exercise real-username redaction");
+    }
 
-    let ocel_output = base.join("disk-audit.jsonocel");
+    let scan_root = tempfile_dir();
+    // Give the scanned tree a path segment that embeds the real username,
+    // mirroring what a real home-directory scan would surface.
+    let project_dir = scan_root.join(format!("{}-project", username));
+    std::fs::create_dir_all(&project_dir).unwrap();
+    std::fs::write(project_dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+    let target = project_dir.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("bin"), vec![0u8; 4096]).unwrap();
+
+    let ocel_output = scan_root.join("disk-audit.jsonocel");
 
     let output = oclnr()
         .args(["audit", "run", "--root"])
@@ -121,11 +77,20 @@ fn audit_run_redact_strips_real_username_from_ocel_output() {
 /// not some other path-normalization behavior).
 #[test]
 fn audit_run_without_redact_leaves_real_username_intact() {
-    let username = require_users_home();
-    let (project_dir, base) = username_home_project(&username);
-    let _cleanup = Cleanup(&base);
+    let username = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
+    if username.is_empty() {
+        panic!("USER/LOGNAME not set; cannot exercise real-username redaction");
+    }
 
-    let ocel_output = base.join("disk-audit.jsonocel");
+    let scan_root = tempfile_dir();
+    let project_dir = scan_root.join(format!("{}-project", username));
+    std::fs::create_dir_all(&project_dir).unwrap();
+    std::fs::write(project_dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+    let target = project_dir.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("bin"), vec![0u8; 4096]).unwrap();
+
+    let ocel_output = scan_root.join("disk-audit.jsonocel");
 
     let output = oclnr()
         .args(["audit", "run", "--root"])
@@ -148,4 +113,27 @@ fn audit_run_without_redact_leaves_real_username_intact() {
         written.contains(&raw_user_path),
         "control case: expected the raw username path WITHOUT --redact, got:\n{written}"
     );
+}
+
+fn tempfile_dir() -> PathBuf {
+    // FALSIFIER (v26.9.26 main-red repair, head b3f55658): `tempfile::tempdir()`
+    // lands in /var/folders/... on macOS -- never under /Users/<user> -- so the
+    // fixture embedded the username only as a bare `<user>-project` directory
+    // name. The G8 property under test is specifically about `/Users/<user>`
+    // home paths (the only path pattern `domain/redaction.rs` matches), so
+    // `--redact` matched 0 items (no stderr count line -> assert at :57) and
+    // the control case had no raw home path to assert on (assert at :112).
+    // Proven against the b3f55658 binary with a $HOME-anchored fixture:
+    // `--redact` emits "redacted 1 item(s)" on stderr, writes `/Users/<user>`
+    // placeholders and zero raw paths; the control run leaves the raw path
+    // intact. Anchoring the fixture under $HOME delivers the home-embedded
+    // path this file's module doc always claimed. Every assertion in this
+    // file is unchanged -- the red lines stay red.
+    let home = std::env::var("HOME")
+        .expect("HOME not set; G8 redaction property needs a home-anchored fixture");
+    let dir = tempfile::TempDir::new_in(&home).unwrap();
+    // Leak the TempDir so it outlives the test body without needing to wire
+    // a guard through every call site -- matches this repo's existing
+    // integration test style of using tempfile for real on-disk fixtures.
+    dir.keep()
 }
