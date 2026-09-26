@@ -116,7 +116,22 @@ fn audit_run_without_redact_leaves_real_username_intact() {
 }
 
 fn tempfile_dir() -> PathBuf {
-    let dir = tempfile::tempdir().unwrap();
+    // FALSIFIER (v26.9.26 main-red repair, head b3f55658): `tempfile::tempdir()`
+    // lands in /var/folders/... on macOS -- never under /Users/<user> -- so the
+    // fixture embedded the username only as a bare `<user>-project` directory
+    // name. The G8 property under test is specifically about `/Users/<user>`
+    // home paths (the only path pattern `domain/redaction.rs` matches), so
+    // `--redact` matched 0 items (no stderr count line -> assert at :57) and
+    // the control case had no raw home path to assert on (assert at :112).
+    // Proven against the b3f55658 binary with a $HOME-anchored fixture:
+    // `--redact` emits "redacted 1 item(s)" on stderr, writes `/Users/<user>`
+    // placeholders and zero raw paths; the control run leaves the raw path
+    // intact. Anchoring the fixture under $HOME delivers the home-embedded
+    // path this file's module doc always claimed. Every assertion in this
+    // file is unchanged -- the red lines stay red.
+    let home = std::env::var("HOME")
+        .expect("HOME not set; G8 redaction property needs a home-anchored fixture");
+    let dir = tempfile::TempDir::new_in(&home).unwrap();
     // Leak the TempDir so it outlives the test body without needing to wire
     // a guard through every call site -- matches this repo's existing
     // integration test style of using tempfile for real on-disk fixtures.
