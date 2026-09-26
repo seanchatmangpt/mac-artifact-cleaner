@@ -52,7 +52,8 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
             };
 
             println!("Verifying deletion receipt: {}", receipt.display());
-            let report = receipt_data.verify(plan_data.as_ref());
+            let report =
+                crate::integration::fs::verify_receipt_on_disk(&receipt_data, plan_data.as_ref());
 
             // Affidavit provenance: build the sealed core/v1 chain from this
             // receipt and certify it through the 7-stage pipeline. This is a
@@ -82,14 +83,28 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
                 println!(
                     "✅ Receipt verification passed: all records are consistent with disk state."
                 );
+                for issue in &report.issues {
+                    println!(
+                        "  ℹ️  [{:?}] {}: {}",
+                        issue.issue_type,
+                        issue.path.display(),
+                        issue.message
+                    );
+                }
                 Ok(())
             } else {
                 println!("\n==================================================");
                 println!("          RECEIPT VERIFICATION ISSUES             ");
                 println!("==================================================");
                 for issue in &report.issues {
+                    let mark =
+                        if issue.issue_type == crate::domain::receipt::IssueType::PathRecreated {
+                            "ℹ️ "
+                        } else {
+                            "❌"
+                        };
                     println!(
-                        "  ❌ [{:?}] {}: {}",
+                        "  {mark} [{:?}] {}: {}",
                         issue.issue_type,
                         issue.path.display(),
                         issue.message
@@ -104,7 +119,11 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
                 }
                 anyhow::bail!(
                     "Receipt verification failed with {} consistency issues.\n\nSuggestions:\n  - Review the issues listed above for details\n  - Verify no external process modified the filesystem during deletion\n  - Re-run `oclnr delete execute` from a fresh plan if the receipt is unrecoverable",
-                    report.issues.len()
+                    report
+                        .issues
+                        .iter()
+                        .filter(|i| i.issue_type != crate::domain::receipt::IssueType::PathRecreated)
+                        .count()
                 );
             }
         }

@@ -514,7 +514,10 @@ fn run_audit_scan(
     // workspace-relative convention for disk-audit.jsonocel/cleanup-plan.json),
     // shared across all concurrently-scanned roots. A cache-open failure must
     // never fail the whole scan — degrade to scanning without a cache.
-    let scan_cache = match ScanCache::open(std::path::Path::new(".")) {
+    let scan_cache = match ScanCache::open(
+        std::path::Path::new("."),
+        &crate::domain::artifact::scan_cache_fingerprint(&args),
+    ) {
         Ok(cache) => Some(Arc::new(cache)),
         Err(e) => {
             eprintln!("warning: could not open scan cache, scanning without it: {e}");

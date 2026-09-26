@@ -128,7 +128,10 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             // Cached candidates are only *replayed* here; every plan item is
             // still sized live below, so a stale byte count can never reach
             // the plan.
-            let scan_cache = match ScanCache::open(std::path::Path::new(".")) {
+            let scan_cache = match ScanCache::open(
+                std::path::Path::new("."),
+                &crate::domain::artifact::scan_cache_fingerprint(&args),
+            ) {
                 Ok(cache) => Some(Arc::new(cache)),
                 Err(e) => {
                     eprintln!("warning: could not open scan cache, scanning without it: {e}");
@@ -181,6 +184,24 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                 candidate_vec,
                 exe_path.as_deref(),
             );
+
+            // Never admit a candidate `plan validate` would reject as an OS/TCC
+            // fence (e.g. `~/Library/Containers/<bundle>/Data/tmp`): a plan
+            // that fails its own validator on build is unusable, and replayed
+            // cache entries from before a fence was added can carry them.
+            candidate_vec.retain(|c| {
+                !crate::domain::artifact::is_macos_os_dir(&c.path)
+                    && !crate::domain::artifact::is_inside_package_store(&c.path)
+            });
+
+            // Directory names can't distinguish regenerable output from
+            // committed content (`~/.cache/act/<action>/dist`, checked-in
+            // `.agents/`); a candidate holding any git-tracked file is not a
+            // cache. See `integration::git_tracked`.
+            candidate_vec = candidate_vec
+                .into_par_iter()
+                .filter(|c| !crate::integration::git_tracked::contains_git_tracked_files(&c.path))
+                .collect();
 
             candidate_vec.sort();
 

@@ -17,8 +17,14 @@ use std::{
 };
 
 use crate::{
-    integration::monitor::{check_and_notify, DiskPressureCheck},
-    nouns::autoclean,
+    domain::pressure::{decide_reclaim, Decision, ReclaimModes},
+    integration::{
+        fs::volume_space,
+        monitor::{check_and_notify, DiskPressureCheck},
+        notify::notify_disk_pressure,
+        pressure::{read_stamp, stamp_path, write_stamp},
+    },
+    nouns::{autoclean, snapshot},
 };
 
 fn report(check: DiskPressureCheck, mount: &str) {
@@ -101,6 +107,146 @@ fn trigger_autoclean_run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Pressure-reclaim configuration for `monitor --reclaim ...`.
+#[derive(Debug, Clone)]
+pub struct ReclaimConfig {
+    pub modes: ReclaimModes,
+    pub margin_gb: f64,
+    pub snapshot_cooldown_secs: u64,
+    pub builds_cooldown_secs: u64,
+    pub urgency: u8,
+    pub receipt_dir: PathBuf,
+    pub builds_max_reclaim_gb: f64,
+    pub builds_ignore_recent_hours: u64,
+}
+
+const SNAPSHOT_STAMP: &str = "last-pressure-snapshot-thin";
+const BUILDS_STAMP: &str = "last-pressure-builds-reclaim";
+const BYTES_PER_GIB: f64 = 1_073_741_824.0;
+
+fn gb_to_bytes(gb: f64) -> u64 {
+    (gb.max(0.0) * BYTES_PER_GIB) as u64
+}
+
+/// Default receipt directory for pressure-triggered reclaims.
+pub fn default_pressure_receipt_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("Library/Logs/oclnr/pressure")
+}
+
+/// One pressure tick: sample free space (statvfs), notify if under pressure,
+/// then run each enabled reclaim strategy through its pure decision.
+/// Snapshots go first (cheap, and the only way to release blocks pinned by a
+/// local APFS snapshot); builds are decided on a fresh sample afterwards, so a
+/// thin that already cleared the pressure does not also delete build dirs.
+fn pressure_tick(mount: &str, threshold_gb: f64, cfg: &ReclaimConfig) -> anyhow::Result<()> {
+    let threshold_bytes = gb_to_bytes(threshold_gb);
+    let margin_bytes = gb_to_bytes(cfg.margin_gb);
+    let free = volume_space(Path::new(mount))?.available;
+    let check = DiskPressureCheck {
+        free_gb: free as f64 / BYTES_PER_GIB,
+        threshold_gb,
+        under_pressure: free < threshold_bytes,
+    };
+    if check.under_pressure {
+        if let Err(e) = notify_disk_pressure(check.free_gb, threshold_gb) {
+            eprintln!("[oclnr monitor] notification failed (non-fatal): {e}");
+        }
+    }
+    report(check, mount);
+
+    if cfg.modes.snapshots {
+        let stamp = stamp_path(SNAPSHOT_STAMP)?;
+        let now = chrono::Utc::now().timestamp();
+        let decision = decide_reclaim(
+            free,
+            threshold_bytes,
+            read_stamp(&stamp),
+            now,
+            cfg.snapshot_cooldown_secs,
+            margin_bytes,
+        );
+        println!("[oclnr monitor] snapshots decision: {decision:?}");
+        if let Decision::Thin { bytes } = decision {
+            // Stamp before acting: a hung or failed tmutil still holds the
+            // cooldown open instead of re-firing every interval.
+            write_stamp(&stamp, now)?;
+            std::fs::create_dir_all(&cfg.receipt_dir)?;
+            let tag = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+            let receipt = cfg.receipt_dir.join(format!("{tag}-snapshot-thin-receipt.json"));
+            let ocel = cfg.receipt_dir.join(format!("{tag}-snapshot-thin.jsonocel"));
+            match snapshot::thin_and_seal(
+                mount,
+                bytes,
+                cfg.urgency,
+                Some(&receipt),
+                Some(&ocel),
+                false,
+                &format!(
+                    "pressure-policy: free {free} B < threshold {threshold_bytes} B \
+                     (monitor --reclaim snapshots, urgency {})",
+                    cfg.urgency
+                ),
+            ) {
+                Ok(r) => println!(
+                    "[oclnr monitor] pressure thin done: {} snapshot(s) removed, receipt {}",
+                    r.snapshots_thinned.len(),
+                    receipt.display()
+                ),
+                Err(e) => eprintln!("[oclnr monitor] pressure thin FAILED: {e}"),
+            }
+        }
+    }
+
+    if cfg.modes.builds {
+        let free = volume_space(Path::new(mount))?.available;
+        let stamp = stamp_path(BUILDS_STAMP)?;
+        let now = chrono::Utc::now().timestamp();
+        let decision = decide_reclaim(
+            free,
+            threshold_bytes,
+            read_stamp(&stamp),
+            now,
+            cfg.builds_cooldown_secs,
+            margin_bytes,
+        );
+        println!("[oclnr monitor] builds decision: {decision:?}");
+        if let Decision::Thin { bytes } = decision {
+            write_stamp(&stamp, now)?;
+            // Budget = min(deficit + margin, configured per-run cap): never
+            // delete more build output than the pressure calls for.
+            let cap_gb = (bytes as f64 / BYTES_PER_GIB).min(cfg.builds_max_reclaim_gb);
+            run_builds_reclaim(cap_gb, cfg.builds_ignore_recent_hours)?;
+        }
+    }
+    Ok(())
+}
+
+/// Runs the plan-bound pipeline (`plan build` -> `plan approve` -> `delete
+/// execute` -> `receipt verify`) via `autoclean run`, restricted to
+/// regenerable build dirs with the live-cwd and recency exclusions.
+fn run_builds_reclaim(max_reclaim_gb: f64, ignore_recent_hours: u64) -> anyhow::Result<()> {
+    let exe = std::env::current_exe()?;
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    println!(
+        "[oclnr monitor] under pressure — `autoclean run --builds-only --exclude-live-cwds` \
+         (cap {max_reclaim_gb:.2} GB, ignore-recent {ignore_recent_hours}h)..."
+    );
+    let status = Command::new(&exe)
+        .current_dir(&home)
+        .args(["autoclean", "run", "--yes", "--builds-only", "--exclude-live-cwds"])
+        .args(["--max-reclaim-gb", &format!("{max_reclaim_gb:.3}")])
+        .args(["--ignore-recent-hours", &ignore_recent_hours.to_string()])
+        .env("OCLNR_AUTOCLEAN_TRIGGER", "pressure")
+        .status()?;
+    if status.success() {
+        println!("[oclnr monitor] builds reclaim finished OK");
+    } else {
+        eprintln!("[oclnr monitor] builds reclaim FAILED (exit {status})");
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn handle(
     threshold_gb: f64,
     mount: String,
@@ -108,8 +254,38 @@ pub fn handle(
     interval_secs: u64,
     trigger_autoclean: bool,
     cooldown_hours: u64,
+    reclaim: Option<ReclaimConfig>,
+    max_iterations: Option<u64>,
 ) -> anyhow::Result<()> {
     let mount_path: PathBuf = PathBuf::from(&mount);
+
+    if let Some(cfg) = reclaim {
+        if trigger_autoclean {
+            anyhow::bail!("--reclaim and --trigger-autoclean are mutually exclusive");
+        }
+        println!(
+            "[oclnr monitor] pressure reclaim on {} every {}s (threshold {:.1} GB, margin {:.1} GB, \
+             snapshots: {}, builds: {}, receipts: {})",
+            mount,
+            interval_secs,
+            threshold_gb,
+            cfg.margin_gb,
+            cfg.modes.snapshots,
+            cfg.modes.builds,
+            cfg.receipt_dir.display()
+        );
+        let mut i: u64 = 0;
+        loop {
+            if let Err(e) = pressure_tick(&mount, threshold_gb, &cfg) {
+                eprintln!("[oclnr monitor] tick failed: {e}");
+            }
+            i += 1;
+            if !watch || max_iterations.is_some_and(|m| i >= m) {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_secs(interval_secs));
+        }
+    }
 
     // One pass: notify (as always), then — only when explicitly enabled and
     // outside the cooldown — fire the capped autoclean pipeline.
@@ -147,10 +323,15 @@ pub fn handle(
         threshold_gb,
         if trigger_autoclean { "on" } else { "off" },
     );
+    let mut i: u64 = 0;
     loop {
         match check_once(&mount_path) {
             Ok(()) => {}
             Err(e) => eprintln!("[oclnr monitor] check failed: {}", e),
+        }
+        i += 1;
+        if max_iterations.is_some_and(|m| i >= m) {
+            return Ok(());
         }
         std::thread::sleep(Duration::from_secs(interval_secs));
     }

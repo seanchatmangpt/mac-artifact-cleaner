@@ -30,7 +30,7 @@ It makes local command execution pass through public naming, separated powers, p
 Deletion is plan-bound by design:
 
 1. **Audit observes:** The filesystem is scanned with intelligent traversal barriers to avoid crawling massive dependencies (like `node_modules` or `target`) while accurately inventorying hidden tool caches (`.cargo`, `.cache`, `.npm`, etc.).
-2. **Plan proposes:** A dry run generates a reviewable JSON plan identifying cleanup candidates based on age, size, and tool-specific heuristics. Add `--include-global-caches` to nominate regenerable global caches (`.cargo/registry`, `Library/Caches`, etc.).
+2. **Plan proposes:** A dry run generates a reviewable JSON plan identifying cleanup candidates based on age, size, and tool-specific heuristics. Add `--include-global-caches` to nominate regenerable global caches (`.cargo/registry`, `Library/Caches`, etc.). Safety filters: any candidate containing git-tracked files is dropped from the plan, and installed extensions/plugins/tool caches are fenced off as package stores (never nominated).
 3. **Human reviews:** The user inspects the plan or the emitted Object-Centric Event Log (OCEL v2) to verify what will be deleted.
 4. **Delete executes only from a saved plan:** The scanner is disabled during deletion. The utility reads the reviewed plan and strictly deletes only the exact paths listed.
 5. **Receipt records the result:** Progress and consequences are tracked without fresh discovery. Receipt verification (`oclnr receipt verify`) checks that measured volume delta is within tolerance of claimed reclaim — surfacing APFS snapshot pinning if space didn't come back.
@@ -53,6 +53,22 @@ When disk is critically full (ENOSPC):
 ```bash
 oclnr emergency        # dry run: show what would be reclaimed
 oclnr emergency --yes  # execute: delete all local snapshots + sweep regenerable caches
+```
+
+### Measurement & Guest Reclaim (non-destructive)
+
+```bash
+oclnr dedupe scan            # read-only: bytes reclaimable by replacing duplicate regular
+                             # files with APFS clones (clonefile); measures, never rewrites
+oclnr docker scan            # Colima VM disk usage + Docker.raw host-side footprint
+oclnr docker trim --confirm  # run fstrim inside the Colima VM so freed guest blocks return
+                             # to the host — data-preserving; refuses without --confirm
+```
+
+### Read-only Fleet Standing
+
+```bash
+oclnr tools git-worktrees    # read-only standing report over git worktrees (git-health)
 ```
 
 ### Plan Approval (CLI)
@@ -84,9 +100,30 @@ To run this daily and unattended via `launchd`:
 
 ```bash
 oclnr daemon install-autoclean    # installs com.oclnr.autoclean, daily at 04:15 local
-oclnr daemon status               # reports both com.oclnr.monitor (alert-only) and com.oclnr.autoclean
+oclnr daemon install-pressure-monitor --threshold-gb 20
+                                   # installs com.oclnr.pressure (KeepAlive): oclnr monitor --watch
+                                   # --reclaim snapshots[,builds] — reclaims when free space drops
+                                   # below --threshold-gb (required, no default; pass it explicitly),
+                                   # polling --interval-secs (default 60 on install-pressure-monitor;
+                                   # 300 on a standalone `monitor --watch`). `--reclaim` defaults to
+                                   # snapshots and excludes --trigger-autoclean
+oclnr daemon status               # reports com.oclnr.monitor (alert-only), com.oclnr.autoclean,
+                                   # and com.oclnr.pressure (reclaiming) when installed
 oclnr daemon uninstall-autoclean
 ```
+
+Besides `--threshold-gb` and `--interval-secs` above, `oclnr monitor` accepts:
+
+- `--margin-gb` (default 5) — hysteresis headroom above `--threshold-gb` to reclaim toward
+- `--urgency` (1-4, default 4) — `tmutil thinlocalsnapshots` urgency for pressure thins
+- `--snapshot-cooldown-secs` (default 600) / `--builds-cooldown-secs` (default 3600) — minimum seconds between pressure-triggered snapshot thins / build reclaims; per-strategy cooldown stamps live under `~/.oclnr/`
+- `--builds-max-reclaim-gb` (default 50) — per-run cap for the builds reclaim
+- `--builds-ignore-recent-hours` (default 2) — skip build dirs modified within this many hours
+- `--receipt-dir` (default `~/Library/Logs/oclnr/pressure`) — directory for pressure-reclaim receipts
+
+`daemon install*` refuses to install a plist the current binary cannot run (no
+crash-looping agents), and reinstalling replaces the running agent and verifies
+its program before reporting success.
 
 ## Privacy and Safety
 
@@ -99,6 +136,7 @@ This tool is safe to publish as source code, but its generated reports are machi
 - `cleanup-plan.json`
 - `cleanup-plan.jsonocel`
 - `deletion-receipt.jsonocel`
+- `*.r.json` (the `R = receipt(A)` projection written beside every native receipt)
 
 These files can contain absolute paths, project names, hidden tool directories, timestamps, file sizes, and local development patterns. The included `.gitignore` will protect against accidental commits of these file patterns.
 

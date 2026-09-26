@@ -16,8 +16,9 @@ use crate::{
     },
     integration::{
         docker::{
-            colima_prune, docker_disk_usage, docker_host_footprint, docker_prune_preview,
-            docker_system_prune, is_colima_available, is_docker_available,
+            colima_fstrim, colima_host_footprint, colima_prune, docker_disk_usage,
+            docker_host_footprint, docker_prune_preview, docker_system_prune, is_colima_available,
+            is_docker_available,
         },
         progress::human_bytes as fmt_bytes,
     },
@@ -47,6 +48,15 @@ pub enum DockerAction {
         #[arg(long)]
         receipt: Option<PathBuf>,
     },
+    /// Run `fstrim` inside the Colima VM so freed guest blocks are returned
+    /// to the host sparse disk images. Data-preserving (removes no image,
+    /// container, or volume); measures host physical bytes before/after.
+    /// Requires --confirm.
+    Trim {
+        /// Required to actually run fstrim.
+        #[arg(long)]
+        confirm: bool,
+    },
 }
 
 /// Prints a Docker disk usage table and returns `Ok(())`.
@@ -67,6 +77,7 @@ fn print_disk_usage() -> anyhow::Result<()> {
     println!("  Total:            {}", fmt_bytes(usage.total_bytes));
 
     print_host_footprint(&usage.total_bytes);
+    print_colima_footprint(&usage.total_bytes);
 
     Ok(())
 }
@@ -92,6 +103,30 @@ fn print_host_footprint(vm_total_bytes: &u64) {
                 "  Note: this is space `docker system df` cannot see. Freeing it needs the VM-side \
                  prune plus image compaction (Docker Desktop restart or a lower disk-image size \
                  limit) — deleting files inside containers alone will not return it."
+            );
+        }
+    }
+}
+
+/// Prints the Colima section: physical/logical bytes of the Lima VM disk
+/// images, and how much of the physical allocation the VM-visible Docker
+/// usage does not explain (the `docker trim` target).
+fn print_colima_footprint(vm_total_bytes: &u64) {
+    if let Some(fp) = colima_host_footprint() {
+        println!();
+        println!("Host-side footprint (Colima/Lima VM disk images)");
+        println!("  Images found:        {}", fp.docker_raw_count);
+        println!(
+            "  Physical allocation: {}  <- blocks actually consumed on the host volume",
+            fmt_bytes(fp.docker_raw_physical_bytes)
+        );
+        println!("  Logical (sparse) size: {}", fmt_bytes(fp.docker_raw_logical_bytes));
+        let pinned = fp.host_pinned_beyond_vm(*vm_total_bytes);
+        println!("  Pinned beyond VM-visible usage: {}", fmt_bytes(pinned));
+        if pinned > 0 {
+            println!(
+                "  Note: freed-but-untrimmed guest blocks are reclaimable without deleting \
+                 anything via `oclnr docker trim --confirm` (guest fstrim)."
             );
         }
     }
@@ -138,6 +173,36 @@ pub fn handle(action: DockerAction) -> anyhow::Result<()> {
                  actually reclaim this space."
             );
 
+            Ok(())
+        }
+        DockerAction::Trim { confirm } => {
+            let before = colima_host_footprint();
+            let Some(before_fp) = before else {
+                println!("No Colima VM disk image found — nothing to trim.");
+                return Ok(());
+            };
+            println!(
+                "Colima disk images before trim: {} physical / {} logical",
+                fmt_bytes(before_fp.docker_raw_physical_bytes),
+                fmt_bytes(before_fp.docker_raw_logical_bytes)
+            );
+            if !confirm {
+                println!("Refusing to run guest fstrim without --confirm.");
+                return Ok(());
+            }
+            let out = colima_fstrim()?;
+            println!("Guest fstrim:");
+            println!("{out}");
+            let after_physical =
+                colima_host_footprint().map(|fp| fp.docker_raw_physical_bytes).unwrap_or(0);
+            let returned =
+                space_returned_to_host(before_fp.docker_raw_physical_bytes, after_physical);
+            println!(
+                "Host: {} -> {} physical; {} returned to host volume",
+                fmt_bytes(before_fp.docker_raw_physical_bytes),
+                fmt_bytes(after_physical),
+                fmt_bytes(returned)
+            );
             Ok(())
         }
         DockerAction::Prune { confirm, skip_colima, receipt } => {

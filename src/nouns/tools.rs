@@ -25,6 +25,25 @@ pub enum ToolsAction {
         #[arg(value_name = "PATH")]
         path: Option<std::path::PathBuf>,
     },
+    /// Read-only worktree standing: classify linked git worktrees
+    /// (PRUNABLE / MERGED_CLEAN reclaimable; DIRTY / UNMERGED / DETACHED /
+    /// LOCKED / UNKNOWN not) and report .git bloat. Never removes anything —
+    /// removal is UNSUPPORTED (would go through plan/approve/delete).
+    #[command(name = "git-worktrees", alias = "worktree-standing")]
+    GitWorktrees {
+        /// Root directory to scan (repeatable; defaults to home)
+        #[arg(long = "root", value_name = "PATH")]
+        roots: Vec<std::path::PathBuf>,
+        /// Directory levels to descend when discovering repos
+        #[arg(long, default_value = "4")]
+        depth: u8,
+        /// Write the full JSON report to this path
+        #[arg(long, value_name = "FILE")]
+        output: Option<std::path::PathBuf>,
+        /// Number of bloated .git dirs to list
+        #[arg(long, default_value = "10")]
+        top: usize,
+    },
 }
 
 pub fn handle(action: ToolsAction) -> anyhow::Result<()> {
@@ -33,7 +52,130 @@ pub fn handle(action: ToolsAction) -> anyhow::Result<()> {
         ToolsAction::Npm => handle_npm(),
         ToolsAction::Pip => handle_pip(),
         ToolsAction::Git { path } => handle_git(path),
+        ToolsAction::GitWorktrees { roots, depth, output, top } => {
+            handle_git_worktrees(roots, depth, output, top)
+        }
     }
+}
+
+fn handle_git_worktrees(
+    roots: Vec<std::path::PathBuf>,
+    depth: u8,
+    output: Option<std::path::PathBuf>,
+    top: usize,
+) -> anyhow::Result<()> {
+    use crate::{
+        domain::git_worktree::WorktreeClass,
+        integration::{fs::write_output_file, git_health::worktree_standing},
+    };
+
+    let roots = if roots.is_empty() {
+        vec![dirs::home_dir().ok_or_else(|| anyhow::anyhow!("home directory not found"))?]
+    } else {
+        roots
+    };
+    for r in &roots {
+        if !r.is_dir() {
+            anyhow::bail!("root is not a directory: {}", r.display());
+        }
+    }
+
+    let report = worktree_standing(&roots, depth);
+    let s = report.summary;
+
+    println!("Git worktree standing (read-only; removal UNSUPPORTED)");
+    println!(
+        "  repos: {}   linked worktrees: {}   .git total: {}",
+        s.repos,
+        s.linked_worktrees,
+        format_bytes(s.git_dir_bytes)
+    );
+    println!(
+        "  reclaimable: {} worktrees, {}  (merged_clean {}, prunable {})",
+        s.reclaimable_worktrees,
+        format_bytes(s.reclaimable_bytes),
+        s.merged_clean,
+        s.prunable
+    );
+    println!(
+        "  not reclaimable: dirty {}, unmerged {}, detached {}, locked {}, unknown {}",
+        s.dirty, s.unmerged, s.detached, s.locked, s.unknown
+    );
+
+    let mut reclaimable: Vec<_> = report
+        .repos
+        .iter()
+        .flat_map(|r| r.worktrees.iter())
+        .filter(|w| w.verdict.reclaimable)
+        .collect();
+    reclaimable.sort_by_key(|w| std::cmp::Reverse(w.size_bytes));
+    if !reclaimable.is_empty() {
+        println!();
+        println!("Reclaimable worktrees:");
+        for w in &reclaimable {
+            let tag = match w.verdict.class {
+                WorktreeClass::Prunable => "PRUNABLE",
+                _ => "MERGED_CLEAN",
+            };
+            println!(
+                "  {:>10}  {:<12} {}  [{}] {}",
+                format_bytes(w.size_bytes),
+                tag,
+                w.path,
+                w.branch.as_deref().unwrap_or("-"),
+                w.last_commit.as_deref().unwrap_or("?")
+            );
+        }
+    }
+
+    let mut bloated: Vec<_> = report.repos.iter().collect();
+    bloated.sort_by_key(|r| std::cmp::Reverse(r.git_dir_bytes));
+    if !bloated.is_empty() {
+        println!();
+        println!("Top .git dirs:");
+        for r in bloated.iter().take(top) {
+            let (loose, pack) = r
+                .count_objects
+                .map(|c| {
+                    (
+                        format!("{} ({})", c.loose_count, format_bytes(c.loose_bytes)),
+                        format_bytes(c.pack_bytes),
+                    )
+                })
+                .unwrap_or_else(|| ("?".into(), "?".into()));
+            let gc = if r.gc_signals.is_empty() {
+                "no".to_string()
+            } else {
+                format!("yes {:?}", r.gc_signals)
+            };
+            println!(
+                "  {:>10}  {}  loose {}  pack {}  gc-would-help: {}",
+                format_bytes(r.git_dir_bytes),
+                r.git_dir,
+                loose,
+                pack,
+                gc
+            );
+            println!(
+                "              of which modules/ {}  worktrees/ {}",
+                format_bytes(r.modules_bytes),
+                format_bytes(r.worktrees_admin_bytes)
+            );
+            for e in &r.errors {
+                println!("      error: {e}");
+            }
+        }
+    }
+
+    if let Some(path) = output {
+        let json = serde_json::to_string_pretty(&report)?;
+        let (outcome, _) = write_output_file(&path, &json, false, "worktree standing report")?;
+        if outcome.is_written() {
+            println!();
+            println!("Report written: {}", path.display());
+        }
+    }
+    Ok(())
 }
 
 fn handle_rustup() -> anyhow::Result<()> {

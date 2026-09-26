@@ -2381,3 +2381,31 @@ mod delete_dir_all_partial_tests {
         assert_eq!(bytes, 0);
     }
 }
+
+/// Observes the on-disk state of a receipt path for
+/// [`crate::domain::receipt::DeletionReceipt::verify_with`]: absent, or
+/// present with its creation (birth) time. `symlink_metadata` so a symlink
+/// planted at the path is observed as itself, never followed.
+pub fn observe_path(path: &Path) -> crate::domain::receipt::PathObservation {
+    use crate::domain::receipt::PathObservation;
+    match std::fs::symlink_metadata(path) {
+        Err(_) => PathObservation::Absent,
+        Ok(meta) => PathObservation::Present {
+            is_symlink: meta.file_type().is_symlink(),
+            born_unix: meta
+                .created()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64),
+        },
+    }
+}
+
+/// Verifies a deletion receipt against the real filesystem (see
+/// [`observe_path`]); the domain's `verify` is the offline form.
+pub fn verify_receipt_on_disk(
+    receipt: &crate::domain::receipt::DeletionReceipt,
+    plan: Option<&crate::domain::plan::DeletionPlan>,
+) -> crate::domain::receipt::VerificationReport {
+    receipt.verify_with(plan, &observe_path)
+}

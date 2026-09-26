@@ -139,12 +139,16 @@ Always drive cleanup through the MCP server. Never use `rm -rf`, `find -delete`,
 | `delete execute` | `delete` |
 | `receipt verify` | `receipt`, `affidavit_integration` |
 | `snapshot` | `integration::tmutil` |
-| `docker scan/plan/prune` | `docker_receipt`, `integration::docker` |
+| `docker scan/plan/prune/trim` | `docker_receipt`, `integration::docker` (`trim` runs guest `fstrim` in the Colima VM — destructive-adjacent, requires `--confirm`) |
+| `dedupe scan` | read-only APFS `clonefile` reclaim measurement (never rewrites) |
+| `tools git-worktrees` | read-only git-worktree standing report |
 | `emergency` | `artifact`, `integration::fs` |
 | `doctor` | `doctor` |
 | `privacy` | `redaction` |
-| `autoclean run` | orchestrates `plan build` → `plan approve` → `delete execute` → `receipt verify` as subprocesses; hard `--max-reclaim-gb` cap (default 50), refuses over-cap plans, skips Unknown/Irreversible-reversibility items, `--ignore-recent-hours` defaults to 24h, never touches Docker/Colima or wholesale `~/Library/Caches` |
-| `daemon install-autoclean/uninstall-autoclean/status` | writes/loads a `com.oclnr.autoclean` launchd LaunchAgent running `autoclean run --yes` daily (default 04:15 local) — separate from the existing alert-only `com.oclnr.monitor` job |
+| `autoclean run` | orchestrates `plan build` → `plan approve` → `delete execute` → `receipt verify` as subprocesses; hard `--max-reclaim-gb` cap (default 50), refuses over-cap plans, skips Unknown/Irreversible-reversibility items, `--ignore-recent-hours` defaults to 24h, never touches Docker/Colima or wholesale `~/Library/Caches`; `plan build` drops candidates containing git-tracked files and never nominates package stores (installed extensions/plugins/tool caches) |
+| `monitor --watch --reclaim snapshots[,builds]` | `pressure` (`decide_reclaim`: Idle/Thin/Cooldown with margin + per-strategy cooldown stamps in `~/.oclnr/`); snapshots via `snapshot::thin_and_seal` (same sealed receipt as `snapshot thin`); builds via `autoclean run --builds-only --exclude-live-cwds` (regenerable build dirs only, `lsof` live-cwd + 2h recency exclusions) |
+| `daemon install-pressure-monitor/uninstall-pressure-monitor` | writes/loads a `com.oclnr.pressure` KeepAlive LaunchAgent running `monitor --watch --reclaim ...` |
+| `daemon install-autoclean/uninstall-autoclean/status` | writes/loads a `com.oclnr.autoclean` launchd LaunchAgent running `autoclean run --yes` daily (default 04:15 local) — separate from the existing alert-only `com.oclnr.monitor` job. Install preflight refuses plists the current binary cannot run; reinstall replaces + reloads the running agent and verifies its program. Every native receipt also writes an `R = receipt(A)` projection at `<stem>.r.json` |
 
 ### Execution pipeline
 

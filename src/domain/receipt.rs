@@ -70,9 +70,29 @@ pub enum IssueType {
     UnsupportedVersion,
     InvalidTimestamps,
     PathStillExists,
+    /// A path the receipt marks deleted exists again, but the object there was
+    /// created *after* execution started — a live build/process regenerated it
+    /// (observed 2026-09-22: `cargo test -p ferroplan` recreated
+    /// `ferroplan/target` inside the deletion window). Informational: the
+    /// deletion itself happened, so this does not make a receipt inconsistent.
+    PathRecreated,
     MissingPlanItem,
     ExtraReceiptItem,
     BytesFreedMismatch,
+}
+
+/// What the integration layer observed at a receipt path when verifying.
+/// Built outside the domain (a `symlink_metadata` + birthtime read) so this
+/// module stays free of filesystem calls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathObservation {
+    /// Nothing exists at the path.
+    Absent,
+    /// Something exists at the path; `born_unix` is its creation time when
+    /// the filesystem reports one (APFS does), `None` otherwise. `is_symlink`
+    /// is true when the entry itself is a symbolic link (observed without
+    /// following it).
+    Present { born_unix: Option<i64>, is_symlink: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -267,6 +287,66 @@ impl DeletionReceipt {
     ///     .any(|i| i.issue_type == IssueType::BytesFreedMismatch));
     /// ```
     pub fn verify(&self, plan: Option<&crate::domain::plan::DeletionPlan>) -> VerificationReport {
+        self.verify_with(plan, &|_| PathObservation::Absent)
+    }
+
+    /// Verifies the receipt, consulting `observe` for the on-disk state of
+    /// every path marked `Deleted`/`SkippedMissing`. [`Self::verify`] is the
+    /// offline form (every path treated as absent); the integration layer's
+    /// `verify_receipt_on_disk` supplies a real observer.
+    ///
+    /// A present path born *after* `execution_started_unix` is classified
+    /// `PathRecreated` (informational, receipt stays consistent); one born
+    /// before — or with unknown birth time — is `PathStillExists` (the delete
+    /// did not happen, receipt inconsistent).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::receipt::{
+    ///     DeletionReceipt, DeletionResult, DeletionStatus, IssueType, PathObservation,
+    /// };
+    /// let r = DeletionReceipt::new(0, 1_000, 2_000, vec![DeletionResult {
+    ///     path: "/p/target".into(), status: DeletionStatus::Deleted, error: None,
+    ///     blake3_hash: None, bytes_freed: 0, reversibility: Default::default(),
+    /// }], None, None);
+    ///
+    /// // Positive: absent after deletion → consistent, no issues.
+    /// let ok = r.verify_with(None, &|_| PathObservation::Absent);
+    /// assert!(ok.is_consistent && ok.issues.is_empty());
+    ///
+    /// // Recreated by a live build during/after the run → informational only.
+    /// let rec = r.verify_with(None, &|_| PathObservation::Present { born_unix: Some(1_500), is_symlink: false });
+    /// assert!(rec.is_consistent);
+    /// assert_eq!(rec.issues[0].issue_type, IssueType::PathRecreated);
+    ///
+    /// // Refusal: the same object predates the run → the delete never happened.
+    /// let stale = r.verify_with(None, &|_| PathObservation::Present { born_unix: Some(500), is_symlink: false });
+    /// assert!(!stale.is_consistent);
+    /// assert_eq!(stale.issues[0].issue_type, IssueType::PathStillExists);
+    ///
+    /// // Refusal: unknown birth time is never assumed to be a recreation.
+    /// let unknown = r.verify_with(None, &|_| PathObservation::Present { born_unix: None, is_symlink: false });
+    /// assert!(!unknown.is_consistent);
+    ///
+    /// // A dangling symlink at a `SkippedMissing` path is what "missing" meant
+    /// // (the deleter follows links and never deletes one) → consistent.
+    /// let skipped = DeletionReceipt::new(0, 1_000, 2_000, vec![DeletionResult {
+    ///     path: "/wt/x/node_modules".into(), status: DeletionStatus::SkippedMissing, error: None,
+    ///     blake3_hash: None, bytes_freed: 0, reversibility: Default::default(),
+    /// }], None, None);
+    /// let link = skipped.verify_with(None, &|_| PathObservation::Present { born_unix: Some(500), is_symlink: true });
+    /// assert!(link.is_consistent && link.issues.is_empty());
+    ///
+    /// // …but a symlink at a path the receipt claims `Deleted` is still a lie.
+    /// let lied = r.verify_with(None, &|_| PathObservation::Present { born_unix: Some(500), is_symlink: true });
+    /// assert!(!lied.is_consistent);
+    /// ```
+    pub fn verify_with(
+        &self,
+        plan: Option<&crate::domain::plan::DeletionPlan>,
+        observe: &dyn Fn(&std::path::Path) -> PathObservation,
+    ) -> VerificationReport {
         let mut issues = Vec::new();
 
         if self.execution_record.version != 1 {
@@ -294,17 +374,38 @@ impl DeletionReceipt {
         for result in &self.execution_record.results {
             match result.status {
                 DeletionStatus::Deleted | DeletionStatus::SkippedMissing
-                    if !result.path.to_string_lossy().starts_with("github://")
-                        && result.path.exists() =>
+                    if !result.path.to_string_lossy().starts_with("github://") =>
                 {
-                    issues.push(VerificationIssue {
-                        path: result.path.clone(),
-                        issue_type: IssueType::PathStillExists,
-                        message: format!(
-                            "Path still exists on disk despite status {:?}",
-                            result.status
-                        ),
-                    });
+                    if let PathObservation::Present { born_unix, is_symlink } =
+                        observe(&result.path)
+                    {
+                        // SkippedMissing means "no target when followed": a
+                        // dangling symlink there is exactly that state, and the
+                        // deleter never removes symlinks.
+                        if is_symlink && result.status == DeletionStatus::SkippedMissing {
+                            continue;
+                        }
+                        let started = self.execution_record.execution_started_unix as i64;
+                        match born_unix {
+                            Some(born) if born > started => issues.push(VerificationIssue {
+                                path: result.path.clone(),
+                                issue_type: IssueType::PathRecreated,
+                                message: format!(
+                                    "Path was deleted but recreated at unix {born} (after \
+                                     execution started at {started}) — a live process \
+                                     regenerated it"
+                                ),
+                            }),
+                            _ => issues.push(VerificationIssue {
+                                path: result.path.clone(),
+                                issue_type: IssueType::PathStillExists,
+                                message: format!(
+                                    "Path still exists on disk despite status {:?}",
+                                    result.status
+                                ),
+                            }),
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -359,7 +460,7 @@ impl DeletionReceipt {
             });
         }
 
-        let is_consistent = issues.is_empty();
+        let is_consistent = issues.iter().all(|i| i.issue_type == IssueType::PathRecreated);
         VerificationReport { is_consistent, issues }
     }
 }

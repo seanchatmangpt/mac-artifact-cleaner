@@ -127,6 +127,7 @@ impl OsxClnrMcpServer {
                         "top_n": { "type": "integer", "default": 20, "description": "(inspect only)" },
                         "approver_name": { "type": "string", "description": "(approve only)" },
                         "approval_reason": { "type": "string", "description": "(approve only)" },
+                        "acknowledge_unknown_reversibility": { "type": "boolean", "default": false, "description": "(approve only) Required when the plan holds any item classified Unknown/Irreversible reversibility; review them via validate first." },
                         "confirm": { "type": "boolean", "default": false, "description": "(approve only)" }
                     },
                     "required": ["action"]
@@ -1505,7 +1506,7 @@ impl OsxClnrMcpServer {
             ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid receipt JSON: {}", e))
         })?;
 
-        let report = receipt.verify(None);
+        let report = crate::integration::fs::verify_receipt_on_disk(&receipt, None);
         let affidavit_receipt =
             affidavit_integration::build_deletion_affidavit(&receipt).map_err(|e| {
                 ErrorResponse::new(

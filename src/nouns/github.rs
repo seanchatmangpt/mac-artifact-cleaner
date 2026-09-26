@@ -393,7 +393,7 @@ pub fn github_receipt(
         None
     };
 
-    let report = receipt.verify(plan.as_ref());
+    let report = crate::integration::fs::verify_receipt_on_disk(&receipt, plan.as_ref());
     println!("\n==================================================");
     println!("            RECEIPT VERIFICATION REPORT           ");
     println!("==================================================");
