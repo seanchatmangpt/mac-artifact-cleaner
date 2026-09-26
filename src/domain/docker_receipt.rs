@@ -166,6 +166,122 @@ impl DockerPruneReceipt {
     }
 }
 
+/// One reaped Lima disk, as recorded by [`LimaDiskReapReceipt`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LimaDiskReapEntry {
+    pub name: String,
+    pub path: String,
+    pub logical_bytes: u64,
+    /// Physical blocks actually returned to the host volume, measured
+    /// (`st_blocks * 512`) immediately before removal.
+    pub physical_bytes_freed: u64,
+}
+
+/// A plain, unsealed record of one `docker disks reap` execution: which
+/// orphaned Lima disk directories were removed and what the host got back.
+/// Same evidence-not-provenance contract as [`DockerPruneReceipt`] — see the
+/// module doc for why these Docker-family receipts carry no affidavit seal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LimaDiskReapReceipt {
+    pub version: u32,
+    pub executed_unix: i64,
+    /// `false` when `limactl disk list` could not be read. Reaping refuses
+    /// to run in that state, so a written receipt with `false` here must not
+    /// exist; the field is recorded so a hand-crafted or future-variant
+    /// receipt claiming a reap without a readable registry is self-evidently
+    /// invalid.
+    pub registry_known: bool,
+    pub orphans_found: usize,
+    pub entries: Vec<LimaDiskReapEntry>,
+    pub total_physical_bytes_freed: u64,
+}
+
+impl LimaDiskReapReceipt {
+    pub fn new(registry_known: bool, entries: Vec<LimaDiskReapEntry>) -> Self {
+        let total = entries.iter().map(|e| e.physical_bytes_freed).fold(0u64, u64::saturating_add);
+        Self {
+            version: 1,
+            executed_unix: chrono::Utc::now().timestamp(),
+            registry_known,
+            orphans_found: entries.len(),
+            total_physical_bytes_freed: total,
+            entries,
+        }
+    }
+}
+
+/// A plain, unsealed record of one `docker recreate` execution: the
+/// requested VM shape, whether the old instance was deleted, how many
+/// orphaned disks were reaped on the way, and host-side before/after
+/// measurements proving what the operation actually returned.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColimaRecreateReceipt {
+    pub version: u32,
+    pub executed_unix: i64,
+    pub cpu: u32,
+    pub memory_gib: u32,
+    pub disk_gib: u32,
+    pub vm_type: Option<String>,
+    /// `Some(true)` when `colima delete` ran and succeeded; `Some(false)`
+    /// when it ran and failed; `None` when no instance existed so delete was
+    /// never attempted. Same None-vs-false discipline as
+    /// [`DockerPruneReceipt::colima_pruned`].
+    pub instance_deleted: Option<bool>,
+    pub disks_reaped: usize,
+    pub reaped_physical_bytes_freed: u64,
+    pub host_physical_bytes_before: Option<u64>,
+    pub host_physical_bytes_after: Option<u64>,
+    pub volume_free_bytes_before: Option<u64>,
+    pub volume_free_bytes_after: Option<u64>,
+    pub started: bool,
+}
+
+impl ColimaRecreateReceipt {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        cpu: u32,
+        memory_gib: u32,
+        disk_gib: u32,
+        vm_type: Option<String>,
+        instance_deleted: Option<bool>,
+        disks_reaped: usize,
+        reaped_physical_bytes_freed: u64,
+        started: bool,
+    ) -> Self {
+        Self {
+            version: 1,
+            executed_unix: chrono::Utc::now().timestamp(),
+            cpu,
+            memory_gib,
+            disk_gib,
+            vm_type,
+            instance_deleted,
+            disks_reaped,
+            reaped_physical_bytes_freed,
+            host_physical_bytes_before: None,
+            host_physical_bytes_after: None,
+            volume_free_bytes_before: None,
+            volume_free_bytes_after: None,
+            started,
+        }
+    }
+
+    /// Records host-side samples (same sampling rules and None-vs-zero
+    /// semantics as [`DockerPruneReceipt::with_host_physical`]).
+    pub fn with_host_samples(
+        &mut self,
+        host_physical_before: Option<u64>,
+        host_physical_after: Option<u64>,
+        volume_free_before: Option<u64>,
+        volume_free_after: Option<u64>,
+    ) {
+        self.host_physical_bytes_before = host_physical_before;
+        self.host_physical_bytes_after = host_physical_after;
+        self.volume_free_bytes_before = volume_free_before;
+        self.volume_free_bytes_after = volume_free_after;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
