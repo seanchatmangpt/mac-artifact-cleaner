@@ -76,7 +76,7 @@ fn count_objects(repo_path: &Path) -> Result<(u64, u64)> {
             pack_size_bytes = parse_human_size(rest.trim());
         } else if let Some(rest) = line.strip_prefix("count:") {
             loose_objects = rest.trim().parse().with_context(|| {
-                format!("unparseable `count:` line from git count-objects: {rest}")
+                format!("unparsable `count:` line from git count-objects: {rest}")
             })?;
         }
     }
