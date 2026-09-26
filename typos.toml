@@ -20,7 +20,11 @@ extend-exclude = [
 
 [default]
 # Ignore content-address / hash-looking hex strings (blake3, sha256, git shas).
-extend-ignore-re = ["\\b[0-9a-f]{32,}\\b"]
+extend-ignore-re = [
+    "\\b[0-9a-f]{32,}\\b",
+    # Abbreviated git commit shas cited in docs (e.g. `- daa0036 Exclude ...`).
+    "\\b[0-9a-f]{7,12}\\b",
+]
 
 [default.extend-words]
 # Intentional project nouns that look like typos.
@@ -33,6 +37,8 @@ affi = "affi"
 linkme = "linkme"
 # Wil M.P. van der Aalst — proper name in thesis citations.
 Wil = "Wil"
+# "(mis)configured" prefix form in prose.
+mis = "mis"
 
 # osx-clnr additions
 [default.extend-identifiers]
