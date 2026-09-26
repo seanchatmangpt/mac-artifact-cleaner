@@ -316,7 +316,7 @@ fn inspect_repo_standing(main: &MainRepo) -> RepoStanding {
         Ok(t) => {
             let parsed = parse_count_objects(&t);
             if parsed.is_none() {
-                errors.push("unparseable `git count-objects -v` output".to_string());
+                errors.push("unparsable `git count-objects -v` output".to_string());
             }
             parsed
         }
