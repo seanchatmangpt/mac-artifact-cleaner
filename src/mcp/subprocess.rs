@@ -35,7 +35,10 @@ impl SubprocessResult {
 /// 1. `env_override` (from `OCLNR_BIN`), if it points at an existing file.
 /// 2. A file named `oclnr` next to `current_exe`'s parent directory, if it
 ///    exists — i.e. co-located with the running `oclnr-mcp` binary.
-/// 3. Whatever `which_lookup("oclnr")` returns (a `PATH` search).
+/// 3. When `current_exe` lives in a directory named `deps` (cargo's test
+///    harness layout), a file named `oclnr` in that directory's parent —
+///    the bin target cargo built alongside the harness.
+/// 4. Whatever `which_lookup("oclnr")` returns (a `PATH` search).
 ///
 /// Co-located resolution is checked *before* `PATH` so that a stale `oclnr`
 /// earlier on `PATH` (e.g. an old install in `~/.cargo/bin`) can never
@@ -51,9 +54,24 @@ fn resolve_oclnr_path(
         }
     }
 
-    if let Some(colocated) = current_exe.and_then(|exe| exe.parent().map(|p| p.join("oclnr"))) {
+    let exe_dir = current_exe.as_deref().and_then(std::path::Path::parent);
+
+    if let Some(colocated) = exe_dir.map(|p| p.join("oclnr")) {
         if colocated.is_file() {
             return Some(colocated);
+        }
+    }
+
+    // Cargo test layout: test harnesses run from `target/<profile>/deps/`,
+    // while the `oclnr` bin target is placed one level up in
+    // `target/<profile>/`. Only a parent literally named `deps` is walked
+    // up, so an installed `oclnr-mcp` never probes an arbitrary grandparent.
+    if let Some(profile_dir) =
+        exe_dir.filter(|p| p.file_name().is_some_and(|n| n == "deps")).and_then(|p| p.parent())
+    {
+        let built = profile_dir.join("oclnr");
+        if built.is_file() {
+            return Some(built);
         }
     }
 
@@ -793,6 +811,81 @@ mod tests {
         });
 
         assert_eq!(resolved, Some(overridden));
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Cargo runs lib unit tests from `target/<profile>/deps/<harness>`; the
+    /// `oclnr` bin lives in `target/<profile>/oclnr`. Without this step the
+    /// MCP server unit tests fail on any machine with no `oclnr` on `PATH`
+    /// (observed on GitHub Actions macOS runners, run 35965611606).
+    #[test]
+    fn test_resolve_finds_bin_above_cargo_deps_dir() {
+        let tmp = std::env::temp_dir().join(format!(
+            "oclnr_subprocess_resolve_test_deps_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let profile_dir = tmp.join("debug");
+        let deps_dir = profile_dir.join("deps");
+        std::fs::create_dir_all(&deps_dir).unwrap();
+        let built = profile_dir.join("oclnr");
+        write_stub(&built);
+        let harness = deps_dir.join("osx_clnr-0123456789abcdef");
+        std::fs::write(&harness, b"fake").unwrap();
+
+        let resolved = resolve_oclnr_path(None, Some(harness), |_| None);
+        assert_eq!(resolved, Some(built));
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Adversarial: a grandparent `oclnr` must NOT be picked up when the
+    /// executable's directory is not literally `deps` (an installed
+    /// `oclnr-mcp` in `~/bin/tools/` must never run `~/bin/oclnr`).
+    #[test]
+    fn test_resolve_ignores_grandparent_when_parent_not_deps() {
+        let tmp = std::env::temp_dir().join(format!(
+            "oclnr_subprocess_resolve_test_notdeps_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let grand = tmp.join("bin");
+        let exe_dir = grand.join("tools");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        write_stub(&grand.join("oclnr"));
+        let exe = exe_dir.join("oclnr-mcp");
+        std::fs::write(&exe, b"fake").unwrap();
+
+        let resolved = resolve_oclnr_path(None, Some(exe), |_| None);
+        assert_eq!(resolved, None, "grandparent must only be probed from a `deps` dir");
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Adversarial: a `deps` layout whose profile dir holds a *directory*
+    /// named `oclnr` (not a file) falls through to PATH instead of
+    /// returning a non-executable path.
+    #[test]
+    fn test_resolve_deps_layout_rejects_directory_named_oclnr() {
+        let tmp = std::env::temp_dir().join(format!(
+            "oclnr_subprocess_resolve_test_depsdir_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let profile_dir = tmp.join("debug");
+        let deps_dir = profile_dir.join("deps");
+        std::fs::create_dir_all(profile_dir.join("oclnr")).unwrap();
+        std::fs::create_dir_all(&deps_dir).unwrap();
+        let harness = deps_dir.join("harness");
+        std::fs::write(&harness, b"fake").unwrap();
+        let path_hit = tmp.join("path").join("oclnr");
+        std::fs::create_dir_all(path_hit.parent().unwrap()).unwrap();
+        write_stub(&path_hit);
+
+        let hit = path_hit.clone();
+        let resolved = resolve_oclnr_path(None, Some(harness), move |_| Some(hit.clone()));
+        assert_eq!(resolved, Some(path_hit));
 
         std::fs::remove_dir_all(&tmp).ok();
     }

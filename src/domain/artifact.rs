@@ -897,13 +897,13 @@ pub fn traversal_barrier_names() -> HashSet<&'static str> {
 /// assert!(project.names.contains(&"rust"));
 ///
 /// // Positive case: a .uproject file marker → unreal project.
-/// let ue_snap = DirSnapshot {
+/// let unreal_snap = DirSnapshot {
 ///     children: vec![
 ///         EntrySnapshot::new(PathBuf::from("/p/MyGame.uproject"), "MyGame.uproject".into(), Some("uproject".into()), EntryKind::File),
 ///     ],
 /// };
-/// let ue_project = detect_project_from_snapshot(&ue_snap).unwrap();
-/// assert!(ue_project.names.contains(&"unreal"));
+/// let unreal_project = detect_project_from_snapshot(&unreal_snap).unwrap();
+/// assert!(unreal_project.names.contains(&"unreal"));
 ///
 /// // Positive case: an engine checkout's Engine/ dir (Source+Shaders+Build siblings) → unreal project.
 /// let engine_snap = DirSnapshot {

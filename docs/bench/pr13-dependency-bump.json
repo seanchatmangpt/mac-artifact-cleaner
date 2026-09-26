@@ -1,0 +1,30 @@
+{
+  "schema": "osx-clnr/bench-receipt/v1",
+  "subject": {
+    "repo": "seanchatmangpt/mac-artifact-cleaner",
+    "pr": 13,
+    "base": "1919a633074291f00814a0833b2b24ca83373f5a",
+    "pr_head": "e7c70b7a3766a07fe27a4a02ffa3a63627719752",
+    "lock_under_test": "PR head lock + crossbeam-epoch 0.9.18 -> 0.9.21 (RUSTSEC-2026-0204)"
+  },
+  "harness": "tests/dependency_bump_bench.rs (median of 7 runs, fixed xorshift64* input)",
+  "command": "cargo test --release --locked --test dependency_bump_bench -- --nocapture --test-threads=1",
+  "host": "aarch64-apple-darwin, rustc nightly-2026-04-15",
+  "measured_at": "2026-09-26",
+  "release_mib_per_s": {
+    "blake3_hash_8MiB": {"base": [1097.35, 1237.72], "bumped": [1198.80, 1329.99]},
+    "serde_json_roundtrip_receipt": {"base": [203.54, 200.84], "bumped": [198.41, 204.26]},
+    "toml_parse_cargo_lock": {"base": [53.45, 61.31], "bumped": [69.63, 64.59]}
+  },
+  "debug_mib_per_s": {
+    "blake3_hash_8MiB": {"base": 23.69, "bumped": 20.06},
+    "serde_json_roundtrip_receipt": {"base": 12.23, "bumped": 12.84},
+    "toml_parse_cargo_lock": {"base": 6.18, "bumped": 5.72}
+  },
+  "regression_floors_debug_mib_per_s": {
+    "blake3_hash_8MiB": 2.0,
+    "serde_json_roundtrip_receipt": 1.0,
+    "toml_parse_cargo_lock": 0.5
+  },
+  "verdict": "no regression: bumped within run-to-run noise of base on every workload; floors are ~10x below debug measurements and enforced by cargo test"
+}
