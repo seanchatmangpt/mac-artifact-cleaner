@@ -2409,3 +2409,20 @@ pub fn verify_receipt_on_disk(
 ) -> crate::domain::receipt::VerificationReport {
     receipt.verify_with(plan, &observe_path)
 }
+
+/// Whether local APFS snapshots exist on `/` — the condition under which a
+/// reclaim shortfall is snapshot-pinned rather than unexplained. Best-effort:
+/// a `tmutil` failure is treated as "no snapshots" so a shortfall stays fatal.
+pub fn local_snapshots_present() -> bool {
+    crate::integration::tmutil::list_local_snapshots("/").map(|s| !s.is_empty()).unwrap_or(false)
+}
+
+/// [`verify_receipt_on_disk`] that also observes local snapshots, so a
+/// snapshot-pinned reclaim shortfall is reported `SnapshotPinned`
+/// (informational) instead of fatal `BytesFreedMismatch`.
+pub fn verify_receipt_on_disk_snapshot_aware(
+    receipt: &crate::domain::receipt::DeletionReceipt,
+    plan: Option<&crate::domain::plan::DeletionPlan>,
+) -> crate::domain::receipt::VerificationReport {
+    receipt.verify_with_context(plan, &observe_path, local_snapshots_present())
+}

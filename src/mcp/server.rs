@@ -1506,7 +1506,7 @@ impl OsxClnrMcpServer {
             ErrorResponse::new(ErrorCode::JsonParseError, format!("invalid receipt JSON: {}", e))
         })?;
 
-        let report = crate::integration::fs::verify_receipt_on_disk(&receipt, None);
+        let report = crate::integration::fs::verify_receipt_on_disk_snapshot_aware(&receipt, None);
         let affidavit_receipt =
             affidavit_integration::build_deletion_affidavit(&receipt).map_err(|e| {
                 ErrorResponse::new(
@@ -1578,8 +1578,15 @@ impl OsxClnrMcpServer {
             None
         };
 
+        let snapshot_pinned = report
+            .issues
+            .iter()
+            .any(|i| i.issue_type == crate::domain::receipt::IssueType::SnapshotPinned);
+
         Ok(serde_json::to_value(ReceiptVerifyOutput {
-            state: if all_targets_gone {
+            state: if all_targets_gone && snapshot_pinned {
+                "RECEIPT_VERIFIED_SNAPSHOT_PINNED".to_string()
+            } else if all_targets_gone {
                 "RECEIPT_VERIFIED".to_string()
             } else {
                 "RECEIPT_VERIFICATION_FAILED".to_string()
@@ -1595,7 +1602,11 @@ impl OsxClnrMcpServer {
                 affidavit_verified: verdict.accepted,
             },
             seal: seal_output,
-            message: if all_targets_gone {
+            message: if all_targets_gone && snapshot_pinned {
+                "Receipt verified; reclaimed space is pinned by local snapshots — run \
+                 snapshot(action: \"thin\") to release it"
+                    .to_string()
+            } else if all_targets_gone {
                 "Receipt verified".to_string()
             } else {
                 format!("Receipt verification found {} issue(s)", report.issues.len())

@@ -1221,3 +1221,46 @@ fn test_repeat_scan_with_cache_matches_first_scan() {
         "cache-hit repeat scan must not undercount candidates_seen"
     );
 }
+
+#[test]
+fn test_verify_snapshot_pinned_shortfall_is_informational_only_with_snapshots() {
+    use osx_clnr::domain::receipt::{
+        DeletionReceipt, DeletionResult, DeletionStatus, IssueType, PathObservation,
+    };
+
+    // Real receipt whose target really is absent on disk (a fresh tempdir child
+    // that was never created), claiming 2 GB freed while the volume free-space
+    // delta is 0 — the exact shape observed 2026-09-28 when snapshots pinned
+    // the freed blocks.
+    let dir = tempfile::tempdir().unwrap();
+    let gone = dir.path().join("target");
+    assert!(!gone.exists());
+    let receipt = DeletionReceipt::new(
+        0,
+        1_000,
+        2_000,
+        vec![DeletionResult {
+            path: gone,
+            status: DeletionStatus::Deleted,
+            error: None,
+            blake3_hash: None,
+            bytes_freed: 2_000_000_000,
+            reversibility: Default::default(),
+        }],
+        Some(5_000_000_000),
+        Some(5_000_000_000),
+    );
+    let observe = |p: &std::path::Path| match std::fs::symlink_metadata(p) {
+        Ok(_) => PathObservation::Present { born_unix: None, is_symlink: false },
+        Err(_) => PathObservation::Absent,
+    };
+
+    let pinned = receipt.verify_with_context(None, &observe, true);
+    assert!(pinned.is_consistent);
+    assert!(pinned.issues.iter().any(|i| i.issue_type == IssueType::SnapshotPinned));
+
+    // Control: without snapshots the same shortfall is still fatal.
+    let bare = receipt.verify_with_context(None, &observe, false);
+    assert!(!bare.is_consistent);
+    assert!(bare.issues.iter().any(|i| i.issue_type == IssueType::BytesFreedMismatch));
+}

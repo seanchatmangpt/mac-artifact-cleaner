@@ -79,6 +79,50 @@ pub enum IssueType {
     MissingPlanItem,
     ExtraReceiptItem,
     BytesFreedMismatch,
+    /// The claimed reclaim did not show up in the volume's free space, *and*
+    /// local APFS snapshots exist that pin the freed blocks (observed
+    /// 2026-09-28: 52.6 GB deleted, free-space delta -48 MB until
+    /// `snapshot thin` released the blocks). Informational: the deletion
+    /// happened; the space is held by a snapshot, not missing. Never emitted
+    /// when no snapshots are present — a shortfall with nothing pinning it
+    /// stays [`IssueType::BytesFreedMismatch`].
+    SnapshotPinned,
+}
+
+/// Classifies a reclaim shortfall: [`IssueType::SnapshotPinned`] when local
+/// snapshots may be pinning the freed blocks, otherwise the fatal
+/// [`IssueType::BytesFreedMismatch`].
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::receipt::{classify_shortfall, IssueType};
+/// // Positive: snapshots present → the space is pinned, not missing.
+/// assert_eq!(classify_shortfall(true), IssueType::SnapshotPinned);
+/// // Refusal: nothing pins the blocks → the claim is unexplained.
+/// assert_eq!(classify_shortfall(false), IssueType::BytesFreedMismatch);
+/// ```
+pub fn classify_shortfall(snapshots_present: bool) -> IssueType {
+    if snapshots_present {
+        IssueType::SnapshotPinned
+    } else {
+        IssueType::BytesFreedMismatch
+    }
+}
+
+impl IssueType {
+    /// Informational issues never make a receipt inconsistent.
+    ///
+    /// ```
+    /// use osx_clnr::domain::receipt::IssueType;
+    /// assert!(IssueType::PathRecreated.is_informational());
+    /// assert!(IssueType::SnapshotPinned.is_informational());
+    /// assert!(!IssueType::BytesFreedMismatch.is_informational());
+    /// assert!(!IssueType::PathStillExists.is_informational());
+    /// ```
+    pub fn is_informational(self) -> bool {
+        matches!(self, IssueType::PathRecreated | IssueType::SnapshotPinned)
+    }
 }
 
 /// What the integration layer observed at a receipt path when verifying.
@@ -347,6 +391,42 @@ impl DeletionReceipt {
         plan: Option<&crate::domain::plan::DeletionPlan>,
         observe: &dyn Fn(&std::path::Path) -> PathObservation,
     ) -> VerificationReport {
+        self.verify_with_context(plan, observe, false)
+    }
+
+    /// [`Self::verify_with`] plus whether local APFS snapshots are present on
+    /// the receipt's volume (observed by the integration layer). A reclaim
+    /// shortfall with snapshots present is [`IssueType::SnapshotPinned`]
+    /// (informational); without them it stays fatal `BytesFreedMismatch`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::receipt::{
+    ///     DeletionReceipt, DeletionResult, DeletionStatus, IssueType, PathObservation,
+    /// };
+    /// let r = DeletionReceipt::new(0, 1_000, 2_000, vec![DeletionResult {
+    ///     path: "/p/target".into(), status: DeletionStatus::Deleted, error: None,
+    ///     blake3_hash: None, bytes_freed: 2_000_000_000, reversibility: Default::default(),
+    /// }], Some(5_000_000_000), Some(5_000_000_000)); // claimed 2 GB, delta 0
+    /// let absent = |_: &std::path::Path| PathObservation::Absent;
+    ///
+    /// // Positive: snapshots pin the blocks → consistent, issue is informational.
+    /// let pinned = r.verify_with_context(None, &absent, true);
+    /// assert!(pinned.is_consistent);
+    /// assert_eq!(pinned.issues[0].issue_type, IssueType::SnapshotPinned);
+    ///
+    /// // Refusal: same shortfall, no snapshots → unexplained, inconsistent.
+    /// let bare = r.verify_with_context(None, &absent, false);
+    /// assert!(!bare.is_consistent);
+    /// assert_eq!(bare.issues[0].issue_type, IssueType::BytesFreedMismatch);
+    /// ```
+    pub fn verify_with_context(
+        &self,
+        plan: Option<&crate::domain::plan::DeletionPlan>,
+        observe: &dyn Fn(&std::path::Path) -> PathObservation,
+        snapshots_present: bool,
+    ) -> VerificationReport {
         let mut issues = Vec::new();
 
         if self.execution_record.version != 1 {
@@ -449,7 +529,7 @@ impl DeletionReceipt {
         ) {
             issues.push(VerificationIssue {
                 path: PathBuf::new(),
-                issue_type: IssueType::BytesFreedMismatch,
+                issue_type: classify_shortfall(snapshots_present),
                 message: format!(
                     "Receipt claims {} bytes freed but volume free-space delta measured \
                      only {} bytes (floor={:.0}%)",
@@ -460,7 +540,7 @@ impl DeletionReceipt {
             });
         }
 
-        let is_consistent = issues.iter().all(|i| i.issue_type == IssueType::PathRecreated);
+        let is_consistent = issues.iter().all(|i| i.issue_type.is_informational());
         VerificationReport { is_consistent, issues }
     }
 }
