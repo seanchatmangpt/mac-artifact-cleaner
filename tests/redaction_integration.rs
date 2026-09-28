@@ -8,7 +8,7 @@
 //! `oclnr` binary (via `CARGO_BIN_EXE_oclnr`) against a real filesystem —
 //! no mocked `fs::write`, no stubbed redaction.
 
-use std::{path::PathBuf, process::Command};
+use std::process::Command;
 
 fn oclnr() -> Command {
     Command::new(env!("CARGO_BIN_EXE_oclnr"))
@@ -28,14 +28,14 @@ fn audit_run_redact_strips_real_username_from_ocel_output() {
     let scan_root = tempfile_dir();
     // Give the scanned tree a path segment that embeds the real username,
     // mirroring what a real home-directory scan would surface.
-    let project_dir = scan_root.join(format!("{}-project", username));
+    let project_dir = scan_root.path().join(format!("{}-project", username));
     std::fs::create_dir_all(&project_dir).unwrap();
     std::fs::write(project_dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
     let target = project_dir.join("target");
     std::fs::create_dir_all(&target).unwrap();
     std::fs::write(target.join("bin"), vec![0u8; 4096]).unwrap();
 
-    let ocel_output = scan_root.join("disk-audit.jsonocel");
+    let ocel_output = scan_root.path().join("disk-audit.jsonocel");
 
     let output = oclnr()
         .args(["audit", "run", "--root"])
@@ -83,14 +83,14 @@ fn audit_run_without_redact_leaves_real_username_intact() {
     }
 
     let scan_root = tempfile_dir();
-    let project_dir = scan_root.join(format!("{}-project", username));
+    let project_dir = scan_root.path().join(format!("{}-project", username));
     std::fs::create_dir_all(&project_dir).unwrap();
     std::fs::write(project_dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
     let target = project_dir.join("target");
     std::fs::create_dir_all(&target).unwrap();
     std::fs::write(target.join("bin"), vec![0u8; 4096]).unwrap();
 
-    let ocel_output = scan_root.join("disk-audit.jsonocel");
+    let ocel_output = scan_root.path().join("disk-audit.jsonocel");
 
     let output = oclnr()
         .args(["audit", "run", "--root"])
@@ -115,7 +115,7 @@ fn audit_run_without_redact_leaves_real_username_intact() {
     );
 }
 
-fn tempfile_dir() -> PathBuf {
+fn tempfile_dir() -> tempfile::TempDir {
     // FALSIFIER (v26.9.26 main-red repair, head b3f55658): `tempfile::tempdir()`
     // lands in /var/folders/... on macOS -- never under /Users/<user> -- so the
     // fixture embedded the username only as a bare `<user>-project` directory
@@ -131,9 +131,8 @@ fn tempfile_dir() -> PathBuf {
     // file is unchanged -- the red lines stay red.
     let home = std::env::var("HOME")
         .expect("HOME not set; G8 redaction property needs a home-anchored fixture");
-    let dir = tempfile::TempDir::new_in(&home).unwrap();
-    // Leak the TempDir so it outlives the test body without needing to wire
-    // a guard through every call site -- matches this repo's existing
-    // integration test style of using tempfile for real on-disk fixtures.
-    dir.keep()
+    // Return the guard: the fixture is deleted when the test drops it. (It was
+    // previously leaked via `keep()`, which left a `~/.tmpXXXX/<user>-project/
+    // target` dir per run for the disk scanner to nominate.)
+    tempfile::TempDir::new_in(&home).unwrap()
 }
