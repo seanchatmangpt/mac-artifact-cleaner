@@ -67,6 +67,10 @@ printf ']'
 /// makes (`delete_dry_run` -> confirm=false, `delete_execute` -> confirm=true)
 /// can be constructed on demand from the same fixture.
 fn run_delete(tmp: &Path, confirm: bool) -> Vec<String> {
+    run_delete_with(tmp, confirm, false)
+}
+
+fn run_delete_with(tmp: &Path, confirm: bool, thin_after: bool) -> Vec<String> {
     let stub = write_argv_echo_stub(tmp);
     let runner = OclnrRunner::with_binary_path(stub);
 
@@ -75,7 +79,17 @@ fn run_delete(tmp: &Path, confirm: bool) -> Vec<String> {
     let receipt_file = tmp.join("deletion-receipt.json");
 
     let result = runner
-        .delete_run(&workspace, &plan_file, &receipt_file, confirm, None, 30)
+        .delete_run_with(
+            &workspace,
+            &plan_file,
+            &receipt_file,
+            confirm,
+            osx_clnr::mcp::subprocess::DeleteRunOptions {
+                max_concurrent: None,
+                timeout_secs: 30,
+                thin_after,
+            },
+        )
         .expect("delete_run should not itself return an ErrorResponse for a working stub");
 
     assert!(
@@ -141,4 +155,24 @@ fn delete_execute_confirm_false_omits_yes_flag() {
     assert!(!argv.contains(&"--confirm".to_string()));
 
     fs::remove_dir_all(&tmp).ok();
+}
+
+/// `thin_after` is opt-in and only meaningful with `--yes`: default sends no
+/// `--thin-after`; `confirm: true, thin_after: true` sends it; a dry run
+/// (`confirm: false`) never does, even if `thin_after` is set.
+#[test]
+fn delete_execute_thin_after_flag_is_opt_in_and_requires_confirm() {
+    let tmp = std::env::temp_dir().join(format!("oclnr-mcp-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&tmp).unwrap();
+
+    let default_argv = run_delete_with(&tmp, true, false);
+    assert!(!default_argv.contains(&"--thin-after".to_string()));
+
+    let opted_in = run_delete_with(&tmp, true, true);
+    assert!(opted_in.contains(&"--thin-after".to_string()));
+    assert!(opted_in.contains(&"--yes".to_string()));
+
+    let dry_run = run_delete_with(&tmp, false, true);
+    assert!(!dry_run.contains(&"--thin-after".to_string()));
+    assert!(!dry_run.contains(&"--yes".to_string()));
 }

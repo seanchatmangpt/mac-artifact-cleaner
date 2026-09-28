@@ -148,6 +148,7 @@ impl OsxClnrMcpServer {
                         "receipt_file": { "type": "string", "description": "(execute only)" },
                         "confirm": { "type": "boolean", "default": false, "description": "(execute only)" },
                         "max_concurrent": { "type": "integer", "default": 4, "description": "(execute only)" },
+                        "thin_after": { "type": "boolean", "default": false, "description": "(execute only) Thin local APFS snapshots after deleting, before free space is sampled, so the receipt records released space instead of a snapshot-pinned shortfall. Writes a sealed <receipt>.thin.json." },
                         "timeout_secs": { "type": "integer", "default": 300, "description": "(execute only) Real deletion plans routinely take well past 30s (multi-GB directory removal, receipt hashing, affidavit sealing, space verification) — a too-low value here SIGKILLs the subprocess mid-deletion after it has already unlinked real files, surfacing as a generic subprocess failure even though most of the plan succeeded." }
                     },
                     "required": ["action", "plan_file"]
@@ -1305,13 +1306,16 @@ impl OsxClnrMcpServer {
             input.receipt_file.clone().unwrap_or_else(|| workspace.join("deletion-receipt.json"));
 
         // Run deletion
-        let result = self.runner.delete_run(
+        let result = self.runner.delete_run_with(
             &workspace,
             &input.plan_file,
             &receipt_file,
             true,
-            Some(input.max_concurrent),
-            input.timeout_secs,
+            crate::mcp::subprocess::DeleteRunOptions {
+                max_concurrent: Some(input.max_concurrent),
+                timeout_secs: input.timeout_secs,
+                thin_after: input.thin_after,
+            },
         )?;
 
         // A non-zero exit here can mean the deletion itself failed, or it can mean

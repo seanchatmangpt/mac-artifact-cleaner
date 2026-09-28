@@ -46,6 +46,15 @@ pub enum DeleteAction {
         /// global pool width, typically the number of CPUs).
         #[arg(long)]
         max_concurrent: Option<usize>,
+        /// After deleting, thin local APFS snapshots (sealed `<receipt>.thin.json`)
+        /// BEFORE sampling free space, so the receipt records the space actually
+        /// released instead of the snapshot-pinned shortfall. Off by default;
+        /// only acts with `--yes` (a dry run deletes and thins nothing).
+        #[arg(long)]
+        thin_after: bool,
+        /// tmutil thinning urgency (1-4) used by `--thin-after`.
+        #[arg(long, default_value_t = 1)]
+        thin_urgency: u8,
     },
 }
 
@@ -75,7 +84,14 @@ fn reversibility_tag(reversibility: Reversibility) -> &'static str {
 
 pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
     match action {
-        DeleteAction::Execute { plan: plan_path, receipt: receipt_path, yes, max_concurrent } => {
+        DeleteAction::Execute {
+            plan: plan_path,
+            receipt: receipt_path,
+            yes,
+            max_concurrent,
+            thin_after,
+            thin_urgency,
+        } => {
             let content = std::fs::read_to_string(&plan_path).map_err(|e| {
                 anyhow::anyhow!(
                     "Failed to read plan file {}: {}\n\nSuggestions:\n  - Check that {} was created by `oclnr plan build`\n  - Re-run `oclnr plan build` to regenerate the plan\n  - Check file permissions on {}",
@@ -482,6 +498,27 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
+
+            // Opt-in: release snapshot-pinned blocks before sampling, so the
+            // receipt's REALITY law measures released space. A thin failure is a
+            // warning, never an abort — the deletion already happened and its
+            // receipt must still be written.
+            if thin_after {
+                let claimed: u64 = results.iter().map(|r| r.bytes_freed).sum();
+                let thin_receipt = receipt_path.with_extension("thin.json");
+                match crate::nouns::snapshot::thin_and_seal(
+                    "/",
+                    claimed,
+                    thin_urgency,
+                    Some(&thin_receipt),
+                    None,
+                    false,
+                    "operator-invocation: `oclnr delete execute --thin-after` run directly by its caller",
+                ) {
+                    Ok(_) => println!("Snapshot-thin receipt: {}", thin_receipt.display()),
+                    Err(e) => println!("⚠️  --thin-after: snapshot thin failed: {e}"),
+                }
+            }
 
             // Sample free space once after execution; reuse for both the receipt
             // REALITY law and the printed delta below.

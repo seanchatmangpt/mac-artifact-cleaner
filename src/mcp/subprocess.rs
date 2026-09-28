@@ -79,6 +79,15 @@ fn resolve_oclnr_path(
 }
 
 /// Subprocess runner
+/// Optional knobs for `oclnr delete execute` beyond the required paths.
+#[derive(Debug, Clone, Copy)]
+pub struct DeleteRunOptions {
+    pub max_concurrent: Option<usize>,
+    pub timeout_secs: u32,
+    /// Pass `--thin-after` (only honoured together with `confirm`).
+    pub thin_after: bool,
+}
+
 pub struct OclnrRunner {
     oclnr_path: PathBuf,
 }
@@ -282,6 +291,26 @@ impl OclnrRunner {
         max_concurrent: Option<usize>,
         timeout_secs: u32,
     ) -> Result<SubprocessResult, ErrorResponse> {
+        self.delete_run_with(
+            workspace,
+            plan_file,
+            receipt_file,
+            confirm,
+            DeleteRunOptions { max_concurrent, timeout_secs, thin_after: false },
+        )
+    }
+
+    /// [`Self::delete_run`] with the optional `--thin-after` flag.
+    #[allow(clippy::result_large_err)]
+    pub fn delete_run_with(
+        &self,
+        workspace: &PathBuf,
+        plan_file: &PathBuf,
+        receipt_file: &PathBuf,
+        confirm: bool,
+        opts: DeleteRunOptions,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        let DeleteRunOptions { max_concurrent, timeout_secs, thin_after } = opts;
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("delete")
             .arg("execute")
@@ -298,6 +327,10 @@ impl OclnrRunner {
         }
         if let Some(n) = max_concurrent {
             cmd.arg("--max-concurrent").arg(n.to_string());
+        }
+        // Only meaningful with --yes (confirm); a dry run thins nothing.
+        if thin_after && confirm {
+            cmd.arg("--thin-after");
         }
 
         self.run_command_with_timeout(cmd, "oclnr delete execute", timeout_secs)
