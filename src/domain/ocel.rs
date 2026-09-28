@@ -322,15 +322,15 @@ pub fn build_disk_audit_ocel(
 ///     artifact::Candidate, audit::Stats, ocel::build_disk_audit_ocel_with_sizes,
 /// };
 ///
-/// let sized = PathBuf::from("/Users/t/a/target");
-/// let unsized_ = PathBuf::from("/Users/t/b/target");
+/// let sized = PathBuf::from("/work/a/target");
+/// let unsized_ = PathBuf::from("/work/b/target");
 /// let candidates = vec![
 ///     Candidate { path: sized.clone(), reason: "rust target".into() },
 ///     Candidate { path: unsized_.clone(), reason: "rust target".into() },
 /// ];
 /// let sizes = HashMap::from([(sized.clone(), 4096u64)]);
 /// let log = build_disk_audit_ocel_with_sizes(
-///     &[PathBuf::from("/Users/t")], &candidates, &[], &Stats::default(), &sizes,
+///     &[PathBuf::from("/work")], &candidates, &[], &Stats::default(), &sizes,
 /// );
 /// let json = serde_json::to_value(&log).unwrap();
 /// let bytes_of = |p: &PathBuf| {

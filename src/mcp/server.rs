@@ -2143,18 +2143,18 @@ mod tests {
 
         let mk = |p: &str| Candidate { path: PathBuf::from(p), reason: "rust target".into() };
         let candidates = vec![
-            mk("/Users/t/small/target"),
-            mk("/Users/t/big/target"),
-            mk("/Users/t/unsized/target"),
-            mk("/Users/t/mid/target"),
+            mk("/work/small/target"),
+            mk("/work/big/target"),
+            mk("/work/unsized/target"),
+            mk("/work/mid/target"),
         ];
         let sizes: HashMap<PathBuf, u64> = HashMap::from([
-            (PathBuf::from("/Users/t/small/target"), 10),
-            (PathBuf::from("/Users/t/big/target"), 3000),
-            (PathBuf::from("/Users/t/mid/target"), 500),
+            (PathBuf::from("/work/small/target"), 10),
+            (PathBuf::from("/work/big/target"), 3000),
+            (PathBuf::from("/work/mid/target"), 500),
         ]);
         let log = build_disk_audit_ocel_with_sizes(
-            &[PathBuf::from("/Users/t")],
+            &[PathBuf::from("/work")],
             &candidates,
             &[],
             &Stats::default(),
@@ -2171,9 +2171,9 @@ mod tests {
         assert_eq!(
             ranked,
             vec![
-                ("/Users/t/big/target".to_string(), 3000),
-                ("/Users/t/mid/target".to_string(), 500),
-                ("/Users/t/small/target".to_string(), 10),
+                ("/work/big/target".to_string(), 3000),
+                ("/work/mid/target".to_string(), 500),
+                ("/work/small/target".to_string(), 10),
             ],
             "ranked descending; the unsized candidate is excluded, not ranked as 0"
         );
@@ -2181,7 +2181,7 @@ mod tests {
 
         // A log with no recorded sizes yields an empty list, not an error.
         let bare = build_disk_audit_ocel_with_sizes(
-            &[PathBuf::from("/Users/t")],
+            &[PathBuf::from("/work")],
             &candidates,
             &[],
             &Stats::default(),
