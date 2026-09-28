@@ -395,6 +395,7 @@ pub fn scan_cache_revision_prefix() -> String {
 /// assert!(is_inside_package_store(Path::new("/Users/j/.cache/.bun/install/cache/yaml@2.9.0@@@1/dist")));
 /// assert!(is_inside_package_store(Path::new("/Users/j/.cache/pre-commit/repoabc/build")));
 /// assert!(is_inside_package_store(Path::new("/Users/j/.cache/act/actions-cache@v6/dist")));
+/// assert!(is_inside_package_store(Path::new("/Users/j/.npm/_npx/bf675e4b8f9df2c5/node_modules")));
 ///
 /// // Negative: ordinary project build outputs and scratch runs.
 /// assert!(!is_inside_package_store(Path::new("/Users/j/wasm4pm/target")));
@@ -407,6 +408,9 @@ pub fn scan_cache_revision_prefix() -> String {
 /// // nomination stays the job of `global_cache_candidates`.
 /// assert!(!is_inside_package_store(Path::new("/Users/j/.cargo/registry/src")));
 /// assert!(!is_inside_package_store(Path::new("/Users/j/go/pkg/mod")));
+/// assert!(!is_inside_package_store(Path::new("/Users/j/.npm/_npx")));
+/// // A project that merely has an `_npx` dir outside `.npm` is not a store.
+/// assert!(!is_inside_package_store(Path::new("/Users/j/proj/_npx/node_modules")));
 /// ```
 pub fn is_inside_package_store(path: &Path) -> bool {
     let comps: Vec<&str> = path.components().filter_map(|c| c.as_os_str().to_str()).collect();
@@ -423,6 +427,8 @@ pub fn is_inside_package_store(path: &Path) -> bool {
             ("site-packages" | "uv-cache", _) => Some(0),
             (".cache", Some("uv" | "pre-commit" | "act")) => Some(1),
             (".bun", Some("install")) => Some(2),
+            // npx's per-invocation package cache: ~/.npm/_npx/<hash>/node_modules.
+            (".npm", Some("_npx")) => Some(1),
             // Installed editor extensions: ~/.vscode/extensions, ~/.cursor/extensions, …
             (dot, Some("extensions")) if dot.starts_with('.') => Some(1),
             // Installed plugin caches: ~/.zcode/cli/plugins/cache, ~/.claude/plugins/cache, …
@@ -769,6 +775,7 @@ pub fn global_cache_candidates(home: &Path) -> Vec<(std::path::PathBuf, String)>
         (".cargo/registry/cache", "cargo registry cache (.crate)"),
         (".cargo/registry/src", "cargo registry unpacked sources"),
         (".npm/_cacache", "npm content cache"),
+        (".npm/_npx", "npx package cache (regenerated on demand)"),
         ("go/pkg/mod/cache", "go module download cache"),
     ]
     .iter()
