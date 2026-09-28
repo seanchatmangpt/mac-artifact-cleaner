@@ -300,6 +300,65 @@ pub fn build_disk_audit_ocel(
     tool_roots: &[crate::domain::tool_roots::ToolRootReport],
     stats: &crate::domain::audit::Stats,
 ) -> OCEL {
+    build_disk_audit_ocel_with_sizes(
+        roots,
+        candidates,
+        tool_roots,
+        stats,
+        &std::collections::HashMap::new(),
+    )
+}
+
+/// [`build_disk_audit_ocel`] plus per-candidate sizes measured by the caller
+/// (the domain cannot touch the filesystem). A candidate present in `sizes`
+/// gets a `bytes` attribute on its `artifact_candidate` object; one absent
+/// gets none — "not measured" is never written as 0.
+///
+/// # Examples
+///
+/// ```
+/// use std::{collections::HashMap, path::PathBuf};
+/// use osx_clnr::domain::{
+///     artifact::Candidate, audit::Stats, ocel::build_disk_audit_ocel_with_sizes,
+/// };
+///
+/// let sized = PathBuf::from("/Users/t/a/target");
+/// let unsized_ = PathBuf::from("/Users/t/b/target");
+/// let candidates = vec![
+///     Candidate { path: sized.clone(), reason: "rust target".into() },
+///     Candidate { path: unsized_.clone(), reason: "rust target".into() },
+/// ];
+/// let sizes = HashMap::from([(sized.clone(), 4096u64)]);
+/// let log = build_disk_audit_ocel_with_sizes(
+///     &[PathBuf::from("/Users/t")], &candidates, &[], &Stats::default(), &sizes,
+/// );
+/// let json = serde_json::to_value(&log).unwrap();
+/// let bytes_of = |p: &PathBuf| {
+///     json["objects"]
+///         .as_array()
+///         .unwrap()
+///         .iter()
+///         .filter(|o| o["type"] == "artifact_candidate")
+///         .find(|o| {
+///             o["attributes"].as_array().unwrap().iter().any(|a| {
+///                 a["name"] == "path" && a["value"] == p.display().to_string().as_str()
+///             })
+///         })
+///         .and_then(|o| o["attributes"].as_array().unwrap().iter().find(|a| a["name"] == "bytes"))
+///         .map(|a| a["value"].clone())
+/// };
+/// // Positive: the measured candidate carries its bytes.
+/// assert_eq!(bytes_of(&sized), Some(serde_json::json!(4096)));
+/// // Refusal: an unmeasured candidate carries no bytes attribute (not 0).
+/// assert_eq!(bytes_of(&unsized_), None);
+/// ```
+pub fn build_disk_audit_ocel_with_sizes(
+    roots: &[std::path::PathBuf],
+    candidates: &[crate::domain::artifact::Candidate],
+    tool_roots: &[crate::domain::tool_roots::ToolRootReport],
+    stats: &crate::domain::audit::Stats,
+    sizes: &std::collections::HashMap<std::path::PathBuf, u64>,
+) -> OCEL {
     let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap());
     let audit_obj_id = format!("audit-{}", chrono::Utc::now().timestamp());
 
@@ -399,10 +458,16 @@ pub fn build_disk_audit_ocel(
         objects.push(OCELObject {
             id: cand_obj_id.clone(),
             object_type: "artifact_candidate".to_string(),
-            attributes: vec![
-                timed_attr("path", &now, serde_json::json!(path_str)),
-                timed_attr("reason", &now, serde_json::json!(c.reason)),
-            ],
+            attributes: {
+                let mut attrs = vec![
+                    timed_attr("path", &now, serde_json::json!(path_str)),
+                    timed_attr("reason", &now, serde_json::json!(c.reason)),
+                ];
+                if let Some(bytes) = sizes.get(&c.path) {
+                    attrs.push(timed_attr("bytes", &now, serde_json::json!(bytes)));
+                }
+                attrs
+            },
             relationships: vec![OCELRelationship {
                 object_id: fs_obj_id.clone(),
                 qualifier: "corresponds-to-fs-obj".to_string(),
@@ -557,7 +622,11 @@ pub fn build_disk_audit_ocel(
             },
             OCELType {
                 name: "artifact_candidate".to_string(),
-                attributes: vec![attr_def("path", "string"), attr_def("reason", "string")],
+                attributes: vec![
+                    attr_def("path", "string"),
+                    attr_def("reason", "string"),
+                    attr_def("bytes", "integer"),
+                ],
             },
             OCELType {
                 name: "tool_root".to_string(),

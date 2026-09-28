@@ -7,12 +7,13 @@ use std::{
 
 use clap::Subcommand;
 use dashmap::DashMap;
+use rayon::prelude::*;
 
 use crate::{
     domain::{
         artifact::{ArgsSnapshot, Candidate},
         audit::Stats,
-        ocel::build_disk_audit_ocel,
+        ocel::build_disk_audit_ocel_with_sizes,
         tool_roots::{build_tool_root_defs, build_tool_root_report, ToolRootAcc, ToolRootReport},
     },
     integration::{
@@ -214,7 +215,24 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             }
 
             if let Some(o_path) = ocel_output {
-                let log = build_disk_audit_ocel(&roots, &candidates, &tool_reports, &stats);
+                // Measure each candidate (physical size via `du`, in parallel) so
+                // the log — and the MCP scan summary built from it — can rank
+                // the largest. A `du` failure leaves that candidate unsized.
+                let sizes: std::collections::HashMap<PathBuf, u64> = candidates
+                    .par_iter()
+                    .filter_map(|c| {
+                        crate::integration::progress::du_bytes(&c.path)
+                            .ok()
+                            .map(|b| (c.path.clone(), b))
+                    })
+                    .collect();
+                let log = build_disk_audit_ocel_with_sizes(
+                    &roots,
+                    &candidates,
+                    &tool_reports,
+                    &stats,
+                    &sizes,
+                );
                 let serialized = serde_json::to_string_pretty(&log)?;
                 let (_outcome, ledger) =
                     write_output_file(&o_path, &serialized, redact, "disk audit OCEL log")?;

@@ -630,77 +630,7 @@ impl OsxClnrMcpServer {
         // real `artifact_candidate` objects (joined to their `filesystem_object`
         // for kind) out of the parsed OCEL log, instead of fabricating an empty
         // candidate list.
-        let objects = parsed.get("objects").and_then(|v| v.as_array());
-
-        let fs_kind_by_id: HashMap<String, String> = objects
-            .map(|objs| {
-                objs.iter()
-                    .filter(|o| o.get("type").and_then(|t| t.as_str()) == Some("filesystem_object"))
-                    .filter_map(|o| {
-                        let id = o.get("id")?.as_str()?.to_string();
-                        let kind = o
-                            .get("attributes")
-                            .and_then(|a| a.as_array())
-                            .and_then(|attrs| {
-                                attrs.iter().find(|a| {
-                                    a.get("name").and_then(|n| n.as_str()) == Some("kind")
-                                })
-                            })
-                            .and_then(|a| a.get("value").and_then(|v| v.as_str()))
-                            .unwrap_or("file")
-                            .to_string();
-                        Some((id, kind))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let mut all_candidates: Vec<Candidate> = objects
-            .map(|objs| {
-                objs.iter()
-                    .filter(|o| {
-                        o.get("type").and_then(|t| t.as_str()) == Some("artifact_candidate")
-                    })
-                    .filter_map(|o| {
-                        let attrs = o.get("attributes").and_then(|a| a.as_array())?;
-                        let get_attr = |name: &str| -> Option<String> {
-                            attrs
-                                .iter()
-                                .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name))
-                                .and_then(|a| a.get("value").and_then(|v| v.as_str()))
-                                .map(|s| s.to_string())
-                        };
-                        let path = get_attr("path")?;
-                        let reason = get_attr("reason").unwrap_or_default();
-
-                        let fs_obj_id = o
-                            .get("relationships")
-                            .and_then(|r| r.as_array())
-                            .and_then(|rels| rels.first())
-                            .and_then(|r| r.get("objectId").and_then(|v| v.as_str()));
-                        let kind = fs_obj_id
-                            .and_then(|id| fs_kind_by_id.get(id))
-                            .map(|k| k.as_str())
-                            .unwrap_or("file");
-
-                        Some(Candidate {
-                            path: PathBuf::from(path),
-                            kind: if kind == "directory" {
-                                ArtifactKind::Dir
-                            } else {
-                                ArtifactKind::File
-                            },
-                            // Per-candidate byte counts are not recorded in the
-                            // disk-audit OCEL log (only aggregate `bytes_seen`
-                            // is), so this is honestly 0 rather than fabricated.
-                            bytes: 0,
-                            reason,
-                            project_type: ProjectType::Generic,
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut all_candidates = artifact_candidates_from_ocel(&parsed);
 
         if let Some(reason_filter) = filter_reason {
             all_candidates.retain(|c| c.reason == reason_filter);
@@ -708,6 +638,8 @@ impl OsxClnrMcpServer {
 
         let total_candidates = all_candidates.len();
         let total_bytes: u64 = all_candidates.iter().map(|c| c.bytes).sum();
+        // Largest first (stable: logs without recorded bytes keep file order).
+        all_candidates.sort_by_key(|c| std::cmp::Reverse(c.bytes));
         all_candidates.truncate(top_n);
 
         Ok(json!({
@@ -2065,6 +1997,86 @@ impl OsxClnrMcpServer {
     }
 }
 
+/// Pulls real `artifact_candidate` objects (joined to their `filesystem_object`
+/// for kind, carrying the per-candidate `bytes` attribute when the audit run
+/// recorded it) out of a parsed disk-audit OCEL log.
+fn artifact_candidates_from_ocel(parsed: &Value) -> Vec<Candidate> {
+    let objects = parsed.get("objects").and_then(|v| v.as_array());
+
+    let fs_kind_by_id: HashMap<String, String> = objects
+        .map(|objs| {
+            objs.iter()
+                .filter(|o| o.get("type").and_then(|t| t.as_str()) == Some("filesystem_object"))
+                .filter_map(|o| {
+                    let id = o.get("id")?.as_str()?.to_string();
+                    let kind = o
+                        .get("attributes")
+                        .and_then(|a| a.as_array())
+                        .and_then(|attrs| {
+                            attrs
+                                .iter()
+                                .find(|a| a.get("name").and_then(|n| n.as_str()) == Some("kind"))
+                        })
+                        .and_then(|a| a.get("value").and_then(|v| v.as_str()))
+                        .unwrap_or("file")
+                        .to_string();
+                    Some((id, kind))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    objects
+        .map(|objs| {
+            objs.iter()
+                .filter(|o| o.get("type").and_then(|t| t.as_str()) == Some("artifact_candidate"))
+                .filter_map(|o| {
+                    let attrs = o.get("attributes").and_then(|a| a.as_array())?;
+                    let get_attr = |name: &str| -> Option<String> {
+                        attrs
+                            .iter()
+                            .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name))
+                            .and_then(|a| a.get("value").and_then(|v| v.as_str()))
+                            .map(|s| s.to_string())
+                    };
+                    let path = get_attr("path")?;
+                    let reason = get_attr("reason").unwrap_or_default();
+                    let bytes = attrs
+                        .iter()
+                        .find(|a| a.get("name").and_then(|n| n.as_str()) == Some("bytes"))
+                        .and_then(|a| a.get("value").and_then(|v| v.as_u64()))
+                        .unwrap_or(0);
+
+                    let fs_obj_id = o
+                        .get("relationships")
+                        .and_then(|r| r.as_array())
+                        .and_then(|rels| rels.first())
+                        .and_then(|r| r.get("objectId").and_then(|v| v.as_str()));
+                    let kind = fs_obj_id
+                        .and_then(|id| fs_kind_by_id.get(id))
+                        .map(|k| k.as_str())
+                        .unwrap_or("file");
+
+                    Some(Candidate {
+                        path: PathBuf::from(path),
+                        kind: if kind == "directory" {
+                            ArtifactKind::Dir
+                        } else {
+                            ArtifactKind::File
+                        },
+                        // Recorded per candidate by newer audit runs; logs
+                        // written before that carry no `bytes` attribute,
+                        // and 0 there is "not recorded", not a measurement.
+                        bytes,
+                        reason,
+                        project_type: ProjectType::Generic,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Extracts audit summary fields from a parsed disk-audit OCEL log.
 fn summarize_disk_audit_ocel(log: &Value, scan_duration_secs: f64) -> AuditSummary {
     let objects = log.get("objects").and_then(|v| v.as_array());
@@ -2096,10 +2108,21 @@ fn summarize_disk_audit_ocel(log: &Value, scan_duration_secs: f64) -> AuditSumma
         total_bytes: disk_audit_attr("bytes_seen"),
         total_candidates,
         projects_detected: HashMap::new(),
-        largest_candidates: vec![],
+        largest_candidates: largest_candidates(log, 10),
         errors: vec![],
         scan_duration_secs,
     }
+}
+
+/// Top `n` audit candidates by recorded bytes. Candidates without a recorded
+/// size (older logs, or a `du` failure) are excluded rather than ranked as 0,
+/// so a log with no sizes yields an empty list, never a misleading one.
+fn largest_candidates(log: &Value, n: usize) -> Vec<Candidate> {
+    let mut sized: Vec<Candidate> =
+        artifact_candidates_from_ocel(log).into_iter().filter(|c| c.bytes > 0).collect();
+    sized.sort_by_key(|c| std::cmp::Reverse(c.bytes));
+    sized.truncate(n);
+    sized
 }
 
 #[cfg(test)]
@@ -2110,6 +2133,62 @@ mod tests {
     fn test_server_creation() {
         let server = OsxClnrMcpServer::new(PathBuf::from("/tmp"));
         assert!(server.is_ok());
+    }
+
+    #[test]
+    fn largest_candidates_are_ranked_by_recorded_bytes_and_skip_unsized() {
+        use crate::domain::{
+            artifact::Candidate, audit::Stats, ocel::build_disk_audit_ocel_with_sizes,
+        };
+
+        let mk = |p: &str| Candidate { path: PathBuf::from(p), reason: "rust target".into() };
+        let candidates = vec![
+            mk("/Users/t/small/target"),
+            mk("/Users/t/big/target"),
+            mk("/Users/t/unsized/target"),
+            mk("/Users/t/mid/target"),
+        ];
+        let sizes: HashMap<PathBuf, u64> = HashMap::from([
+            (PathBuf::from("/Users/t/small/target"), 10),
+            (PathBuf::from("/Users/t/big/target"), 3000),
+            (PathBuf::from("/Users/t/mid/target"), 500),
+        ]);
+        let log = build_disk_audit_ocel_with_sizes(
+            &[PathBuf::from("/Users/t")],
+            &candidates,
+            &[],
+            &Stats::default(),
+            &sizes,
+        );
+        let value = serde_json::to_value(&log).unwrap();
+
+        let summary = summarize_disk_audit_ocel(&value, 0.0);
+        let ranked: Vec<(String, u64)> = summary
+            .largest_candidates
+            .iter()
+            .map(|c| (c.path.display().to_string(), c.bytes))
+            .collect();
+        assert_eq!(
+            ranked,
+            vec![
+                ("/Users/t/big/target".to_string(), 3000),
+                ("/Users/t/mid/target".to_string(), 500),
+                ("/Users/t/small/target".to_string(), 10),
+            ],
+            "ranked descending; the unsized candidate is excluded, not ranked as 0"
+        );
+        assert_eq!(summary.total_candidates, 4);
+
+        // A log with no recorded sizes yields an empty list, not an error.
+        let bare = build_disk_audit_ocel_with_sizes(
+            &[PathBuf::from("/Users/t")],
+            &candidates,
+            &[],
+            &Stats::default(),
+            &HashMap::new(),
+        );
+        let bare_summary = summarize_disk_audit_ocel(&serde_json::to_value(&bare).unwrap(), 0.0);
+        assert!(bare_summary.largest_candidates.is_empty());
     }
 
     #[test]
