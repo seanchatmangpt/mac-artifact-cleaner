@@ -1264,3 +1264,36 @@ fn test_verify_snapshot_pinned_shortfall_is_informational_only_with_snapshots() 
     assert!(!bare.is_consistent);
     assert!(bare.issues.iter().any(|i| i.issue_type == IssueType::BytesFreedMismatch));
 }
+
+#[test]
+fn test_snapshot_thin_receipt_iterations_are_backward_compatible() {
+    use osx_clnr::domain::time::{SnapshotThinReceipt, ThinIteration};
+
+    // A receipt sealed before iterative thinning existed has no `iterations`
+    // key. It must still parse, and re-serialize byte-identically (its sealed
+    // chain hash is computed over this serialization).
+    let legacy = serde_json::json!({
+        "volume": "/",
+        "requested_bytes": 1000,
+        "timestamp_unix": 1716768000,
+        "snapshots_before": ["a", "b"],
+        "snapshots_after": ["b"],
+        "snapshots_thinned": ["a"]
+    });
+    let parsed: SnapshotThinReceipt = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(parsed.iterations.is_empty());
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), legacy);
+
+    // A receipt with iterations round-trips them.
+    let mut r = parsed;
+    r.iterations = vec![ThinIteration {
+        iteration: 1,
+        snapshots_before_count: 2,
+        snapshots_after_count: 1,
+        free_bytes_before: Some(10),
+        free_bytes_after: None,
+    }];
+    let back: SnapshotThinReceipt =
+        serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+    assert_eq!(back, r);
+}

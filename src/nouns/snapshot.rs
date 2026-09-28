@@ -9,7 +9,7 @@ use crate::{
         ocel::{build_snapshot_audit_ocel, build_snapshot_delete_ocel, build_snapshot_thin_ocel},
         time::{
             parse_size_in_bytes, select_oldest_snapshots, select_snapshots_to_keep_latest,
-            SnapshotThinReceipt,
+            should_continue_thinning, SnapshotThinReceipt, ThinIteration, MAX_THIN_ITERATIONS,
         },
     },
     integration::{
@@ -171,23 +171,62 @@ pub fn thin_and_seal(
     );
 
     let before = list_local_snapshots(mount)?;
-    let output = thin_local_snapshots(mount, parsed_bytes, urgency)?;
-    println!("{}", output);
 
-    let after = list_local_snapshots(mount)?;
+    // One pass can release only some snapshots, so iterate while the last pass
+    // made progress (see `should_continue_thinning`). Free space is sampled per
+    // pass when the mount is statvfs-able; an unsampled pass never counts as
+    // "target met".
+    let free_now = || volume_space(Path::new(mount)).ok().map(|v| v.available);
+    let free_start = free_now();
+    let mut iterations: Vec<ThinIteration> = Vec::new();
+    let mut current = before.clone();
+    let mut iteration: u32 = 0;
+    loop {
+        iteration += 1;
+        let pass_free_before = free_now();
+        let output = thin_local_snapshots(mount, parsed_bytes, urgency)?;
+        println!("{}", output);
+        let pass_after = list_local_snapshots(mount)?;
+        let pass_free_after = free_now();
+        iterations.push(ThinIteration {
+            iteration,
+            snapshots_before_count: current.len(),
+            snapshots_after_count: pass_after.len(),
+            free_bytes_before: pass_free_before,
+            free_bytes_after: pass_free_after,
+        });
+        let free_delta = match (free_start, pass_free_after) {
+            (Some(a), Some(b)) => Some(b.saturating_sub(a)),
+            _ => None,
+        };
+        let go = should_continue_thinning(
+            iteration,
+            MAX_THIN_ITERATIONS,
+            current.len(),
+            pass_after.len(),
+            free_delta,
+            parsed_bytes,
+        );
+        current = pass_after;
+        if !go {
+            break;
+        }
+    }
+    let after = current;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
 
-    let receipt_obj = SnapshotThinReceipt::new(
+    let mut receipt_obj = SnapshotThinReceipt::new(
         mount.to_string(),
         parsed_bytes,
         now,
         before.clone(),
         after.clone(),
     );
+    receipt_obj.iterations = iterations;
 
     println!("Thinned {} snapshots successfully.", receipt_obj.snapshots_thinned.len());
     for s in &receipt_obj.snapshots_thinned {

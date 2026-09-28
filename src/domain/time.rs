@@ -289,6 +289,64 @@ pub struct SnapshotThinReceipt {
     pub snapshots_before: Vec<String>,
     pub snapshots_after: Vec<String>,
     pub snapshots_thinned: Vec<String>,
+    /// One entry per `tmutil thinlocalsnapshots` pass. Empty for receipts
+    /// written before iterative thinning existed; omitted from the serialized
+    /// form when empty so those receipts (and their sealed chain hashes)
+    /// round-trip byte-identically.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub iterations: Vec<ThinIteration>,
+}
+
+/// One `tmutil thinlocalsnapshots` pass: snapshot counts and (when sampled)
+/// free bytes on the volume before and after.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ThinIteration {
+    pub iteration: u32,
+    pub snapshots_before_count: usize,
+    pub snapshots_after_count: usize,
+    pub free_bytes_before: Option<u64>,
+    pub free_bytes_after: Option<u64>,
+}
+
+/// Default cap on thinning passes per `thin_and_seal` call.
+pub const MAX_THIN_ITERATIONS: u32 = 5;
+
+/// Whether another `tmutil thinlocalsnapshots` pass is worth running.
+///
+/// One pass can release only some snapshots (observed 2026-09-28: a 60 GB
+/// request thinned 2 of 7, and a second identical call thinned the other 5).
+/// Continue only while the last pass made progress, snapshots remain, the
+/// requested reclaim is not yet visible in free space, and the cap is not hit.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::time::should_continue_thinning;
+/// // Positive: progress was made, snapshots remain, target not yet met.
+/// assert!(should_continue_thinning(1, 5, 7, 5, Some(0), 60_000_000_000));
+/// // Refusal: no progress this pass.
+/// assert!(!should_continue_thinning(2, 5, 5, 5, Some(0), 60_000_000_000));
+/// // Refusal: nothing left to thin.
+/// assert!(!should_continue_thinning(1, 5, 7, 0, Some(0), 60_000_000_000));
+/// // Refusal: requested reclaim is now visible in free space.
+/// assert!(!should_continue_thinning(1, 5, 7, 5, Some(60_000_000_000), 60_000_000_000));
+/// // Refusal: iteration cap reached.
+/// assert!(!should_continue_thinning(5, 5, 7, 5, Some(0), 60_000_000_000));
+/// // Unknown free-space delta never counts as "target met".
+/// assert!(should_continue_thinning(1, 5, 7, 5, None, 60_000_000_000));
+/// ```
+pub fn should_continue_thinning(
+    iteration: u32,
+    cap: u32,
+    snapshots_before_count: usize,
+    snapshots_after_count: usize,
+    free_delta_bytes: Option<u64>,
+    requested_bytes: u64,
+) -> bool {
+    iteration < cap
+        && snapshots_after_count > 0
+        && snapshots_after_count < snapshots_before_count
+        && free_delta_bytes.is_none_or(|d| d < requested_bytes)
 }
 
 impl SnapshotThinReceipt {
@@ -334,6 +392,7 @@ impl SnapshotThinReceipt {
             snapshots_before,
             snapshots_after,
             snapshots_thinned,
+            iterations: Vec::new(),
         }
     }
 }
