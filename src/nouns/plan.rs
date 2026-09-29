@@ -10,7 +10,7 @@ use crate::{
     domain::{
         artifact::{ArgsSnapshot, Candidate},
         audit::Stats,
-        dcm::{classify_reversibility, Reversibility},
+        dcm::{classify_reversibility_at, Reversibility},
         plan::{DeletionPlan, PlanItem, PlanItemKind},
         tool_roots::build_tool_root_defs,
     },
@@ -256,7 +256,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                         | PlanItemKind::GithubReleaseAsset => 0,
                     };
 
-                    let reversibility = classify_reversibility(kind, &c.reason);
+                    let reversibility = classify_reversibility_at(kind, &c.reason, &c.path);
                     PlanItem {
                         path: c.path.clone(),
                         kind,
