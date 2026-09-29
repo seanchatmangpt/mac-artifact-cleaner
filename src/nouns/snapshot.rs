@@ -9,7 +9,7 @@ use crate::{
         ocel::{build_snapshot_audit_ocel, build_snapshot_delete_ocel, build_snapshot_thin_ocel},
         time::{
             parse_size_in_bytes, select_oldest_snapshots, select_snapshots_to_keep_latest,
-            should_continue_thinning, SnapshotThinReceipt, ThinIteration, MAX_THIN_ITERATIONS,
+            thin_stop_reason, SnapshotThinReceipt, ThinIteration, MAX_THIN_ITERATIONS,
         },
     },
     integration::{
@@ -194,12 +194,13 @@ pub fn thin_and_seal(
             snapshots_after_count: pass_after.len(),
             free_bytes_before: pass_free_before,
             free_bytes_after: pass_free_after,
+            stop_reason: None,
         });
         let free_delta = match (free_start, pass_free_after) {
             (Some(a), Some(b)) => Some(b.saturating_sub(a)),
             _ => None,
         };
-        let go = should_continue_thinning(
+        let stop = thin_stop_reason(
             iteration,
             MAX_THIN_ITERATIONS,
             current.len(),
@@ -207,6 +208,10 @@ pub fn thin_and_seal(
             free_delta,
             parsed_bytes,
         );
+        if let (Some(reason), Some(last)) = (stop, iterations.last_mut()) {
+            last.stop_reason = Some(reason.to_string());
+        }
+        let go = stop.is_none();
         current = pass_after;
         if !go {
             break;

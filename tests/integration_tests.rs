@@ -1292,6 +1292,7 @@ fn test_snapshot_thin_receipt_iterations_are_backward_compatible() {
         snapshots_after_count: 1,
         free_bytes_before: Some(10),
         free_bytes_after: None,
+        stop_reason: Some("nothing_left".to_string()),
     }];
     let back: SnapshotThinReceipt =
         serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();

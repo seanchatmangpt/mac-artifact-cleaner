@@ -306,6 +306,10 @@ pub struct ThinIteration {
     pub snapshots_after_count: usize,
     pub free_bytes_before: Option<u64>,
     pub free_bytes_after: Option<u64>,
+    /// Why the loop stopped after this pass (`None` on passes that continued).
+    /// One of `iteration_cap`, `nothing_left`, `no_progress`, `target_met`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
 }
 
 /// Default cap on thinning passes per `thin_and_seal` call.
@@ -343,10 +347,50 @@ pub fn should_continue_thinning(
     free_delta_bytes: Option<u64>,
     requested_bytes: u64,
 ) -> bool {
-    iteration < cap
-        && snapshots_after_count > 0
-        && snapshots_after_count < snapshots_before_count
-        && free_delta_bytes.is_none_or(|d| d < requested_bytes)
+    thin_stop_reason(
+        iteration,
+        cap,
+        snapshots_before_count,
+        snapshots_after_count,
+        free_delta_bytes,
+        requested_bytes,
+    )
+    .is_none()
+}
+
+/// Why thinning should stop after a pass, or `None` to run another.
+/// Checked in a fixed order: cap, nothing left, no progress, target met.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::time::thin_stop_reason;
+/// assert_eq!(thin_stop_reason(5, 5, 7, 5, Some(0), 100), Some("iteration_cap"));
+/// assert_eq!(thin_stop_reason(1, 5, 7, 0, Some(0), 100), Some("nothing_left"));
+/// assert_eq!(thin_stop_reason(2, 5, 5, 5, Some(0), 100), Some("no_progress"));
+/// assert_eq!(thin_stop_reason(1, 5, 7, 5, Some(100), 100), Some("target_met"));
+/// // Continue: progress, snapshots remain, target not met.
+/// assert_eq!(thin_stop_reason(1, 5, 7, 5, Some(0), 100), None);
+/// ```
+pub fn thin_stop_reason(
+    iteration: u32,
+    cap: u32,
+    snapshots_before_count: usize,
+    snapshots_after_count: usize,
+    free_delta_bytes: Option<u64>,
+    requested_bytes: u64,
+) -> Option<&'static str> {
+    if iteration >= cap {
+        Some("iteration_cap")
+    } else if snapshots_after_count == 0 {
+        Some("nothing_left")
+    } else if snapshots_after_count >= snapshots_before_count {
+        Some("no_progress")
+    } else if free_delta_bytes.is_some_and(|d| d >= requested_bytes) {
+        Some("target_met")
+    } else {
+        None
+    }
 }
 
 impl SnapshotThinReceipt {

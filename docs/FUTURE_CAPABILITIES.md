@@ -19,7 +19,7 @@ the capability another way.
 | Spotlight metadata | `mdquery-rs` | open | not in `Cargo.toml` |
 | Plist / bundle analysis | `plist`, `goblin` | open | not in `Cargo.toml` |
 | Homebrew graph | `homebrew` | partial | `src/integration/brew.rs` exists; no orphan-cache graph walk |
-| launchd orphan scan | `persistence` | partial | `daemon` preflight checks the plists it installs (`src/nouns/daemon.rs`); no scan of foreign LaunchAgents |
+| launchd orphan scan | `persistence` | done (CLI) | `oclnr tools launchd-orphans` (`src/domain/launchd_orphans.rs`, `src/integration/launchd_scan.rs`); read-only, `plutil`-based, no crate; no MCP exposure |
 | Unified logs / endpoint-sec | `macos-unifiedlogs`, `endpoint-sec` | open | not in `Cargo.toml`; `endpoint-sec` needs an Apple entitlement |
 
 ---
