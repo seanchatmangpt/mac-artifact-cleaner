@@ -171,6 +171,7 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
             println!("  Errors encountered:  {}", errors);
             println!("==================================================");
 
+            let phase_start = std::time::Instant::now();
             let mut candidate_vec: Vec<Candidate> =
                 candidates.iter().map(|e| e.value().clone()).collect();
 
@@ -203,6 +204,13 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                 .filter(|c| !crate::integration::git_tracked::contains_git_tracked_files(&c.path))
                 .collect();
 
+            if verbose {
+                eprintln!(
+                    "[timing] git-tracked filter: {} candidates kept, {:.2}s since candidates collected",
+                    candidate_vec.len(),
+                    phase_start.elapsed().as_secs_f64()
+                );
+            }
             candidate_vec.sort();
 
             // Optionally nominate large user-level caches the per-project scanner
@@ -266,6 +274,14 @@ pub fn handle(action: PlanAction) -> anyhow::Result<()> {
                     }
                 })
                 .collect();
+
+            if verbose {
+                eprintln!(
+                    "[timing] sizing done: {} candidates, {:.2}s since candidates collected",
+                    items.len(),
+                    phase_start.elapsed().as_secs_f64()
+                );
+            }
 
             // Drop zero-byte file/dir candidates (mostly near-empty AI-tool temp
             // folders like `.claude/tmp`) — they aren't worth reasoning about or

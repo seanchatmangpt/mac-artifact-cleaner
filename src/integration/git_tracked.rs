@@ -23,6 +23,16 @@ pub fn contains_git_tracked_files(path: &Path) -> bool {
     if !parent.is_dir() {
         return false;
     }
+    // Cheap pre-check: git can only report tracked files inside a work tree,
+    // and a work tree is discovered via a `.git` entry (directory, or a file
+    // for worktrees/submodules) in an ancestor. Most scan candidates (caches,
+    // `node_modules` under non-repo dirs) have none, so skip spawning a
+    // process for them — a plan over ~1,000 candidates otherwise forks `git`
+    // ~1,000 times. An explicit `GIT_DIR` bypasses discovery, so keep the
+    // spawn there.
+    if std::env::var_os("GIT_DIR").is_none() && !has_git_ancestor(parent) {
+        return false;
+    }
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(parent)
@@ -33,6 +43,25 @@ pub fn contains_git_tracked_files(path: &Path) -> bool {
         Ok(o) if o.status.success() => !o.stdout.is_empty(),
         _ => false,
     }
+}
+
+/// Whether `dir` or any ancestor holds a `.git` entry (directory or file).
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::integration::git_tracked::has_git_ancestor;
+/// let dir = tempfile::tempdir().unwrap();
+/// let inner = dir.path().join("a/b");
+/// std::fs::create_dir_all(&inner).unwrap();
+/// // Refusal: no `.git` anywhere under the tempdir (assumes /tmp isn't a repo).
+/// assert!(!has_git_ancestor(&inner) || dir.path().ancestors().any(|a| a.join(".git").exists()));
+/// // Positive: a `.git` *file* (worktree/submodule style) in an ancestor counts.
+/// std::fs::write(dir.path().join(".git"), "gitdir: /elsewhere").unwrap();
+/// assert!(has_git_ancestor(&inner));
+/// ```
+pub fn has_git_ancestor(dir: &Path) -> bool {
+    dir.ancestors().any(|a| a.join(".git").exists())
 }
 
 #[cfg(test)]

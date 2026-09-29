@@ -215,15 +215,24 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             }
 
             if let Some(o_path) = ocel_output {
-                // Measure each candidate (physical size via `du`, in parallel) so
-                // the log — and the MCP scan summary built from it — can rank
-                // the largest. A `du` failure leaves that candidate unsized.
+                // Measure each candidate in-process (hardlink-aware physical size,
+                // the same `physical_dir_size` plan build uses, so audit and plan
+                // agree), one serial walk per rayon worker — no `du` fork per
+                // candidate. Files use their own block count.
                 let sizes: std::collections::HashMap<PathBuf, u64> = candidates
                     .par_iter()
-                    .filter_map(|c| {
-                        crate::integration::progress::du_bytes(&c.path)
-                            .ok()
-                            .map(|b| (c.path.clone(), b))
+                    .map(|c| {
+                        let bytes = if c.path.is_file() {
+                            std::fs::symlink_metadata(&c.path)
+                                .map(|m| {
+                                    use std::os::unix::fs::MetadataExt;
+                                    m.blocks() * 512
+                                })
+                                .unwrap_or(0)
+                        } else {
+                            crate::integration::fs::physical_dir_size(&c.path)
+                        };
+                        (c.path.clone(), bytes)
                     })
                     .collect();
                 let log = build_disk_audit_ocel_with_sizes(
