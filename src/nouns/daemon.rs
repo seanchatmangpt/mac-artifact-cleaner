@@ -116,7 +116,7 @@ pub(crate) fn pressure_plist_path() -> PathBuf {
 /// use std::path::Path;
 ///
 /// let plist = generate_pressure_plist(
-///     "/usr/local/bin/oclnr", 20.0, 60, "snapshots,builds", Path::new("/Users/me/Library/Logs/oclnr"),
+///     "/usr/local/bin/oclnr", 20.0, 60, "snapshots,builds", Path::new("/h/me/Library/Logs/oclnr"),
 /// );
 ///
 /// // Positive: label, watch loop, threshold, interval, strategies, keep-alive.
@@ -127,7 +127,7 @@ pub(crate) fn pressure_plist_path() -> PathBuf {
 /// assert!(plist.contains("<string>--interval-secs</string>\n        <string>60</string>"));
 /// assert!(plist.contains("<string>--reclaim</string>\n        <string>snapshots,builds</string>"));
 /// assert!(plist.contains("<key>KeepAlive</key>"));
-/// assert!(plist.contains("/Users/me/Library/Logs/oclnr/pressure-launchd.log"));
+/// assert!(plist.contains("/h/me/Library/Logs/oclnr/pressure-launchd.log"));
 ///
 /// // Negative: it is not the re-fired monitor shape.
 /// assert!(!plist.contains("StartInterval"));

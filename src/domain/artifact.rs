@@ -359,6 +359,28 @@ pub fn scan_cache_fingerprint(args: &ArgsSnapshot) -> String {
 /// The ruleset-identity prefix shared by every current scan-cache namespace.
 /// Namespaces not starting with this prefix were written by an older
 /// classifier and are safe to drop wholesale.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::scan_cache_revision_prefix;
+///
+/// let prefix = scan_cache_revision_prefix();
+///
+/// // Positive: carries the classifier revision and the crate version.
+/// assert!(prefix.starts_with("scan-r"));
+/// assert!(prefix.contains(&format!("-v{}-", env!("CARGO_PKG_VERSION"))));
+/// assert!(prefix.ends_with('-'));
+///
+/// // Negative: a legacy, unversioned namespace does not carry the prefix.
+/// assert!(!"d0a0t0".starts_with(&prefix));
+/// assert!(!"scan-r0-v0.0.0-d0a0t0".starts_with(&prefix));
+///
+/// // Refusal: the prefix is deterministic, so a namespace written by the
+/// // current ruleset is always recognised as current.
+/// assert_eq!(prefix, scan_cache_revision_prefix());
+/// assert!(format!("{prefix}d0a0t0").starts_with(&scan_cache_revision_prefix()));
+/// ```
 pub fn scan_cache_revision_prefix() -> String {
     format!("scan-r{}-v{}-", CLASSIFIER_REVISION, env!("CARGO_PKG_VERSION"))
 }
@@ -382,35 +404,35 @@ pub fn scan_cache_revision_prefix() -> String {
 /// use std::path::Path;
 ///
 /// // Positive: sub-paths of unpacked package stores and app bundles.
-/// assert!(is_inside_package_store(Path::new("/Users/j/.cargo/registry/src/index.crates.io-1/otel-0.31.0/src/logs")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.cargo/git/checkouts/foo-1/abc/target")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/go/pkg/mod/github.com/x/y@v1/logs")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/proj/.venv/lib/python3.13/site-packages/fastapi/.agents")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.cache/uv/archive-v0/abc/typer/.agents")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/x/toolchain/uv-cache/archive-v0/abc/fastapi/.agents")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/Applications/Z.app/Contents/Resources/p/node_modules")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.vscode/extensions/antfu.slidev-53.0.0/dist")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.cursor/extensions/vitest.explorer-1.52.0/dist")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.zcode/cli/plugins/cache/official/computer-use/0.5.14/node_modules")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.cache/.bun/install/cache/yaml@2.9.0@@@1/dist")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.cache/pre-commit/repoabc/build")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.cache/act/actions-cache@v6/dist")));
-/// assert!(is_inside_package_store(Path::new("/Users/j/.npm/_npx/bf675e4b8f9df2c5/node_modules")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.cargo/registry/src/index.crates.io-1/otel-0.31.0/src/logs")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.cargo/git/checkouts/foo-1/abc/target")));
+/// assert!(is_inside_package_store(Path::new("/h/j/go/pkg/mod/github.com/x/y@v1/logs")));
+/// assert!(is_inside_package_store(Path::new("/h/j/proj/.venv/lib/python3.13/site-packages/fastapi/.agents")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.cache/uv/archive-v0/abc/typer/.agents")));
+/// assert!(is_inside_package_store(Path::new("/h/j/x/toolchain/uv-cache/archive-v0/abc/fastapi/.agents")));
+/// assert!(is_inside_package_store(Path::new("/h/j/Applications/Z.app/Contents/Resources/p/node_modules")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.vscode/extensions/antfu.slidev-53.0.0/dist")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.cursor/extensions/vitest.explorer-1.52.0/dist")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.zcode/cli/plugins/cache/official/computer-use/0.5.14/node_modules")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.cache/.bun/install/cache/yaml@2.9.0@@@1/dist")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.cache/pre-commit/repoabc/build")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.cache/act/actions-cache@v6/dist")));
+/// assert!(is_inside_package_store(Path::new("/h/j/.npm/_npx/bf675e4b8f9df2c5/node_modules")));
 ///
 /// // Negative: ordinary project build outputs and scratch runs.
-/// assert!(!is_inside_package_store(Path::new("/Users/j/wasm4pm/target")));
-/// assert!(!is_inside_package_store(Path::new("/Users/j/.cache/tmp/base-2/runs/x/_build")));
-/// assert!(!is_inside_package_store(Path::new("/Users/j/my.application/target")));
+/// assert!(!is_inside_package_store(Path::new("/h/j/wasm4pm/target")));
+/// assert!(!is_inside_package_store(Path::new("/h/j/.cache/tmp/base-2/runs/x/_build")));
+/// assert!(!is_inside_package_store(Path::new("/h/j/my.application/target")));
 /// // A project that merely has an `extensions/` source dir is not a store.
-/// assert!(!is_inside_package_store(Path::new("/Users/j/proj/extensions/foo/dist")));
+/// assert!(!is_inside_package_store(Path::new("/h/j/proj/extensions/foo/dist")));
 ///
 /// // Refusal boundary: the store roots themselves are not "inside" — whole-store
 /// // nomination stays the job of `global_cache_candidates`.
-/// assert!(!is_inside_package_store(Path::new("/Users/j/.cargo/registry/src")));
-/// assert!(!is_inside_package_store(Path::new("/Users/j/go/pkg/mod")));
-/// assert!(!is_inside_package_store(Path::new("/Users/j/.npm/_npx")));
+/// assert!(!is_inside_package_store(Path::new("/h/j/.cargo/registry/src")));
+/// assert!(!is_inside_package_store(Path::new("/h/j/go/pkg/mod")));
+/// assert!(!is_inside_package_store(Path::new("/h/j/.npm/_npx")));
 /// // A project that merely has an `_npx` dir outside `.npm` is not a store.
-/// assert!(!is_inside_package_store(Path::new("/Users/j/proj/_npx/node_modules")));
+/// assert!(!is_inside_package_store(Path::new("/h/j/proj/_npx/node_modules")));
 /// ```
 pub fn is_inside_package_store(path: &Path) -> bool {
     let comps: Vec<&str> = path.components().filter_map(|c| c.as_os_str().to_str()).collect();

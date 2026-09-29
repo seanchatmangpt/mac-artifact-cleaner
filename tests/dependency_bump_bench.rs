@@ -75,7 +75,7 @@ fn bench_serde_json_receipt_roundtrip() {
     let entries: Vec<serde_json::Value> = (0..2_000u64)
         .map(|i| {
             serde_json::json!({
-                "path": format!("/Users/dev/project-{i}/target/debug/deps/lib{i}.rlib"),
+                "path": format!("/work/dev/project-{i}/target/debug/deps/lib{i}.rlib"),
                 "bytes": i * 4096 + 17,
                 "digest": blake3::hash(&i.to_le_bytes()).to_hex().to_string(),
                 "kind": "RustTarget",
