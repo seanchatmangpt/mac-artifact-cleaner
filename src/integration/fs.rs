@@ -448,6 +448,13 @@ pub fn scan_root(
     let cache_hits: Arc<Mutex<Vec<(PathBuf, CachedDirEntry)>>> = Arc::new(Mutex::new(Vec::new()));
     let cache_hits_for_filter = cache_hits.clone();
 
+    // Per-directory own (non-recursive) file count / physical bytes, fed by
+    // the stat the walker already performs on every file. Replaces a second
+    // `stat` of every file (`shallow_dir_stats`) that doubled the syscall
+    // count of a cached scan. Merged per worker thread on drop.
+    let own_stats: Arc<Mutex<std::collections::HashMap<PathBuf, (u64, u64)>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
@@ -531,6 +538,7 @@ pub fn scan_root(
         let snapshot_memo = snapshot_memo.clone();
         let dir_records = dir_records.clone();
         let linked_seen = linked_seen_for_visitor.clone();
+        let mut own_acc = OwnStatsAcc::new(own_stats.clone());
 
         Box::new(move |result| {
             let entry = match result {
@@ -554,6 +562,9 @@ pub fn scan_root(
 
             let meta = entry.metadata().ok();
             let mut is_dir = false;
+            if scan_cache.is_some() {
+                own_acc.record(path, meta.as_ref());
+            }
             if let Some(meta) = &meta {
                 if meta.is_file() {
                     let physical = meta.blocks() * 512;
@@ -620,14 +631,14 @@ pub fn scan_root(
             }
 
             if scan_cache.is_some() {
-                let (files, bytes) = shallow_dir_stats(&snap);
                 dir_records.lock().unwrap().push((
                     path.to_path_buf(),
                     DirRecord {
                         mtime: meta.as_ref().map(|m| m.mtime()).unwrap_or(0),
                         child_names_hash: child_names_hash(&snap),
-                        own_files: files,
-                        own_bytes: bytes,
+                        // Filled from `own_stats` once the walk completes.
+                        own_files: 0,
+                        own_bytes: 0,
                         own_candidates,
                     },
                 ));
@@ -638,7 +649,14 @@ pub fn scan_root(
     });
 
     if let Some(cache) = &scan_cache {
-        let records = std::mem::take(&mut *dir_records.lock().unwrap());
+        let mut records = std::mem::take(&mut *dir_records.lock().unwrap());
+        let mut own = std::mem::take(&mut *own_stats.lock().unwrap());
+        for (path, rec) in &mut records {
+            if let Some((files, bytes)) = own.remove(path) {
+                rec.own_files = files;
+                rec.own_bytes = bytes;
+            }
+        }
         let hits = std::mem::take(&mut *cache_hits.lock().unwrap());
         let staged = aggregate_subtrees(records, hits);
         if let Err(e) = cache.insert_batch(&staged) {
@@ -782,23 +800,68 @@ fn aggregate_subtrees(
         .collect()
 }
 
-/// Computes file count / physical byte total for a directory's *immediate*
-/// file children only (non-recursive) — the cheap counts available from a
-/// `DirSnapshot` plus a `stat` per file. `scan_root` combines this per-directory
-/// "own" total with descendant totals in `aggregate_subtrees` to produce the
-/// true recursive aggregate stored in `CachedDirEntry`.
-fn shallow_dir_stats(snap: &DirSnapshot) -> (u64, u64) {
-    let mut files = 0u64;
-    let mut bytes = 0u64;
-    for child in &snap.children {
-        if child.is_file() {
-            if let Ok(meta) = std::fs::metadata(&child.path) {
-                files += 1;
-                bytes += meta.blocks() * 512;
+/// Per-worker accumulator of each directory's *immediate* file count and
+/// physical byte total, driven by the stat the walker already made for every
+/// entry (no second `stat`). `scan_root` combines these per-directory "own"
+/// totals with descendant totals in `aggregate_subtrees` to produce the true
+/// recursive aggregate stored in `CachedDirEntry`.
+///
+/// The ignore crate's parallel walker yields one directory's entries
+/// consecutively from a single worker, so a run of same-parent entries is
+/// folded locally and only merged into the shared map on parent change and
+/// on drop (workers are joined before `walk` returns, so every run flushes).
+///
+/// Counting rule is the one `shallow_dir_stats` had: regular files count via
+/// the walker's `lstat`; a symlink / special file / failed stat falls back to
+/// a following `stat` and counts when it resolves to a non-directory.
+struct OwnStatsAcc {
+    shared: Arc<Mutex<std::collections::HashMap<PathBuf, (u64, u64)>>>,
+    cur: Option<(PathBuf, u64, u64)>,
+}
+
+impl OwnStatsAcc {
+    fn new(shared: Arc<Mutex<std::collections::HashMap<PathBuf, (u64, u64)>>>) -> Self {
+        Self { shared, cur: None }
+    }
+
+    fn record(&mut self, path: &Path, meta: Option<&std::fs::Metadata>) {
+        let (files, bytes) = match meta {
+            Some(m) if m.is_file() => (1, m.blocks() * 512),
+            Some(m) if m.is_dir() => return,
+            _ => match std::fs::metadata(path) {
+                Ok(m) if !m.is_dir() => (1, m.blocks() * 512),
+                _ => return,
+            },
+        };
+        let Some(parent) = path.parent() else {
+            return;
+        };
+        match &mut self.cur {
+            Some((p, f, b)) if p.as_path() == parent => {
+                *f += files;
+                *b += bytes;
+            }
+            _ => {
+                self.flush();
+                self.cur = Some((parent.to_path_buf(), files, bytes));
             }
         }
     }
-    (files, bytes)
+
+    fn flush(&mut self) {
+        if let Some((p, f, b)) = self.cur.take() {
+            let mut map = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+            let slot = map.entry(p).or_insert((0, 0));
+            slot.0 += f;
+            slot.1 += b;
+        }
+    }
+}
+
+impl Drop for OwnStatsAcc {
+    fn drop(&mut self) {
+        self.flush();
+    }
 }
 
 // ── Disk breakdown by top-level directory ─────────────────────────────────────
