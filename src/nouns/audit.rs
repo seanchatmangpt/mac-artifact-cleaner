@@ -7,12 +7,13 @@ use std::{
 
 use clap::Subcommand;
 use dashmap::DashMap;
+use rayon::prelude::*;
 
 use crate::{
     domain::{
         artifact::{ArgsSnapshot, Candidate},
         audit::Stats,
-        ocel::build_disk_audit_ocel,
+        ocel::build_disk_audit_ocel_with_sizes,
         tool_roots::{build_tool_root_defs, build_tool_root_report, ToolRootAcc, ToolRootReport},
     },
     integration::{
@@ -214,7 +215,33 @@ pub fn handle(action: AuditAction) -> anyhow::Result<()> {
             }
 
             if let Some(o_path) = ocel_output {
-                let log = build_disk_audit_ocel(&roots, &candidates, &tool_reports, &stats);
+                // Measure each candidate in-process (hardlink-aware physical size,
+                // the same `physical_dir_size` plan build uses, so audit and plan
+                // agree), one serial walk per rayon worker — no `du` fork per
+                // candidate. Files use their own block count.
+                let sizes: std::collections::HashMap<PathBuf, u64> = candidates
+                    .par_iter()
+                    .map(|c| {
+                        let bytes = if c.path.is_file() {
+                            std::fs::symlink_metadata(&c.path)
+                                .map(|m| {
+                                    use std::os::unix::fs::MetadataExt;
+                                    m.blocks() * 512
+                                })
+                                .unwrap_or(0)
+                        } else {
+                            crate::integration::fs::physical_dir_size(&c.path)
+                        };
+                        (c.path.clone(), bytes)
+                    })
+                    .collect();
+                let log = build_disk_audit_ocel_with_sizes(
+                    &roots,
+                    &candidates,
+                    &tool_reports,
+                    &stats,
+                    &sizes,
+                );
                 let serialized = serde_json::to_string_pretty(&log)?;
                 let (_outcome, ledger) =
                     write_output_file(&o_path, &serialized, redact, "disk audit OCEL log")?;

@@ -13,6 +13,7 @@ pub mod docker_receipt;
 pub mod doctor;
 pub mod git_worktree;
 pub mod github;
+pub mod launchd_orphans;
 pub mod ocel;
 pub mod ocl;
 pub mod plan;

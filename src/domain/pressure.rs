@@ -156,12 +156,12 @@ pub fn decide_reclaim(
 /// use osx_clnr::domain::pressure::parse_lsof_cwds;
 /// use std::path::PathBuf;
 ///
-/// let out = "p101\nfcwd\nn/Users/me/dev/app\np102\nfcwd\nn/Users/me/dev/app\np103\nfcwd\nn/\n";
+/// let out = "p101\nfcwd\nn/h/me/dev/app\np102\nfcwd\nn/h/me/dev/app\np103\nfcwd\nn/\n";
 ///
 /// // Positive: two distinct cwds, deduplicated and sorted.
 /// assert_eq!(
 ///     parse_lsof_cwds(out),
-///     vec![PathBuf::from("/"), PathBuf::from("/Users/me/dev/app")]
+///     vec![PathBuf::from("/"), PathBuf::from("/h/me/dev/app")]
 /// );
 ///
 /// // Negative: no `n` lines -> no cwds.
@@ -193,20 +193,20 @@ pub fn parse_lsof_cwds(stdout: &str) -> Vec<PathBuf> {
 ///
 /// let cwds = vec![
 ///     PathBuf::from("/"),
-///     PathBuf::from("/Users"),
-///     PathBuf::from("/Users/me"),
-///     PathBuf::from("/Users/me/dev/app"),
+///     PathBuf::from("/h"),
+///     PathBuf::from("/h/me"),
+///     PathBuf::from("/h/me/dev/app"),
 /// ];
 ///
 /// // Positive: only the project cwd survives.
-/// assert_eq!(significant_cwds(cwds, Path::new("/Users/me")), vec![PathBuf::from("/Users/me/dev/app")]);
+/// assert_eq!(significant_cwds(cwds, Path::new("/h/me")), vec![PathBuf::from("/h/me/dev/app")]);
 ///
 /// // Negative: nothing but broad cwds -> empty.
-/// assert!(significant_cwds(vec![PathBuf::from("/")], Path::new("/Users/me")).is_empty());
+/// assert!(significant_cwds(vec![PathBuf::from("/")], Path::new("/h/me")).is_empty());
 ///
 /// // Refusal: a sibling of home is not an ancestor of it and is kept.
 /// assert_eq!(
-///     significant_cwds(vec![PathBuf::from("/tmp/build")], Path::new("/Users/me")),
+///     significant_cwds(vec![PathBuf::from("/tmp/build")], Path::new("/h/me")),
 ///     vec![PathBuf::from("/tmp/build")]
 /// );
 /// ```

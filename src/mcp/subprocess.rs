@@ -79,6 +79,15 @@ fn resolve_oclnr_path(
 }
 
 /// Subprocess runner
+/// Optional knobs for `oclnr delete execute` beyond the required paths.
+#[derive(Debug, Clone, Copy)]
+pub struct DeleteRunOptions {
+    pub max_concurrent: Option<usize>,
+    pub timeout_secs: u32,
+    /// Pass `--thin-after` (only honoured together with `confirm`).
+    pub thin_after: bool,
+}
+
 pub struct OclnrRunner {
     oclnr_path: PathBuf,
 }
@@ -282,6 +291,26 @@ impl OclnrRunner {
         max_concurrent: Option<usize>,
         timeout_secs: u32,
     ) -> Result<SubprocessResult, ErrorResponse> {
+        self.delete_run_with(
+            workspace,
+            plan_file,
+            receipt_file,
+            confirm,
+            DeleteRunOptions { max_concurrent, timeout_secs, thin_after: false },
+        )
+    }
+
+    /// [`Self::delete_run`] with the optional `--thin-after` flag.
+    #[allow(clippy::result_large_err)]
+    pub fn delete_run_with(
+        &self,
+        workspace: &PathBuf,
+        plan_file: &PathBuf,
+        receipt_file: &PathBuf,
+        confirm: bool,
+        opts: DeleteRunOptions,
+    ) -> Result<SubprocessResult, ErrorResponse> {
+        let DeleteRunOptions { max_concurrent, timeout_secs, thin_after } = opts;
         let mut cmd = Command::new(&self.oclnr_path);
         cmd.arg("delete")
             .arg("execute")
@@ -298,6 +327,10 @@ impl OclnrRunner {
         }
         if let Some(n) = max_concurrent {
             cmd.arg("--max-concurrent").arg(n.to_string());
+        }
+        // Only meaningful with --yes (confirm); a dry run thins nothing.
+        if thin_after && confirm {
+            cmd.arg("--thin-after");
         }
 
         self.run_command_with_timeout(cmd, "oclnr delete execute", timeout_secs)
@@ -635,7 +668,17 @@ pub fn parse_json_output(output: &str) -> Result<Value, ErrorResponse> {
 /// Parse JSONOCEL output from oclnr subprocess
 #[allow(clippy::result_large_err)]
 pub fn parse_jsonocel_output(output: &str) -> Result<Value, ErrorResponse> {
-    // JSONOCEL is line-delimited JSON
+    // `oclnr audit run --ocel-output` writes ONE pretty-printed OCEL 2.0 JSON
+    // document (top-level `objects`/`events` arrays, objects keyed by `type`).
+    // Accept that shape first; it previously fell through to the line-delimited
+    // parser below, which found no `objectType` lines and returned an empty log.
+    if let Ok(doc) = serde_json::from_str::<Value>(output) {
+        if doc.get("objects").is_some_and(Value::is_array) {
+            return Ok(doc);
+        }
+    }
+
+    // Otherwise JSONOCEL is line-delimited JSON
     let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
 
     if lines.is_empty() {
@@ -664,6 +707,27 @@ pub fn parse_jsonocel_output(output: &str) -> Result<Value, ErrorResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_jsonocel_output_accepts_a_single_ocel_document() {
+        use crate::domain::{artifact::Candidate, audit::Stats, ocel::build_disk_audit_ocel};
+
+        let candidates =
+            vec![Candidate { path: PathBuf::from("/work/p/target"), reason: "rust target".into() }];
+        let log =
+            build_disk_audit_ocel(&[PathBuf::from("/work")], &candidates, &[], &Stats::default());
+        // Exactly what `audit run --ocel-output` writes: one pretty-printed doc.
+        let text = serde_json::to_string_pretty(&log).unwrap();
+        let parsed = parse_jsonocel_output(&text).unwrap();
+        let objects = parsed["objects"].as_array().unwrap();
+        assert!(objects.iter().any(|o| o["type"] == "artifact_candidate"));
+
+        // The legacy line-delimited shape still parses.
+        let jsonl = "{\"objectType\":\"x\"}\n{\"eventType\":\"y\"}\n";
+        let legacy = parse_jsonocel_output(jsonl).unwrap();
+        assert_eq!(legacy["objects"].as_array().unwrap().len(), 1);
+        assert_eq!(legacy["events"].as_array().unwrap().len(), 1);
+    }
 
     #[test]
     fn test_subprocess_result_success() {

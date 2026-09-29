@@ -275,6 +275,26 @@ pub enum WorktreeClass {
 impl WorktreeClass {
     /// Only [`WorktreeClass::Prunable`] and [`WorktreeClass::MergedClean`]
     /// are reclaimable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osx_clnr::domain::git_worktree::WorktreeClass;
+    ///
+    /// // Positive: the two classes with nothing left to lose.
+    /// assert!(WorktreeClass::Prunable.is_reclaimable());
+    /// assert!(WorktreeClass::MergedClean.is_reclaimable());
+    ///
+    /// // Negative: work-bearing classes are kept.
+    /// assert!(!WorktreeClass::Dirty.is_reclaimable());
+    /// assert!(!WorktreeClass::Unmerged.is_reclaimable());
+    /// assert!(!WorktreeClass::Detached.is_reclaimable());
+    ///
+    /// // Refusal: main, locked, and unestablished facts are never reclaimable.
+    /// assert!(!WorktreeClass::Main.is_reclaimable());
+    /// assert!(!WorktreeClass::Locked.is_reclaimable());
+    /// assert!(!WorktreeClass::Unknown.is_reclaimable());
+    /// ```
     pub fn is_reclaimable(self) -> bool {
         matches!(self, WorktreeClass::Prunable | WorktreeClass::MergedClean)
     }

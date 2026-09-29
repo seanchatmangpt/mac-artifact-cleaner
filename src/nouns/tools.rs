@@ -44,6 +44,17 @@ pub enum ToolsAction {
         #[arg(long, default_value = "10")]
         top: usize,
     },
+    /// Read-only: report LaunchAgents/LaunchDaemons plists whose Program /
+    /// ProgramArguments[0] is an absolute path to a binary that no longer
+    /// exists. Relative or absent programs are UNKNOWN, not orphans. Never
+    /// unloads or deletes anything.
+    #[command(name = "launchd-orphans")]
+    LaunchdOrphans {
+        /// Directory to scan (repeatable; defaults to ~/Library/LaunchAgents,
+        /// /Library/LaunchAgents, /Library/LaunchDaemons)
+        #[arg(long = "dir", value_name = "PATH")]
+        dirs: Vec<std::path::PathBuf>,
+    },
 }
 
 pub fn handle(action: ToolsAction) -> anyhow::Result<()> {
@@ -55,6 +66,7 @@ pub fn handle(action: ToolsAction) -> anyhow::Result<()> {
         ToolsAction::GitWorktrees { roots, depth, output, top } => {
             handle_git_worktrees(roots, depth, output, top)
         }
+        ToolsAction::LaunchdOrphans { dirs } => handle_launchd_orphans(dirs),
     }
 }
 
@@ -174,6 +186,52 @@ fn handle_git_worktrees(
             println!();
             println!("Report written: {}", path.display());
         }
+    }
+    Ok(())
+}
+
+fn handle_launchd_orphans(dirs: Vec<std::path::PathBuf>) -> anyhow::Result<()> {
+    use crate::{
+        domain::launchd_orphans::{find_orphans, summarize},
+        integration::launchd_scan::{default_launchd_dirs, scan_launchd_dirs},
+    };
+
+    let dirs = if dirs.is_empty() { default_launchd_dirs() } else { dirs };
+    let scan = scan_launchd_dirs(&dirs);
+    let s = summarize(&scan.facts);
+    let orphans = find_orphans(&scan.facts);
+
+    println!("Launchd orphan scan (read-only; nothing is unloaded or deleted)");
+    println!(
+        "  plists: {}   ok: {}   orphans: {}   unknown: {}   unreadable: {}",
+        s.total,
+        s.ok,
+        s.orphans,
+        s.unknown,
+        scan.errors.len()
+    );
+    if !orphans.is_empty() {
+        println!();
+        println!("Orphans (absolute program path missing):");
+        for o in &orphans {
+            println!(
+                "  {}  [{}]\n      -> {}",
+                o.plist_path,
+                o.label.as_deref().unwrap_or("-"),
+                o.program
+            );
+        }
+    }
+    if !scan.errors.is_empty() {
+        println!();
+        println!("Unreadable:");
+        for e in &scan.errors {
+            println!("  {}  ({})", e.path, e.reason);
+        }
+    }
+    if !scan.missing_dirs.is_empty() {
+        println!();
+        println!("Directories not present: {}", scan.missing_dirs.join(", "));
     }
     Ok(())
 }

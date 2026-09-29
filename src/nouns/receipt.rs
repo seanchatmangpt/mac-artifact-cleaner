@@ -52,8 +52,10 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
             };
 
             println!("Verifying deletion receipt: {}", receipt.display());
-            let report =
-                crate::integration::fs::verify_receipt_on_disk(&receipt_data, plan_data.as_ref());
+            let report = crate::integration::fs::verify_receipt_on_disk_snapshot_aware(
+                &receipt_data,
+                plan_data.as_ref(),
+            );
 
             // Affidavit provenance: build the sealed core/v1 chain from this
             // receipt and certify it through the 7-stage pipeline. This is a
@@ -97,12 +99,7 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
                 println!("          RECEIPT VERIFICATION ISSUES             ");
                 println!("==================================================");
                 for issue in &report.issues {
-                    let mark =
-                        if issue.issue_type == crate::domain::receipt::IssueType::PathRecreated {
-                            "ℹ️ "
-                        } else {
-                            "❌"
-                        };
+                    let mark = if issue.issue_type.is_informational() { "ℹ️ " } else { "❌" };
                     println!(
                         "  {mark} [{:?}] {}: {}",
                         issue.issue_type,
@@ -122,7 +119,7 @@ pub fn handle(action: ReceiptAction) -> anyhow::Result<()> {
                     report
                         .issues
                         .iter()
-                        .filter(|i| i.issue_type != crate::domain::receipt::IssueType::PathRecreated)
+                        .filter(|i| !i.issue_type.is_informational())
                         .count()
                 );
             }

@@ -382,6 +382,10 @@ pub struct DeleteExecuteInput {
     pub max_concurrent: usize,
     #[serde(default = "default_timeout_secs")]
     pub timeout_secs: u32,
+    /// Thin local APFS snapshots after deleting (before free space is
+    /// sampled) so the receipt records released space. Default off.
+    #[serde(default)]
+    pub thin_after: bool,
 }
 
 // 30s was the original default, but real deletion plans routinely take well

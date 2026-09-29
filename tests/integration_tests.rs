@@ -1221,3 +1221,80 @@ fn test_repeat_scan_with_cache_matches_first_scan() {
         "cache-hit repeat scan must not undercount candidates_seen"
     );
 }
+
+#[test]
+fn test_verify_snapshot_pinned_shortfall_is_informational_only_with_snapshots() {
+    use osx_clnr::domain::receipt::{
+        DeletionReceipt, DeletionResult, DeletionStatus, IssueType, PathObservation,
+    };
+
+    // Real receipt whose target really is absent on disk (a fresh tempdir child
+    // that was never created), claiming 2 GB freed while the volume free-space
+    // delta is 0 — the exact shape observed 2026-09-28 when snapshots pinned
+    // the freed blocks.
+    let dir = tempfile::tempdir().unwrap();
+    let gone = dir.path().join("target");
+    assert!(!gone.exists());
+    let receipt = DeletionReceipt::new(
+        0,
+        1_000,
+        2_000,
+        vec![DeletionResult {
+            path: gone,
+            status: DeletionStatus::Deleted,
+            error: None,
+            blake3_hash: None,
+            bytes_freed: 2_000_000_000,
+            reversibility: Default::default(),
+        }],
+        Some(5_000_000_000),
+        Some(5_000_000_000),
+    );
+    let observe = |p: &std::path::Path| match std::fs::symlink_metadata(p) {
+        Ok(_) => PathObservation::Present { born_unix: None, is_symlink: false },
+        Err(_) => PathObservation::Absent,
+    };
+
+    let pinned = receipt.verify_with_context(None, &observe, true);
+    assert!(pinned.is_consistent);
+    assert!(pinned.issues.iter().any(|i| i.issue_type == IssueType::SnapshotPinned));
+
+    // Control: without snapshots the same shortfall is still fatal.
+    let bare = receipt.verify_with_context(None, &observe, false);
+    assert!(!bare.is_consistent);
+    assert!(bare.issues.iter().any(|i| i.issue_type == IssueType::BytesFreedMismatch));
+}
+
+#[test]
+fn test_snapshot_thin_receipt_iterations_are_backward_compatible() {
+    use osx_clnr::domain::time::{SnapshotThinReceipt, ThinIteration};
+
+    // A receipt sealed before iterative thinning existed has no `iterations`
+    // key. It must still parse, and re-serialize byte-identically (its sealed
+    // chain hash is computed over this serialization).
+    let legacy = serde_json::json!({
+        "volume": "/",
+        "requested_bytes": 1000,
+        "timestamp_unix": 1716768000,
+        "snapshots_before": ["a", "b"],
+        "snapshots_after": ["b"],
+        "snapshots_thinned": ["a"]
+    });
+    let parsed: SnapshotThinReceipt = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(parsed.iterations.is_empty());
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), legacy);
+
+    // A receipt with iterations round-trips them.
+    let mut r = parsed;
+    r.iterations = vec![ThinIteration {
+        iteration: 1,
+        snapshots_before_count: 2,
+        snapshots_after_count: 1,
+        free_bytes_before: Some(10),
+        free_bytes_after: None,
+        stop_reason: Some("nothing_left".to_string()),
+    }];
+    let back: SnapshotThinReceipt =
+        serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+    assert_eq!(back, r);
+}

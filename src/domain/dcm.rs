@@ -262,6 +262,178 @@ pub fn classify_reversibility(kind: PlanItemKind, reason: &str) -> Reversibility
     }
 }
 
+/// Path segments that mark credential/key material. A path containing any
+/// of these never receives a path-conditional `Reversible` upgrade.
+const PROTECTED_PATH_SEGMENTS: &[&str] =
+    &["rotated-signing-keys", "keys", ".ssh", ".gnupg", ".config", ".aws", "secrets"];
+
+/// Whether `path` lies inside a known scratch root: a segment named
+/// `scratch`/`scratch-*`/`scratch_*` below `.zcode/workspace`.
+///
+/// Evidence (2026-09-28): the scan-nominated `.agents` dirs under
+/// `~/.zcode/workspace/default/<milestone>/<wave>/scratch*/…` sit inside
+/// `git archive` extractions (no `.git`), i.e. disposable copies of a
+/// committed SHA. Pure string/path-component logic; no filesystem access.
+fn is_under_workspace_scratch(path: &std::path::Path) -> bool {
+    let comps: Vec<String> =
+        path.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let Some(ws) = comps.windows(2).position(|w| w[0] == ".zcode" && w[1] == "workspace") else {
+        return false;
+    };
+    // Segments strictly between `workspace` and the final component.
+    let tail_end = comps.len().saturating_sub(1);
+    comps
+        .get(ws + 2..tail_end)
+        .map(|mid| {
+            mid.iter()
+                .any(|s| s == "scratch" || s.starts_with("scratch-") || s.starts_with("scratch_"))
+        })
+        .unwrap_or(false)
+}
+
+/// Path-aware reversibility classification.
+///
+/// Starts from [`classify_reversibility`] and applies one path-conditional
+/// upgrade: an `"ai agents dir"` (`.agents`) candidate is `Reversible` only
+/// when its final component is exactly `.agents`, it sits inside a
+/// workspace scratch root (see `is_under_workspace_scratch`), and no path
+/// segment marks key/credential material. Everywhere else `.agents` stays
+/// `Unknown`: real repos commit hand-authored skills/rules/agents there
+/// (`xaas/.agents/skills`, `ggen-marketplace/.agents/rules`), so the reason
+/// string alone proves nothing.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+/// use osx_clnr::domain::dcm::{classify_reversibility_at, Reversibility};
+/// use osx_clnr::domain::plan::PlanItemKind;
+///
+/// // Positive: `.agents` inside a workspace scratch extraction.
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "ai agents dir",
+///         Path::new("/h/.zcode/workspace/default/v1/wave5/scratch/L4/base/.agents"),
+///     ),
+///     Reversibility::Reversible
+/// );
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "ai agents dir",
+///         Path::new("/h/.zcode/workspace/default/v1/wave6/scratch-L9/head/.agents"),
+///     ),
+///     Reversibility::Reversible
+/// );
+///
+/// // Negative: a repo's own `.agents` (may hold committed skills) stays Unknown.
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "ai agents dir",
+///         Path::new("/h/xaas/.agents"),
+///     ),
+///     Reversibility::Unknown
+/// );
+/// // Negative: under the workspace but outside any scratch segment.
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "ai agents dir",
+///         Path::new("/h/.zcode/workspace/default/v1/wave5/keep/.agents"),
+///     ),
+///     Reversibility::Unknown
+/// );
+/// // Negative: the scratch segment must be strictly above the `.agents` leaf.
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "ai agents dir",
+///         Path::new("/h/.zcode/workspace/default/scratch"),
+///     ),
+///     Reversibility::Unknown
+/// );
+///
+/// // Refusal: rotated signing keys must NEVER become Reversible.
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "ai agents dir",
+///         Path::new("/h/.config/rotated-signing-keys/v26.9.24/rocket-craft/.agents"),
+///     ),
+///     Reversibility::Unknown
+/// );
+/// // Refusal: even inside a scratch root, a key-bearing path stays Unknown.
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "ai agents dir",
+///         Path::new("/h/.zcode/workspace/default/v1/scratch/x/.ggen/keys/.agents"),
+///     ),
+///     Reversibility::Unknown
+/// );
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "ai agents dir",
+///         Path::new("/h/.zcode/workspace/default/v1/scratch/rotated-signing-keys/.agents"),
+///     ),
+///     Reversibility::Unknown
+/// );
+///
+/// // The upgrade is specific to the `.agents` reason and to Dir items.
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::File,
+///         "massive ai session logs",
+///         Path::new("/h/.zcode/workspace/default/v1/scratch/s.jsonl"),
+///     ),
+///     Reversibility::Unknown
+/// );
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::File,
+///         "ai agents dir",
+///         Path::new("/h/.zcode/workspace/default/v1/scratch/L4/.agents"),
+///     ),
+///     Reversibility::Unknown
+/// );
+///
+/// // Non-`.agents` reasons defer to `classify_reversibility` unchanged.
+/// assert_eq!(
+///     classify_reversibility_at(
+///         PlanItemKind::Dir,
+///         "rust target",
+///         Path::new("/h/.config/rotated-signing-keys/x/target"),
+///     ),
+///     Reversibility::Reversible
+/// );
+/// ```
+pub fn classify_reversibility_at(
+    kind: PlanItemKind,
+    reason: &str,
+    path: &std::path::Path,
+) -> Reversibility {
+    let base = classify_reversibility(kind, reason);
+    if base != Reversibility::Unknown
+        || kind != PlanItemKind::Dir
+        || !reason.eq_ignore_ascii_case("ai agents dir")
+        || path.file_name().and_then(|n| n.to_str()) != Some(".agents")
+    {
+        return base;
+    }
+    let protected = path.components().any(|c| {
+        let s = c.as_os_str().to_string_lossy();
+        PROTECTED_PATH_SEGMENTS.iter().any(|p| s == *p)
+    });
+    if !protected && is_under_workspace_scratch(path) {
+        Reversibility::Reversible
+    } else {
+        Reversibility::Unknown
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,6 +2,26 @@
 
 This report summarizes the research conducted by five specialized sub-agents (May 2026) to identify potential directions for the `osx-clnr` project.
 
+**Last Updated:** 2026-09-28 (originally May 2026). Status below was checked against `Cargo.toml`
+and `src/` on that date; a crate that is not a dependency is `open` unless `src/` already covers
+the capability another way.
+
+## Status
+
+| Item | Crate(s) | Status | Evidence |
+|---|---|---|---|
+| Live-process guard | `sysinfo` | partial | `autoclean --exclude-live-cwds` uses `lsof` (`src/integration/pressure.rs`); no Xcode/DerivedData process check |
+| Pressure/thermal metrics | `darwin-metrics`, `macsmc` | open | not in `Cargo.toml`; free-space pressure only (`src/domain/pressure.rs`) |
+| Native path resolution | `objc2-foundation` | open | not in `Cargo.toml`; `~/Library` paths are string literals |
+| Keychain / VPN audit | `security-framework`, `system-configuration` | parked | out-of-charter call pending; not in `Cargo.toml` |
+| Provenance xattrs | `xattr` | open | not in `Cargo.toml` |
+| Clone-aware reclaim | `reflink-copy` | partial | `dedupe scan` measures `clonefile` reclaim (`src/integration/dedupe.rs`) |
+| Spotlight metadata | `mdquery-rs` | open | not in `Cargo.toml` |
+| Plist / bundle analysis | `plist`, `goblin` | open | not in `Cargo.toml` |
+| Homebrew graph | `homebrew` | partial | `src/integration/brew.rs` exists; no orphan-cache graph walk |
+| launchd orphan scan | `persistence` | done (CLI) | `oclnr tools launchd-orphans` (`src/domain/launchd_orphans.rs`, `src/integration/launchd_scan.rs`); read-only, `plutil`-based, no crate; no MCP exposure |
+| Unified logs / endpoint-sec | `macos-unifiedlogs`, `endpoint-sec` | open | not in `Cargo.toml`; `endpoint-sec` needs an Apple entitlement |
+
 ---
 
 ## 1. Hardware & System Vitality
@@ -66,3 +86,10 @@ This report summarizes the research conducted by five specialized sub-agents (Ma
 
 ## Strategic Roadmap Conclusion
 The highest priority next step for the project's "Promotion" beyond G9 is the integration of **`objc2-foundation`** for path resolution and **`plist`** for application analysis. These provide the strongest foundation for moving from a "heuristics-based" tool to a "system-aware" utility.
+
+---
+
+## See Also
+- [Gall Checkpoints](GALL_CHECKPOINTS.md) — the promotion rule this roadmap feeds
+- [Time Machine Model](TIME_MACHINE_MODEL.md) — snapshot semantics behind the reclaim items
+- [OCEL Model](OCEL_MODEL.md) — evidence log the provenance items would extend
