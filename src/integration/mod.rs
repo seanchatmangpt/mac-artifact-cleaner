@@ -11,6 +11,7 @@ pub mod fs;
 pub mod git_health;
 pub mod git_tracked;
 pub mod github;
+pub mod launchd_scan;
 pub mod monitor;
 pub mod notify;
 pub mod ocl_store;
