@@ -125,7 +125,7 @@ fn test_end_to_end_artifact_scan_build_delete() {
     let args = ArgsSnapshot {
         deps: true,
         aggressive: true,
-        verbose: true,
+        verbose: false,
         tool_roots: false,
         ignore_recent_hours: 1,
         all_filesystems: false,
@@ -1298,3 +1298,82 @@ fn test_snapshot_thin_receipt_iterations_are_backward_compatible() {
         serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
     assert_eq!(back, r);
 }
+
+/// W651d — per-lane recency gate on the parent-project scan path.
+///
+/// Regression witness (W651c2): when scanning the parent project, lane build
+/// roots are nominated wholesale (artifact.rs) and suppression used the
+/// PROJECT root's recency (`is_recently_active(project_root)`), so one fresh
+/// compile anywhere suppressed every lane. The exact designed split: an
+/// actively-worked project (fresh root mtime) with one stale lane root and
+/// one fresh lane root must nominate the stale lane and suppress the fresh
+/// one — per candidate, judged by the lane root's own dir mtime.
+#[test]
+fn test_parent_project_scan_lane_gate_splits_stale_from_fresh() {
+    let tmp = tempfile::Builder::new().tempdir_in(".").unwrap();
+    let root = tmp.path();
+
+    // Actively-worked project: fresh Cargo.toml and root mtime (now).
+    File::create(root.join("mix.exs")).unwrap();
+    let target = root.join("target");
+    fs::create_dir(&target).unwrap();
+    File::create(target.join("output.bin")).unwrap();
+
+    // Stale lane lease: dir mtime pushed >1h into the past.
+    let stale_lane = root.join("_build-laneWSTALE");
+    fs::create_dir(&stale_lane).unwrap();
+    File::create(stale_lane.join("beam")).unwrap();
+    // Age the lane root's own dir mtime >1h. The stale lane's INTERIOR file
+    // stays fresh — interior freshness must not suppress a lane lease.
+    let _ = std::process::Command::new("touch")
+        .arg("-t").arg("202001010000").arg(&stale_lane)
+        .status();
+    // Fresh lane lease: dir mtime is now (just created).
+    let fresh_lane = root.join("_build-laneWFRESH");
+    fs::create_dir(&fresh_lane).unwrap();
+    File::create(fresh_lane.join("beam")).unwrap();
+
+    let args = ArgsSnapshot {
+        deps: true,
+        aggressive: true,
+        verbose: false,
+        tool_roots: false,
+        ignore_recent_hours: 1,
+        all_filesystems: false,
+    };
+    let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
+    let stats = Arc::new(Stats::default());
+    let tool_accs = Arc::new(DashMap::new());
+
+    scan_root(root, &args, candidates.clone(), stats.clone(), &[], tool_accs, None).unwrap();
+
+    let mut nominated: Vec<PathBuf> =
+        candidates.iter().map(|e| e.value().path.clone()).collect();
+    nominated.sort();
+    assert!(
+        nominated.contains(&stale_lane),
+        "stale lane root must be nominated despite the fresh project root: {nominated:?}"
+    );
+    assert!(
+        !nominated.contains(&fresh_lane),
+        "fresh lane root must be suppressed by its own dir mtime: {nominated:?}"
+    );
+    assert!(
+        !nominated.contains(&target),
+        "fresh non-lane candidate must keep the project-level suppression rule: {nominated:?}"
+    );
+    let stale_cand = candidates
+        .iter()
+        .find(|e| e.value().path == stale_lane)
+        .expect("stale lane present");
+    assert_eq!(stale_cand.value().reason, "elixir lane build root (fan-out lease)");
+
+    // Gate off (hours=0): never recently-active — both lanes nominated.
+    let args0 = ArgsSnapshot { ignore_recent_hours: 0, ..args };
+    let candidates0: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
+    let tool_accs0 = Arc::new(DashMap::new());
+    scan_root(root, &args0, candidates0.clone(), stats.clone(), &[], tool_accs0, None).unwrap();
+    let paths0: Vec<PathBuf> = candidates0.iter().map(|e| e.value().path.clone()).collect();
+    assert!(paths0.contains(&stale_lane) && paths0.contains(&fresh_lane));
+}
+

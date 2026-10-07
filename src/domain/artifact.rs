@@ -317,7 +317,7 @@ pub struct ArgsSnapshot {
 /// judged by its OWN directory mtime, not interior-file freshness (bulk-copy
 /// interior mtimes are not activity; project-root interior walks suppressed
 /// every lane under an actively-worked repo).
-pub const CLASSIFIER_REVISION: u32 = 5;
+pub const CLASSIFIER_REVISION: u32 = 6;
 
 /// Namespace for the persistent scan cache: every input that changes what a
 /// directory's cached `candidates_list` would contain.
@@ -1000,7 +1000,7 @@ pub fn is_artifact_leaf_name(name: &str) -> bool {
 /// This includes standard barrier names and custom prefix barriers (e.g. `target_`).
 ///
 /// ```
-/// use osx_clnr::domain::artifact::is_traversal_barrier_name;
+/// use osx_clnr::domain::artifact::{is_lane_build_root_name, is_traversal_barrier_name};
 ///
 /// // Positive cases
 /// assert!(is_traversal_barrier_name("node_modules"));
@@ -1851,8 +1851,8 @@ mod lane_build_root_tests {
     /// bulk-copied lane roots by interior freshness) can never be mistaken
     /// for current.
     #[test]
-    fn classifier_revision_is_5() {
-        assert_eq!(CLASSIFIER_REVISION, 5);
-        assert!(scan_cache_revision_prefix().starts_with("scan-r5-"));
+    fn classifier_revision_is_6() {
+        assert_eq!(CLASSIFIER_REVISION, 6);
+        assert!(scan_cache_revision_prefix().starts_with("scan-r6-"));
     }
 }

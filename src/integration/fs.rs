@@ -667,11 +667,36 @@ pub fn scan_root(
                     // freshly-built target/node_modules always has a fresh internal
                     // mtime, so checking the candidate path itself would wrongly
                     // flag every build artifact as "recent activity".
-                    let recently_active = args_snapshot.ignore_recent_hours > 0
+                    let project_recently_active = args_snapshot.ignore_recent_hours > 0
                         && is_recently_active(path, args_snapshot.ignore_recent_hours);
 
                     for c in found {
-                        if recently_active {
+                        // Per-candidate gate (W651d): a whole-nominated lane
+                        // build root (`_build-lane*` / `target-lane*`) is
+                        // judged by its OWN directory mtime, not the project
+                        // root's recency — one fresh compile anywhere in the
+                        // repo must not suppress every lane lease
+                        // (W651c2 falsifier: 11 stale lanes suppressed
+                        // alongside 20 fresh ones under an active project).
+                        // Non-lane candidates keep the project-level rule:
+                        // a freshly-built target/node_modules always has a
+                        // fresh internal mtime, so checking the candidate
+                        // path itself would wrongly flag it as active.
+                        let suppressed =
+                            if c.path
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .map(crate::domain::artifact::is_lane_build_root_name)
+                                .unwrap_or(false)
+                            {
+                                is_lane_root_recently_active(
+                                    &c.path,
+                                    args_snapshot.ignore_recent_hours,
+                                )
+                            } else {
+                                project_recently_active
+                            };
+                        if suppressed {
                             continue;
                         }
                         candidates.insert(c.path.clone(), c.clone());
