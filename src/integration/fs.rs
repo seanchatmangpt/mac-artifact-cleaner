@@ -388,6 +388,32 @@ fn is_recently_active(project_root: &Path, hours: u64) -> bool {
     false
 }
 
+/// Recency signal for fan-out lane build roots (`_build-lane*` /
+/// `target-lane*`), deliberately different from [`is_recently_active`].
+///
+/// The project-root rule walks interior files because a directory's mtime
+/// only moves on direct-child changes; a lane root inverts that table. The
+/// signal the fan-out cleanup law needs is narrower: a live compile writes
+/// into the lane root continuously, and each direct-child add/remove touches
+/// the root's own directory mtime. So for lane roots the only honest signal
+/// is the lane root's own directory mtime — interior file freshness must NOT
+/// suppress nomination (W651b: a bulk-copied lane with fresh interior files
+/// but an old dir mtime never gated open, while gating on project-root
+/// interior files suppressed ALL lanes under an actively-worked repo).
+///
+/// `hours == 0` (window disabled) means never recently-active, matching the
+/// `ignore_recent_hours > 0 &&` guard this replaces.
+fn is_lane_root_recently_active(lane_root: &Path, hours: u64) -> bool {
+    if hours == 0 {
+        return false;
+    }
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
+    std::fs::metadata(lane_root)
+        .and_then(|m| m.modified())
+        .map(|modified| modified > cutoff)
+        .unwrap_or(false)
+}
+
 // ── Parallel traversal ─────────────────────────────────────────────────────────
 
 /// Recursively traverses a root path to find candidate files/folders.
@@ -423,8 +449,8 @@ pub fn scan_root(
     // 60-minute-stale rule maps to, so a LIVE lane's root is never nominated.
     if let Some(name) = root.file_name().and_then(|s| s.to_str()) {
         if is_lane_build_root_name(name) {
-            let recently_active = args.ignore_recent_hours > 0
-                && is_recently_active(root, args.ignore_recent_hours);
+            let recently_active =
+                is_lane_root_recently_active(root, args.ignore_recent_hours);
             if !recently_active {
                 let cand = Candidate {
                     path: root.to_path_buf(),
@@ -2624,6 +2650,64 @@ mod lane_root_scan_tests {
         assert!(
             !candidates.contains_key(&inner),
             "inner _build must not be separately nominated"
+        );
+    }
+
+    /// The W651b boundary finding: a *bulk-copied* lane root preserves old
+    /// interior mtimes and (here) an old dir mtime, but carries fresh
+    /// interior FILES. Interior-file freshness must not suppress nomination —
+    /// for lane roots only the lane root's own directory mtime gates. With a
+    /// 2h-old dir mtime past a 1-hour window, the gate opens: nominated.
+    #[test]
+    fn bulk_copied_lane_root_with_old_dir_mtime_and_fresh_interior_files_is_nominated() {
+        let dir = tempfile::tempdir().unwrap();
+        let lane = dir.path().join("target-laneW651c");
+        let deep = lane.join("debug").join("incremental");
+        fs::create_dir_all(&deep).unwrap();
+        // Fresh interior FILES (bulk-copy artifact): mtime = now.
+        fs::write(lane.join("fresh.rlib"), vec![0u8; 4096]).unwrap();
+        fs::write(deep.join("fresh.bin"), vec![0u8; 4096]).unwrap();
+
+        // Backdate ONLY the lane root's own directory mtime, 2h — past the
+        // 1-hour window. `touch -t` on the directory itself.
+        let _ = std::process::Command::new("touch")
+            .arg("-t")
+            .arg("202001010000")
+            .arg(lane.as_os_str())
+            .status()
+            .unwrap();
+
+        let candidates = scan(&lane, &args(1));
+
+        assert!(
+            candidates.contains_key(&lane),
+            "lane root with 2h-old dir mtime must be nominated despite fresh interior files; got: {:?}",
+            candidates.iter().map(|e| e.key().clone()).collect::<Vec<_>>()
+        );
+    }
+
+    /// Symmetric case: the lane root's own directory was recently written
+    /// (direct-child change) — the gate stays CLOSED even with otherwise
+    /// copy-preserved (old) interior files. A live lane is never nominated.
+    #[test]
+    fn lane_root_with_recent_dir_write_is_suppressed_despite_old_interior_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let lane = dir.path().join("_build-laneW651c");
+        fs::create_dir_all(lane.join("dev")).unwrap();
+        // Old interior files (copy-preserved mtimes).
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("find '{}' -exec touch -t 202001010000 {{}} +", lane.display()))
+            .status();
+        // Recent direct-child write into the lane root itself.
+        fs::write(lane.join("just-written.beam"), b"live lane").unwrap();
+
+        let candidates = scan(&lane, &args(1));
+
+        assert!(
+            !candidates.contains_key(&lane),
+            "a lane root with a recent dir write must stay suppressed; got: {:?}",
+            candidates.iter().map(|e| e.key().clone()).collect::<Vec<_>>()
         );
     }
 

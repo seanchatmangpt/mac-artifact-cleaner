@@ -313,7 +313,11 @@ pub struct ArgsSnapshot {
 /// v4 (2026-10-07): added same-checkout fan-out lane build roots
 /// (`_build-lane*` for Elixir `MIX_BUILD_ROOT`, `target-lane*` for Rust
 /// `CARGO_TARGET_DIR`) as barrier/leaf names and as wholesale candidates.
-pub const CLASSIFIER_REVISION: u32 = 4;
+/// v5 (2026-10-07, W651c): lane-root recency gate refined — a lane root is
+/// judged by its OWN directory mtime, not interior-file freshness (bulk-copy
+/// interior mtimes are not activity; project-root interior walks suppressed
+/// every lane under an actively-worked repo).
+pub const CLASSIFIER_REVISION: u32 = 5;
 
 /// Namespace for the persistent scan cache: every input that changes what a
 /// directory's cached `candidates_list` would contain.
@@ -1842,12 +1846,13 @@ mod lane_build_root_tests {
         assert!(candidates.iter().any(|c| c.path == PathBuf::from("/project/target")));
     }
 
-    /// The ruleset revision was bumped to 4 for this classification change,
-    /// so scan caches written under revision 3 (which replayed zero lane-root
-    /// candidates) can never be mistaken for current.
+    /// The ruleset revision was bumped to 5 for the W651c lane-root recency
+    /// refinement, so scan caches written under revision 4 (which suppressed
+    /// bulk-copied lane roots by interior freshness) can never be mistaken
+    /// for current.
     #[test]
-    fn classifier_revision_is_4() {
-        assert_eq!(CLASSIFIER_REVISION, 4);
-        assert!(scan_cache_revision_prefix().starts_with("scan-r4-"));
+    fn classifier_revision_is_5() {
+        assert_eq!(CLASSIFIER_REVISION, 5);
+        assert!(scan_cache_revision_prefix().starts_with("scan-r5-"));
     }
 }
