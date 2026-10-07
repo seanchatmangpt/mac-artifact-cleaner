@@ -27,7 +27,8 @@ use crate::{
     domain::{
         artifact::{
             artifact_candidates_from_snapshot, cache_hit, detect_project_from_snapshot,
-            is_global_cache, is_macos_os_dir, is_traversal_barrier_name, ArgsSnapshot,
+            is_global_cache, is_lane_build_root_name, is_macos_os_dir, is_traversal_barrier_name,
+            ArgsSnapshot,
             CachedDirEntry, Candidate, DirSnapshot, EntryKind, EntrySnapshot,
         },
         audit::Stats,
@@ -411,6 +412,29 @@ pub fn scan_root(
     }
 
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
+
+    // Same-checkout fan-out lane build roots (`_build-lane*`, `target-lane*`):
+    // project detection cannot fire inside a build root (no mix.exs /
+    // Cargo.toml at the build-root level), so when the scan root IS a lane
+    // lease the walk previously found nothing — the observed blindspot where
+    // an audit over N lane roots returned zero deletion candidates even at
+    // --aggressive. Nominate the root wholesale, gated by the same
+    // `ignore_recent_hours` recency window the fan-out cleanup law's
+    // 60-minute-stale rule maps to, so a LIVE lane's root is never nominated.
+    if let Some(name) = root.file_name().and_then(|s| s.to_str()) {
+        if is_lane_build_root_name(name) {
+            let recently_active = args.ignore_recent_hours > 0
+                && is_recently_active(root, args.ignore_recent_hours);
+            if !recently_active {
+                let cand = Candidate {
+                    path: root.to_path_buf(),
+                    reason: "lane build root (fan-out lease)".to_string(),
+                };
+                stats.candidates_seen.fetch_add(1, Ordering::Relaxed);
+                candidates.insert(cand.path.clone(), cand);
+            }
+        }
+    }
 
     let root_for_filter = root.to_path_buf();
     let stats_for_filter = stats.clone();
@@ -1273,9 +1297,20 @@ pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
             chmod_failures.push((entry.path().to_path_buf(), err));
         }
     }
+    // Entries that vanished between enumeration and chmod (a concurrent remover
+    // winning the race) are not blockers — naming them in a later error context
+    // would report phantom paths. The real blockers are the surviving failures.
+    chmod_failures.retain(|(_, err)| err.kind() != std::io::ErrorKind::NotFound);
 
-    // Final removal.
-    std::fs::remove_dir_all(path).with_context(|| {
+    // Final removal. A concurrent remover (another oclnr lane, a parallel
+    // cache-clean pass) may delete the tree between the `path.exists()` gate
+    // above and this call; `NotFound` here means the removal already succeeded,
+    // not that it failed — the same race `delete_dir_all`'s residue check
+    // tolerates for the plan-bound path.
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).with_context(|| {
         let mut msg = format!(
             "Could not remove {}. Some entries may be root-owned — try: sudo rm -rf {}",
             path.display(),
@@ -1285,19 +1320,20 @@ pub fn force_remove_dir_all(path: &Path) -> anyhow::Result<()> {
             msg.push_str(&format!("\n  chflags failure: {chflags_err}"));
         }
         if !chmod_failures.is_empty() {
-            msg.push_str(&format!(
-                "\n  Blocked by {} entries whose permissions could not be changed, including: {}",
-                chmod_failures.len(),
-                chmod_failures
-                    .iter()
-                    .take(5)
-                    .map(|(p, e)| format!("{} ({e})", p.display()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        msg
-    })
+                msg.push_str(&format!(
+                    "\n  Blocked by {} entries whose permissions could not be changed, including: {}",
+                    chmod_failures.len(),
+                    chmod_failures
+                        .iter()
+                        .take(5)
+                        .map(|(p, e)| format!("{} ({e})", p.display()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            msg
+        })
+    }
 }
 
 // ── Plan-bound deletion ────────────────────────────────────────────────────────
@@ -2187,6 +2223,42 @@ mod force_remove_dir_all_tests {
         assert!(!root.exists());
     }
 
+    /// The race the 2026-10-03 cache-clean run hit: another remover deletes
+    /// the tree while `force_remove_dir_all` is between its `exists()` gate
+    /// and the final `remove_dir_all`. The race-won `NotFound` must be
+    /// reported as success — the removal did happen — never as
+    /// `Err("Could not remove ... try: sudo rm -rf ...")`.
+    #[test]
+    fn concurrent_removal_reports_success_not_enoent() {
+        for delay_ms in [2u64, 4, 6, 8, 10, 12, 14, 16, 18, 20] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("raced");
+            fs::create_dir_all(root.join("nested/deeper")).unwrap();
+            for i in 0..64 {
+                fs::write(root.join("nested/deeper").join(format!("f{i}.bin")), b"x").unwrap();
+            }
+
+            let racer_root = root.clone();
+            let racer = std::thread::spawn(move || {
+                // Land inside the gate→final-remove window (chflags/chmod
+                // passes run there) often enough to exercise the NotFound
+                // path; if this thread loses the race its own removal is
+                // the one that reports NotFound, which we discard.
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                let _ = fs::remove_dir_all(&racer_root);
+            });
+
+            let result = force_remove_dir_all(&root);
+            racer.join().unwrap();
+
+            assert!(
+                result.is_ok(),
+                "race-won removal must not surface as an error (delay {delay_ms}ms): {result:?}"
+            );
+            assert!(!root.exists(), "tree must be gone (delay {delay_ms}ms)");
+        }
+    }
+
     /// A path that doesn't exist is a no-op success, not an error — callers
     /// (e.g. re-running a plan after a partial prior deletion) rely on this.
     #[test]
@@ -2488,4 +2560,90 @@ pub fn verify_receipt_on_disk_snapshot_aware(
     plan: Option<&crate::domain::plan::DeletionPlan>,
 ) -> crate::domain::receipt::VerificationReport {
     receipt.verify_with_context(plan, &observe_path, local_snapshots_present())
+}
+
+#[cfg(test)]
+mod lane_root_scan_tests {
+    use std::{fs, path::PathBuf, sync::Arc};
+
+    use dashmap::DashMap;
+
+    use super::scan_root;
+    use crate::domain::{
+        artifact::{ArgsSnapshot, Candidate},
+        audit::Stats,
+    };
+
+    fn args(hours: u64) -> ArgsSnapshot {
+        ArgsSnapshot {
+            deps: false,
+            aggressive: true,
+            verbose: false,
+            tool_roots: false,
+            ignore_recent_hours: hours,
+            all_filesystems: false,
+        }
+    }
+
+    fn scan(root: &std::path::Path, a: &ArgsSnapshot) -> Arc<DashMap<PathBuf, Candidate>> {
+        let candidates: Arc<DashMap<PathBuf, Candidate>> = Arc::new(DashMap::new());
+        let stats = Arc::new(Stats::default());
+        let tool_accs = Arc::new(DashMap::new());
+        scan_root(root, a, candidates.clone(), stats, &[], tool_accs, None).unwrap();
+        candidates
+    }
+
+    /// A scan root that IS a fan-out lane build root (`_build-lane*`) is
+    /// nominated wholesale — project detection cannot fire inside a build
+    /// root, which is the observed blindspot (N lane roots scanned, zero
+    /// candidates, even at --aggressive). An inner `_build` needs no separate
+    /// nomination: the whole-root candidate reclaims it by containment.
+    #[test]
+    fn scan_root_that_is_a_stale_lane_build_root_is_nominated_wholesale() {
+        let dir = tempfile::tempdir().unwrap();
+        let lane = dir.path().join("_build-laneW984dj");
+        let inner = lane.join("_build");
+        fs::create_dir_all(&inner).unwrap();
+        fs::write(lane.join("dev.beam"), b"fake build output").unwrap();
+
+        // Backdate past the recency window so the lane counts as stale.
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("find '{}' -exec touch -t 202001010000 {{}} +", lane.display()))
+            .status();
+
+        let candidates = scan(&lane, &args(1));
+
+        assert!(
+            candidates.contains_key(&lane),
+            "expected stale lane root {} to be a wholesale candidate; got: {:?}",
+            lane.display(),
+            candidates.iter().map(|e| e.key().clone()).collect::<Vec<_>>()
+        );
+        // No inner candidate is needed — containment covers it.
+        assert!(
+            !candidates.contains_key(&inner),
+            "inner _build must not be separately nominated"
+        );
+    }
+
+    /// A LIVE lane root (recently written) is suppressed by the same
+    /// `ignore_recent_hours` recency window that protects project roots — the
+    /// 60-minute-stale fanout cleanup gate maps to `ignore_recent_hours = 1`.
+    #[test]
+    fn live_lane_build_root_is_suppressed_by_recency_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let lane = dir.path().join("target-laneW622");
+        fs::create_dir_all(&lane).unwrap();
+        fs::write(lane.join("fresh.rlib"), vec![0u8; 4096]).unwrap();
+        // Not backdated: mtime is now.
+
+        let candidates = scan(dir.path(), &args(1));
+
+        assert!(
+            !candidates.contains_key(&lane),
+            "a live (recently written) lane root must not be nominated; got: {:?}",
+            candidates.iter().map(|e| e.key().clone()).collect::<Vec<_>>()
+        );
+    }
 }

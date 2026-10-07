@@ -339,6 +339,7 @@ mod tests {
             (Unstarted, AuditNeeded),
             (CleanupComplete, AuditNeeded),
             (DeleteFailed, AuditNeeded),
+            (AuditFailed, AuditNeeded),
             (AuditNeeded, AuditInProgress),
             (AuditInProgress, AuditComplete),
             (AuditComplete, PlanNeeded),

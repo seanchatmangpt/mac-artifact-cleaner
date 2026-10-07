@@ -57,14 +57,19 @@ fn delete_failed_allows_direct_rescan() {
 }
 
 /// The other terminal "in progress" / success states must NOT gain this
-/// same shortcut as a side effect of the fix -- only DELETE_FAILED (and the
-/// pre-existing UNSTARTED / CLEANUP_COMPLETE arms) may jump to AUDIT_NEEDED.
+/// same shortcut as a side effect of the fix -- only DELETE_FAILED /
+/// AUDIT_FAILED (and the pre-existing UNSTARTED / CLEANUP_COMPLETE arms) may
+/// jump to AUDIT_NEEDED.
 /// This is what would catch an overly broad fix (e.g. a `(_, AuditNeeded)`
 /// catch-all) that accidentally lets deletion mid-flight be abandoned.
 #[test]
 fn only_documented_states_can_jump_to_audit_needed() {
-    let allowed =
-        [WorkflowState::Unstarted, WorkflowState::CleanupComplete, WorkflowState::DeleteFailed];
+    let allowed = [
+        WorkflowState::Unstarted,
+        WorkflowState::CleanupComplete,
+        WorkflowState::DeleteFailed,
+        WorkflowState::AuditFailed,
+    ];
 
     let all_states = [
         WorkflowState::Unstarted,

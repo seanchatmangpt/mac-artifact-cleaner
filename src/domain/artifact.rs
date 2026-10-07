@@ -310,7 +310,10 @@ pub struct ArgsSnapshot {
 /// that decides *which* paths become candidates changes meaning — the scan
 /// cache replays stored candidates verbatim, so a cache written under an older
 /// ruleset would otherwise keep re-nominating paths the current rules refuse.
-pub const CLASSIFIER_REVISION: u32 = 3;
+/// v4 (2026-10-07): added same-checkout fan-out lane build roots
+/// (`_build-lane*` for Elixir `MIX_BUILD_ROOT`, `target-lane*` for Rust
+/// `CARGO_TARGET_DIR`) as barrier/leaf names and as wholesale candidates.
+pub const CLASSIFIER_REVISION: u32 = 4;
 
 /// Namespace for the persistent scan cache: every input that changes what a
 /// directory's cached `candidates_list` would contain.
@@ -895,6 +898,43 @@ pub fn merge_global_cache_candidates(
     out
 }
 
+/// Returns true when a directory name is a per-lane build-root lease created
+/// by same-checkout agent fan-out: `_build-lane*` (Elixir `MIX_BUILD_ROOT`
+/// convention, e.g. `_build-laneW984dj`) or `target-lane*` (Rust
+/// `CARGO_TARGET_DIR` convention, e.g. `target-laneW622`).
+///
+/// These roots are LEASES, not permanent artifacts: a live lane's build root
+/// must not be deleted mid-run. The classifier itself is pure and carries no
+/// mtime, so the age gate is applied by the caller: the standard
+/// `ignore_recent_hours` recency window (the fan-out cleanup law's 60-minute
+/// stale gate corresponds to `ignore_recent_hours = 1`) suppresses recently
+/// active roots at the scan/plan layer.
+///
+/// Plain `_build` / `target` directories *inside* a lane root need no rule of
+/// their own: the whole lane root is nominated (and treated as a traversal
+/// barrier, so the walker never descends), which covers the inner content by
+/// containment.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::is_lane_build_root_name;
+///
+/// // Positive cases: both conventions, with any lane suffix.
+/// assert!(is_lane_build_root_name("_build-laneW984dj"));
+/// assert!(is_lane_build_root_name("_build-lane1"));
+/// assert!(is_lane_build_root_name("target-laneW622"));
+///
+/// // Negative cases: the plain, unqualified build dirs keep their own rules.
+/// assert!(!is_lane_build_root_name("_build"));
+/// assert!(!is_lane_build_root_name("target"));
+/// assert!(!is_lane_build_root_name("target_wasm32"));
+/// assert!(!is_lane_build_root_name("src"));
+/// ```
+pub fn is_lane_build_root_name(name: &str) -> bool {
+    name.starts_with("_build-lane") || name.starts_with("target-lane")
+}
+
 /// Returns true when a directory name should be treated as a rebuildable
 /// artifact/dependency leaf during scanning.
 ///
@@ -905,6 +945,7 @@ pub fn merge_global_cache_candidates(
 ///
 /// // Positive cases
 /// assert!(is_artifact_leaf_name("node_modules"));
+/// assert!(is_artifact_leaf_name("_build-laneW984dj"));
 /// assert!(is_artifact_leaf_name("_build"));
 /// assert!(is_artifact_leaf_name(".venv"));
 ///
@@ -912,6 +953,9 @@ pub fn merge_global_cache_candidates(
 /// assert!(!is_artifact_leaf_name("src"));
 /// ```
 pub fn is_artifact_leaf_name(name: &str) -> bool {
+    if is_lane_build_root_name(name) {
+        return true;
+    }
     if name.starts_with("target_") {
         return true;
     }
@@ -957,11 +1001,17 @@ pub fn is_artifact_leaf_name(name: &str) -> bool {
 /// // Positive cases
 /// assert!(is_traversal_barrier_name("node_modules"));
 /// assert!(is_traversal_barrier_name("target_wasm32"));
+/// assert!(is_traversal_barrier_name("_build-laneW984dj"));
+/// assert!(is_traversal_barrier_name("target-laneW622"));
 ///
-/// // Negative case
+/// // Negative case: the plain, lane-unqualified build dirs are unchanged.
+/// assert!(!is_lane_build_root_name("_build"));
 /// assert!(!is_traversal_barrier_name("src"));
 /// ```
 pub fn is_traversal_barrier_name(name: &str) -> bool {
+    if is_lane_build_root_name(name) {
+        return true;
+    }
     if name.starts_with("target_") {
         return true;
     }
@@ -1373,6 +1423,16 @@ pub fn artifact_candidates_from_snapshot(
                         reason: format!("rust target ({})", e.file_name),
                     });
                 }
+                // Same-checkout fan-out lane leases (CARGO_TARGET_DIR
+                // convention). Covered as whole roots: the barrier/leaf rules
+                // keep the walker from descending, so an inner `target/` is
+                // reclaimed by containment, not by its own nomination.
+                for e in snap.dirs_with_prefix("target-lane") {
+                    out.push(Candidate {
+                        path: e.path.clone(),
+                        reason: "rust lane target root (fan-out lease)".to_string(),
+                    });
+                }
             }
 
             "go" => {
@@ -1388,6 +1448,16 @@ pub fn artifact_candidates_from_snapshot(
             "elixir" => {
                 add_dir(&mut out, root, "_build", "elixir build", snap);
                 add_dir(&mut out, root, ".elixir_ls", "elixir ls cache", snap);
+                // Same-checkout fan-out lane leases (MIX_BUILD_ROOT
+                // convention). Whole-root nomination: the barrier/leaf rules
+                // stop the walker descending, so an inner `_build/` inside a
+                // lane root is reclaimed by containment.
+                for e in snap.dirs_with_prefix("_build-lane") {
+                    out.push(Candidate {
+                        path: e.path.clone(),
+                        reason: "elixir lane build root (fan-out lease)".to_string(),
+                    });
+                }
 
                 if args.deps {
                     add_dir(&mut out, root, "deps", "elixir dependencies", snap);
@@ -1396,6 +1466,12 @@ pub fn artifact_candidates_from_snapshot(
 
             "erlang" => {
                 add_dir(&mut out, root, "_build", "erlang build", snap);
+                for e in snap.dirs_with_prefix("_build-lane") {
+                    out.push(Candidate {
+                        path: e.path.clone(),
+                        reason: "erlang lane build root (fan-out lease)".to_string(),
+                    });
+                }
                 add_dir(&mut out, root, "ebin", "erlang beam output", snap);
                 add_file(&mut out, root, "erl_crash.dump", "erlang crash dump", snap);
 
@@ -1639,5 +1715,139 @@ mod ai_project_false_positive_tests {
             "claude tmp marker path must still be nominated: {:?}",
             candidates
         );
+    }
+}
+
+#[cfg(test)]
+mod lane_build_root_tests {
+    use super::*;
+
+    fn args(aggressive: bool) -> ArgsSnapshot {
+        ArgsSnapshot {
+            deps: true,
+            aggressive,
+            verbose: false,
+            tool_roots: false,
+            ignore_recent_hours: 1,
+            all_filesystems: false,
+        }
+    }
+
+    /// Positive: `_build-lane*` (MIX_BUILD_ROOT convention) is recognized as a
+    /// lane lease and as a traversal barrier / artifact leaf.
+    #[test]
+    fn elixir_lane_build_root_matches() {
+        assert!(is_lane_build_root_name("_build-laneW984dj"));
+        assert!(is_artifact_leaf_name("_build-laneW984dj"));
+        assert!(is_traversal_barrier_name("_build-laneW984dj"));
+    }
+
+    /// Positive: `target-lane*` (CARGO_TARGET_DIR convention) is recognized.
+    #[test]
+    fn rust_lane_target_root_matches() {
+        assert!(is_lane_build_root_name("target-laneW622"));
+        assert!(is_artifact_leaf_name("target-laneW622"));
+        assert!(is_traversal_barrier_name("target-laneW622"));
+    }
+
+    /// Negative: plain, lane-unqualified `_build` / `target` keep their
+    /// existing rules — the lane prefix must be present. `_build` stays a
+    /// leaf/barrier through its own exact-name rule, but is NOT a lane lease.
+    #[test]
+    fn plain_build_and_target_are_not_lane_roots() {
+        assert!(!is_lane_build_root_name("_build"));
+        assert!(!is_lane_build_root_name("target"));
+        assert!(!is_lane_build_root_name("target_wasm32"));
+        assert!(is_lane_build_root_name("_build-laneboogus")); // any suffix after the prefix matches
+        assert!(!is_lane_build_root_name("build-laneX"));
+        assert!(!is_lane_build_root_name("_build_laneX"));
+    }
+
+    /// An elixir project root with a `_build-laneW984dj` sibling dir gets the
+    /// whole lane root nominated as a single wholesale candidate; the plain
+    /// `_build` rule still fires alongside it. Inner content is covered by
+    /// containment (the root is a traversal barrier, so the walker never
+    /// descends into it and never needs inner nominations).
+    #[test]
+    fn elixir_project_nominates_lane_build_root_wholesale() {
+        let root = Path::new("/project");
+        let snap = DirSnapshot {
+            children: vec![
+                EntrySnapshot::new(
+                    PathBuf::from("/project/mix.exs"),
+                    "mix.exs".into(),
+                    Some("exs".into()),
+                    EntryKind::File,
+                ),
+                EntrySnapshot::new(
+                    PathBuf::from("/project/_build"),
+                    "_build".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+                EntrySnapshot::new(
+                    PathBuf::from("/project/_build-laneW984dj"),
+                    "_build-laneW984dj".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+            ],
+        };
+        let project = detect_project_from_snapshot(&snap).expect("mix.exs detected as elixir");
+        let candidates = artifact_candidates_from_snapshot(root, &project, &args(false), &snap);
+
+        let lane = candidates
+            .iter()
+            .find(|c| c.path == PathBuf::from("/project/_build-laneW984dj"))
+            .expect("lane build root must be nominated");
+        assert_eq!(lane.reason, "elixir lane build root (fan-out lease)");
+        assert!(candidates.iter().any(|c| c.path == PathBuf::from("/project/_build")));
+    }
+
+    /// A rust project root with `target-laneW622` gets the wholesale lane
+    /// candidate alongside the plain `target` rule.
+    #[test]
+    fn rust_project_nominates_lane_target_root_wholesale() {
+        let root = Path::new("/project");
+        let snap = DirSnapshot {
+            children: vec![
+                EntrySnapshot::new(
+                    PathBuf::from("/project/Cargo.toml"),
+                    "Cargo.toml".into(),
+                    Some("toml".into()),
+                    EntryKind::File,
+                ),
+                EntrySnapshot::new(
+                    PathBuf::from("/project/target"),
+                    "target".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+                EntrySnapshot::new(
+                    PathBuf::from("/project/target-laneW622"),
+                    "target-laneW622".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+            ],
+        };
+        let project = detect_project_from_snapshot(&snap).expect("Cargo.toml detected as rust");
+        let candidates = artifact_candidates_from_snapshot(root, &project, &args(false), &snap);
+
+        let lane = candidates
+            .iter()
+            .find(|c| c.path == PathBuf::from("/project/target-laneW622"))
+            .expect("lane target root must be nominated");
+        assert_eq!(lane.reason, "rust lane target root (fan-out lease)");
+        assert!(candidates.iter().any(|c| c.path == PathBuf::from("/project/target")));
+    }
+
+    /// The ruleset revision was bumped to 4 for this classification change,
+    /// so scan caches written under revision 3 (which replayed zero lane-root
+    /// candidates) can never be mistaken for current.
+    #[test]
+    fn classifier_revision_is_4() {
+        assert_eq!(CLASSIFIER_REVISION, 4);
+        assert!(scan_cache_revision_prefix().starts_with("scan-r4-"));
     }
 }
