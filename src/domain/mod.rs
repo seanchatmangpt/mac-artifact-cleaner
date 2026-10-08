@@ -8,6 +8,7 @@ pub mod daemon_preflight;
 pub mod dcm;
 pub mod dedupe;
 pub mod delete;
+pub mod disk_scan;
 pub mod docker_host;
 pub mod docker_receipt;
 pub mod doctor;

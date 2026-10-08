@@ -317,7 +317,13 @@ pub struct ArgsSnapshot {
 /// judged by its OWN directory mtime, not interior-file freshness (bulk-copy
 /// interior mtimes are not activity; project-root interior walks suppressed
 /// every lane under an actively-worked repo).
-pub const CLASSIFIER_REVISION: u32 = 6;
+/// v7 (2026-10-08): disk-scan-derived classes from the 15-lane nomination
+/// corpus — repo-root `erl_crash.dump`, `ios/build`+`ios/Pods` behind
+/// `Podfile.lock`, tmp lane build roots, and the new build-tool caches
+/// (`dotslash`, `BytecodeAlliance.wasmtime`, `node-gyp`, `pyinstaller`,
+/// `*-updater`, `.terraform/providers`). Full class set (including
+/// operator-call nominate-only classes) lives in `domain::disk_scan`.
+pub const CLASSIFIER_REVISION: u32 = 7;
 
 /// Namespace for the persistent scan cache: every input that changes what a
 /// directory's cached `candidates_list` would contain.
@@ -788,6 +794,16 @@ pub fn global_cache_candidates(home: &Path) -> Vec<(std::path::PathBuf, String)>
         // compiler/package caches individually so each is auditable on its own
         // line in a plan, not buried inside one opaque multi-GB directory.
         ("Library/Caches/Mozilla.sccache", "sccache compiler cache"),
+        // r7 (2026-10-08 disk-scan corpus): dotslash materializes signed .app
+        // contents — callers must skip unreadable subpaths and report partial.
+        (
+            "Library/Caches/dotslash",
+            "dotslash materialization cache (skip unreadable subpaths, report partial)",
+        ),
+        ("Library/Caches/BytecodeAlliance.wasmtime", "wasmtime build cache"),
+        ("Library/Caches/node-gyp", "node-gyp headers/toolchain cache"),
+        ("Library/Caches/pyinstaller", "pyinstaller bootloader cache"),
+        (".terraform/providers", "terraform provider cache"),
         ("Library/Caches/Homebrew", "Homebrew downloaded-bottle cache"),
         ("Library/Caches/go-build", "Go build cache"),
         ("Library/Caches/ms-playwright", "Playwright downloaded browsers"),
@@ -1579,6 +1595,15 @@ pub fn artifact_candidates_from_snapshot(
         }
     }
 
+    // ── r7 disk-scan-derived classes (domain::disk_scan) ────────────────────
+    // Repo-root erlang crash dump (any project kind — erlmcp-style roots
+    // accumulate them outside `_build/`).
+    if let Some(c) = crate::domain::disk_scan::erl_crash_dump_candidate(root, snap) {
+        out.push(c);
+    }
+    // iOS build + Pods behind a Podfile.lock (witnessed: zoela, 6.8 GB).
+    out.extend(crate::domain::disk_scan::ios_build_pods_candidates(root, snap));
+
     // Project detection legitimately fires inside unpacked package stores and
     // app bundles; a sub-path nomination there corrupts the store instead of
     // reclaiming a rebuildable cache. See `is_inside_package_store`.
@@ -1846,13 +1871,12 @@ mod lane_build_root_tests {
         assert!(candidates.iter().any(|c| c.path == PathBuf::from("/project/target")));
     }
 
-    /// The ruleset revision was bumped to 5 for the W651c lane-root recency
-    /// refinement, so scan caches written under revision 4 (which suppressed
-    /// bulk-copied lane roots by interior freshness) can never be mistaken
-    /// for current.
+    /// The ruleset revision was bumped to 7 for the 2026-10-08 disk-scan
+    /// classes, so scan caches written under revision 6 (or earlier) can
+    /// never be mistaken for current.
     #[test]
-    fn classifier_revision_is_6() {
-        assert_eq!(CLASSIFIER_REVISION, 6);
-        assert!(scan_cache_revision_prefix().starts_with("scan-r6-"));
+    fn classifier_revision_is_7() {
+        assert_eq!(CLASSIFIER_REVISION, 7);
+        assert!(scan_cache_revision_prefix().starts_with("scan-r7-"));
     }
 }
