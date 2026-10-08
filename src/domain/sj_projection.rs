@@ -264,4 +264,52 @@ mod tests {
         assert!(ttl.contains("\\\"subject\\\""));
         assert!(ttl.contains("\\nline2"));
     }
+
+    #[test]
+    fn seal_closes_chain_hash_seam_deterministically() {
+        let mut rec = from_r_receipt(&fixture_receipt());
+        assert_eq!(rec.chain_hash, None);
+
+        // Fresh empty base chain (no prior events).
+        let empty_base = affidavit::chain::ChainAssembler::new().finalize();
+        let sealed1 = crate::domain::affidavit_integration::seal_sj_record(&mut rec, &empty_base)
+            .expect("empty base seals");
+        assert_eq!(
+            rec.chain_hash.as_deref(),
+            Some(sealed1.chain_hash.as_hex()),
+            "chain_hash must equal the sealed chain's rolling hash"
+        );
+
+        // Deterministic: same record + same base -> same chain_hash.
+        let mut rec2 = from_r_receipt(&fixture_receipt());
+        let sealed2 = crate::domain::affidavit_integration::seal_sj_record(&mut rec2, &empty_base)
+            .expect("second seal of identical input");
+        assert_eq!(rec.chain_hash, rec2.chain_hash);
+        assert_eq!(sealed1.chain_hash, sealed2.chain_hash);
+
+        // The record is itself chain-attested: it appears in the chain events.
+        let event = sealed1.events.last().expect("record event appended");
+        assert_eq!(event.event_type, "sj_work_order_sealed");
+        assert_eq!(event.seq, 0);
+        assert_eq!(event.objects[0].obj_type, "sj_work_order_record");
+        assert_eq!(event.objects[0].id, rec.provider_execution_id);
+        // Commitment is recomputable from the record's canonical emission.
+        let expected_commitment = affidavit::Blake3Hash::from_bytes(
+            to_sj_ttl(&[from_r_receipt(&fixture_receipt())]).as_bytes(),
+        );
+        assert_eq!(event.payload_commitment, expected_commitment);
+
+        // Extending a non-empty base chain: hash differs from the empty base.
+        let r = fixture_receipt();
+        let base = crate::domain::affidavit_integration::build_deletion_affidavit(
+            &crate::domain::receipt::DeletionReceipt::new(0, 1, 2, vec![], None, None),
+        )
+        .expect("base seals");
+        let mut rec3 = from_r_receipt(&r);
+        let sealed3 = crate::domain::affidavit_integration::seal_sj_record(&mut rec3, &base)
+            .expect("non-empty base seals");
+        assert_eq!(sealed3.events.len(), base.events.len() + 1);
+        assert_ne!(sealed3.chain_hash, sealed1.chain_hash);
+        assert_eq!(sealed3.events[..base.events.len()], base.events[..]);
+    }
 }

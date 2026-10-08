@@ -15,7 +15,11 @@
 use affidavit::{chain::ChainAssembler, Blake3Hash, ObjectRef, OperationEvent};
 pub use affidavit::{types::AdmittedReceipt, Receipt, Verdict};
 
-use crate::domain::{receipt::DeletionReceipt, time::SnapshotThinReceipt};
+use crate::domain::{
+    receipt::DeletionReceipt,
+    sj_projection::{SjWorkOrderRecord, SJ_REFUSAL_REGISTRY_SEAM},
+    time::SnapshotThinReceipt,
+};
 
 /// Project a [`DeletionReceipt`] into a sealed affidavit [`Receipt`].
 ///
@@ -215,6 +219,111 @@ pub fn build_snapshot_thin_affidavit(receipt: &SnapshotThinReceipt) -> anyhow::R
 /// not theoretical, failure mode.
 pub fn build_snapshot_delete_affidavit(receipt: &SnapshotThinReceipt) -> anyhow::Result<Receipt> {
     build_snapshot_affidavit(receipt, "snapshot_delete_requested", "snapshot_delete_plan")
+}
+
+/// Seal an [`SjWorkOrderRecord`] into an affidavit chain.
+///
+/// The record is emitted into the chain as a `sj_work_order_sealed` event
+/// (payload commitment = BLAKE3 over the record's canonical `sj:` Turtle
+/// emission, which is deterministic and chain_hash-free, so the commitment is
+/// circularity-free) and [`SjWorkOrderRecord::chain_hash`] — `None` until now
+/// — is set to the resulting chain's rolling BLAKE3 `chain_hash`. The returned
+/// [`Receipt`] carries the full extended chain (base events + the record
+/// event) and can be persisted/certified like any other sealed receipt.
+///
+/// Deterministic: the same record and base chain always produce the same
+/// `chain_hash`.
+///
+/// ```
+/// use osx_clnr::domain::affidavit_integration::{build_deletion_affidavit, seal_sj_record};
+/// use osx_clnr::domain::r_projection::RReceipt;
+/// use osx_clnr::domain::sj_projection::from_r_receipt;
+///
+/// // A minimal RReceipt fixture (see sj_projection tests for the full shape).
+/// let sha40 = "a".repeat(40);
+/// let authority = osx_clnr::domain::r_projection::RAuthority {
+///     ceiling: "DO".into(), grant: "plan:approved".into(), actor: "oclnr-cli".into(),
+/// };
+/// let r = RReceipt {
+///     identity: osx_clnr::domain::r_projection::RIdentity {
+///         subject: "osx-clnr@aaaaaaa".into(), repo: "/src/osx-clnr".into(),
+///         subject_sha: sha40.clone(), base_sha: sha40,
+///     },
+///     authority: authority.clone(),
+///     consequence: osx_clnr::domain::r_projection::RConsequence {
+///         commits: vec![], files_changed: vec![], remote_effects: vec![],
+///     },
+///     replay: osx_clnr::domain::r_projection::RReplay {
+///         commands: vec![], durable_location: "/tmp/clean.r.json".into(),
+///     },
+///     standing: osx_clnr::domain::r_projection::RStanding {
+///         value: "ALIVE".into(), derived_from: "test".into(), broken_term: None,
+///     },
+///     work_order_id: "oclnr-plan:abc123".into(),
+///     origin_authority: authority,
+///     provider: osx_clnr::domain::r_projection::RProvider {
+///         name: "oclnr".into(), transport: "local-process".into(),
+///         authority_ceiling: "DO".into(), receipt_protocol: "test".into(),
+///     },
+///     provider_execution_id: format!("oclnr:sha256:{}", "f".repeat(64)),
+/// };
+/// let mut record = from_r_receipt(&r);
+/// assert_eq!(record.chain_hash, None);          // unsealed seam
+///
+/// // Base chain: a freshly sealed deletion affidavit (may also be empty via
+/// // `ChainAssembler::new().finalize()`).
+/// let base = build_deletion_affidavit(&osx_clnr::domain::receipt::DeletionReceipt::new(
+///     0, 1, 2, vec![], None, None,
+/// )).unwrap();
+/// let sealed_chain = seal_sj_record(&mut record, &base).unwrap();
+///
+/// // The seam is closed: chain_hash is Some and recomputable from the chain.
+/// assert_eq!(
+///     record.chain_hash.as_deref(),
+///     Some(sealed_chain.chain_hash.as_hex()),
+/// );
+/// // The record is itself chain-attested: last event carries its commitment.
+/// let last = sealed_chain.events.last().unwrap();
+/// assert_eq!(last.event_type, "sj_work_order_sealed");
+/// assert_eq!(last.objects[0].obj_type, "sj_work_order_record");
+/// ```
+///
+/// # Errors
+///
+/// Returns `Err` if the base chain's events fail to re-append (chain-order
+/// invariant violation — never expected for a [`Receipt`] produced by
+/// `finalize`) or if the record fails to serialize.
+pub fn seal_sj_record(
+    record: &mut SjWorkOrderRecord,
+    base: &Receipt,
+) -> anyhow::Result<Receipt> {
+    let mut assembler = ChainAssembler::new();
+    for event in &base.events {
+        assembler
+            .append(event.clone())
+            .map_err(|e| anyhow::anyhow!("base chain event failed to re-append: {e}"))?;
+    }
+
+    let record_ttl = crate::domain::sj_projection::to_sj_ttl(std::slice::from_ref(record));
+    let seq = base.events.len() as u64;
+    let event = OperationEvent {
+        id: format!("sj-work-order-{seq}"),
+        seq,
+        event_type: "sj_work_order_sealed".to_string(),
+        objects: vec![ObjectRef {
+            id: record.provider_execution_id.clone(),
+            obj_type: "sj_work_order_record".to_string(),
+            qualifier: Some(SJ_REFUSAL_REGISTRY_SEAM.to_string()),
+        }],
+        payload_commitment: Blake3Hash::from_bytes(record_ttl.as_bytes()),
+    };
+    assembler
+        .append(event)
+        .map_err(|e| anyhow::anyhow!("sj: record event failed to canonicalize: {e}"))?;
+
+    let sealed = assembler.finalize();
+    record.chain_hash = Some(sealed.chain_hash.as_hex().to_string());
+    Ok(sealed)
 }
 
 /// Run affidavit's 7-stage structural certification over a sealed receipt.
