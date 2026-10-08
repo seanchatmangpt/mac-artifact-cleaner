@@ -23,5 +23,6 @@ pub mod pressure;
 pub mod r_projection;
 pub mod receipt;
 pub mod redaction;
+pub mod sj_projection;
 pub mod time;
 pub mod tool_roots;
