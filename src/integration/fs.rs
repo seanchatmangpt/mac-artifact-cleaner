@@ -28,8 +28,7 @@ use crate::{
         artifact::{
             artifact_candidates_from_snapshot, cache_hit, detect_project_from_snapshot,
             is_global_cache, is_lane_build_root_name, is_macos_os_dir, is_traversal_barrier_name,
-            ArgsSnapshot,
-            CachedDirEntry, Candidate, DirSnapshot, EntryKind, EntrySnapshot,
+            ArgsSnapshot, CachedDirEntry, Candidate, DirSnapshot, EntryKind, EntrySnapshot,
         },
         audit::Stats,
         tool_roots::{ToolRootAcc, ToolRootDef},
@@ -335,61 +334,8 @@ pub fn estimate_size(path: &Path, stats: Arc<Stats>) -> u64 {
     size
 }
 
-/// Performs a fast, bounded traversal to see if any *source* file within the
-/// project has been modified recently. This correctly identifies active
-/// development because a directory's `mtime` only updates on direct child
-/// changes.
-///
-/// Must be called with the **project root**, not an individual artifact
-/// candidate path — a freshly-built `target/` or `node_modules/` always has
-/// a fresh internal mtime, which would otherwise make every build artifact
-/// look like "recent activity" and mask real reclaim candidates. Known
-/// artifact/barrier directories are skipped during the walk so a fresh build
-/// doesn't count as source activity.
-fn is_recently_active(project_root: &Path, hours: u64) -> bool {
-    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
-
-    let mut builder = WalkBuilder::new(project_root);
-    builder
-        .hidden(false)
-        .ignore(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        // Bounded depth keeps this cheap, but it must reach real source
-        // trees: at the previous limit of 4, sources at depth ≥5 — Elixir
-        // umbrella apps (`apps/<app>/lib/…`), workspace crates
-        // (`crates/<crate>/src/…`), monorepo packages — were invisible, so a
-        // project under active development could be judged stale and its
-        // build artifacts planned for deletion. 6 covers those layouts while
-        // artifact/barrier directories are pruned by the filter below.
-        .max_depth(Some(6))
-        .filter_entry(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .map(|name| !is_traversal_barrier_name(name))
-                .unwrap_or(true)
-        });
-
-    for result in builder.build() {
-        if let Ok(entry) = result {
-            if let Ok(meta) = entry.metadata() {
-                if meta.is_file() {
-                    if let Ok(modified) = meta.modified() {
-                        if modified > cutoff {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
 /// Recency signal for fan-out lane build roots (`_build-lane*` /
-/// `target-lane*`), deliberately different from [`is_recently_active`].
+/// `target-lane*`), deliberately narrower than a project-level walk.
 ///
 /// The project-root rule walks interior files because a directory's mtime
 /// only moves on direct-child changes; a lane root inverts that table. The
@@ -449,8 +395,7 @@ pub fn scan_root(
     // 60-minute-stale rule maps to, so a LIVE lane's root is never nominated.
     if let Some(name) = root.file_name().and_then(|s| s.to_str()) {
         if is_lane_build_root_name(name) {
-            let recently_active =
-                is_lane_root_recently_active(root, args.ignore_recent_hours);
+            let recently_active = is_lane_root_recently_active(root, args.ignore_recent_hours);
             if !recently_active {
                 let cand = Candidate {
                     path: root.to_path_buf(),
@@ -663,39 +608,35 @@ pub fn scan_root(
                 if !found.is_empty() {
                     stats.candidates_seen.fetch_add(found.len(), Ordering::Relaxed);
 
-                    // Checked once per project root, not per artifact candidate: a
-                    // freshly-built target/node_modules always has a fresh internal
-                    // mtime, so checking the candidate path itself would wrongly
-                    // flag every build artifact as "recent activity".
-                    let project_recently_active = args_snapshot.ignore_recent_hours > 0
-                        && is_recently_active(path, args_snapshot.ignore_recent_hours);
-
+                    // Per-candidate recency gate. Only fan-out lane build
+                    // roots (`_build-lane*` / `target-lane*`) are recency-
+                    // shielded, and only by their OWN directory mtime: a
+                    // live compile writes into the lane continuously, and
+                    // the lane's dir mtime moves on direct-child churn.
+                    //
+                    // Plain regenerable build dirs (`target/`,
+                    // `node_modules`, `_build`) are NOT recency-shielded,
+                    // not even under an actively-developed project. The
+                    // previous project-root rule (`is_recently_active`
+                    // walking interior files to depth 6) meant any repo
+                    // worked in the last 24h had its build dirs suppressed
+                    // from EVERY plan — on this machine that permanently
+                    // shielded a 166 GB `ggen/target` while the disk sat
+                    // at 93% full (2026-10-10). A build dir is regenerable
+                    // by definition (`cargo clean` is always safe); the
+                    // worst case of cleaning one under an active project
+                    // is one forced rebuild, never data loss.
                     for c in found {
-                        // Per-candidate gate (W651d): a whole-nominated lane
-                        // build root (`_build-lane*` / `target-lane*`) is
-                        // judged by its OWN directory mtime, not the project
-                        // root's recency — one fresh compile anywhere in the
-                        // repo must not suppress every lane lease
-                        // (W651c2 falsifier: 11 stale lanes suppressed
-                        // alongside 20 fresh ones under an active project).
-                        // Non-lane candidates keep the project-level rule:
-                        // a freshly-built target/node_modules always has a
-                        // fresh internal mtime, so checking the candidate
-                        // path itself would wrongly flag it as active.
-                        let suppressed =
-                            if c.path
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .map(crate::domain::artifact::is_lane_build_root_name)
-                                .unwrap_or(false)
-                            {
-                                is_lane_root_recently_active(
-                                    &c.path,
-                                    args_snapshot.ignore_recent_hours,
-                                )
-                            } else {
-                                project_recently_active
-                            };
+                        let suppressed = c
+                            .path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .map(crate::domain::artifact::is_lane_build_root_name)
+                            .unwrap_or(false)
+                            && is_lane_root_recently_active(
+                                &c.path,
+                                args_snapshot.ignore_recent_hours,
+                            );
                         if suppressed {
                             continue;
                         }
@@ -1746,69 +1687,6 @@ pub fn populate_tool_roots_metadata(defs: &[ToolRootDef], accs: &DashMap<PathBuf
 }
 
 #[cfg(test)]
-mod is_recently_active_tests {
-    use std::{fs, thread, time::Duration};
-
-    use super::is_recently_active;
-
-    /// A freshly-built `target/` under a project with stale source files must
-    /// not itself count as "recent activity" — this was the regression that
-    /// silently filtered every real reclaim candidate out of the plan (the
-    /// bug called `is_recently_active` on the artifact path instead of the
-    /// project root, so a fresh build always looked like recent development).
-    #[test]
-    fn fresh_build_artifact_does_not_count_as_recent_activity() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-
-        let main_rs = root.join("main.rs");
-        fs::write(&main_rs, "fn main() {}").unwrap();
-        // Backdate the source file well past the 1-hour cutoff used below.
-        let stale = std::time::SystemTime::now() - Duration::from_secs(3600 * 24);
-        fs::File::options().write(true).open(&main_rs).unwrap().set_modified(stale).unwrap();
-
-        let target = root.join("target");
-        fs::create_dir(&target).unwrap();
-        fs::write(target.join("build-output.bin"), b"fresh").unwrap();
-
-        assert!(!is_recently_active(root, 1));
-    }
-
-    /// A genuinely-recently-edited source file (outside any barrier dir)
-    /// still correctly marks the project as active.
-    #[test]
-    fn recently_edited_source_file_counts_as_recent_activity() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-
-        fs::write(root.join("main.rs"), "fn main() {}").unwrap();
-        thread::sleep(Duration::from_millis(10));
-
-        assert!(is_recently_active(root, 1));
-    }
-
-    /// Source files below the old `max_depth(4)` cutoff — Elixir umbrella
-    /// apps (`apps/<app>/lib/…`, depth 4) and any deeper workspace layout —
-    /// must also count as recent activity. At the old depth limit a freshly
-    /// edited depth-5 source was invisible, an actively developed project
-    /// looked stale, and its build artifacts were planned for deletion.
-    #[test]
-    fn deep_umbrella_source_file_counts_as_recent_activity() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-
-        // Depth check: root(0) → apps(1) → api(2) → lib(3) → api(4) →
-        // file(5) — beyond the old depth-4 cutoff, inside the new one.
-        let deep = root.join("apps").join("api").join("lib").join("api");
-        fs::create_dir_all(&deep).unwrap();
-        fs::write(deep.join("api.ex"), "defmodule Api do\nend").unwrap();
-        thread::sleep(Duration::from_millis(10));
-
-        assert!(is_recently_active(root, 1));
-    }
-}
-
-#[cfg(test)]
 mod physical_dir_size_tests {
     use std::{fs, os::unix::fs::MetadataExt as _, path::PathBuf};
 
@@ -2004,9 +1882,9 @@ mod scan_root_tests {
         fs::create_dir(&target).unwrap();
         fs::write(target.join("output.bin"), b"fake build output").unwrap();
 
-        // Backdate everything so `ignore_recent_hours` doesn't mask the
-        // freshly-created target/ as "recent activity" (see
-        // `is_recently_active_tests` above for why this matters).
+        // Backdate everything so the fixture isn't masked by recency rules
+        // that touch only lane build roots (see the candidate-gate comment
+        // in `scan_root`).
         let _ = std::process::Command::new("sh")
             .arg("-c")
             .arg(format!("find '{}' -exec touch -t 202001010000 {{}} +", project.display()))
@@ -2672,10 +2550,7 @@ mod lane_root_scan_tests {
             candidates.iter().map(|e| e.key().clone()).collect::<Vec<_>>()
         );
         // No inner candidate is needed — containment covers it.
-        assert!(
-            !candidates.contains_key(&inner),
-            "inner _build must not be separately nominated"
-        );
+        assert!(!candidates.contains_key(&inner), "inner _build must not be separately nominated");
     }
 
     /// The W651b boundary finding: a *bulk-copied* lane root preserves old

@@ -152,6 +152,8 @@ impl WorkflowContext {
             // directly instead of forcing clear_artifacts as an undocumented
             // mandatory recovery step.
             (WorkflowState::DeleteFailed, WorkflowState::AuditNeeded) => Ok(()),
+            // Same for a failed audit: retrying audit_scan must not be a dead end.
+            (WorkflowState::AuditFailed, WorkflowState::AuditNeeded) => Ok(()),
             (WorkflowState::AuditNeeded, WorkflowState::AuditInProgress) => Ok(()),
             (WorkflowState::AuditInProgress, WorkflowState::AuditComplete) => Ok(()),
 

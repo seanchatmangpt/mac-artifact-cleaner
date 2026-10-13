@@ -748,6 +748,19 @@ privacy scan passed
 relevant receipts emitted or validated
 ```
 
+### 12.6 Post-Session Self-Clean
+
+The repo's own `target/` is a recurring disk whale (measured 2026-10-03: 16 GB,
+regrowing ~12 GB in five days of builds). The live-cwd guard correctly keeps
+unattended jobs from touching it while a session is active — so leaving it behind
+is a hand-delete responsibility:
+
+- After heavy builds, before leaving the repo, run `oclnr dev` (first-party,
+  receipted cleanup for the current directory's `target/`).
+- Multi-root variant: `oclnr audit cargo-clean --root <PATH>`.
+- Raw `cargo clean` / `rm -rf` remain hook-blocked; `oclnr dev` is the
+  lawful path (handles macOS immutable flags, reports what it removed).
+
 ---
 
 ## 13. Definition of Done

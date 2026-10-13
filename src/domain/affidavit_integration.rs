@@ -293,10 +293,7 @@ pub fn build_snapshot_delete_affidavit(receipt: &SnapshotThinReceipt) -> anyhow:
 /// Returns `Err` if the base chain's events fail to re-append (chain-order
 /// invariant violation — never expected for a [`Receipt`] produced by
 /// `finalize`) or if the record fails to serialize.
-pub fn seal_sj_record(
-    record: &mut SjWorkOrderRecord,
-    base: &Receipt,
-) -> anyhow::Result<Receipt> {
+pub fn seal_sj_record(record: &mut SjWorkOrderRecord, base: &Receipt) -> anyhow::Result<Receipt> {
     let mut assembler = ChainAssembler::new();
     for event in &base.events {
         assembler

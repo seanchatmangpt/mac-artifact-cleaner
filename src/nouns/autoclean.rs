@@ -715,17 +715,40 @@ fn run(opts: RunOptions) -> anyhow::Result<()> {
     // autonomous job must be strictly more conservative than an interactive
     // session (which can pass --acknowledge-unknown-reversibility after a
     // human actually looks). Skip and log instead of overriding it here.
-    let non_reversible_count = plan
-        .items
-        .iter()
-        .filter(|i| {
+    //
+    // Exception: a 0-byte unknown/irreversible item carries no bytes at
+    // risk, so it cannot be the thing the veto exists to protect. Such
+    // items are dropped from the plan (and logged) rather than allowed to
+    // veto the run — a 0-byte `/tmp` leftover classifying as Unknown used
+    // to silence multi-GB runs for days (2026-10-06..09 autoclean.log).
+    let (non_reversible_count, zero_byte_dropped): (usize, Vec<String>) = {
+        let non_reversible = |i: &&crate::domain::plan::PlanItem| {
             matches!(
                 i.reversibility,
                 crate::domain::dcm::Reversibility::Unknown
                     | crate::domain::dcm::Reversibility::Irreversible
             )
-        })
-        .count();
+        };
+        let zeros: Vec<String> = plan
+            .items
+            .iter()
+            .filter(|i| i.bytes == 0 && non_reversible(i))
+            .map(|i| i.path.display().to_string())
+            .collect();
+        let vetoed_count = plan.items.iter().filter(|i| i.bytes > 0 && non_reversible(i)).count();
+        plan.items.retain(|i| !(i.bytes == 0 && non_reversible(&i)));
+        (vetoed_count, zeros)
+    };
+    if !zero_byte_dropped.is_empty() {
+        let msg = format!(
+            "[autoclean {ts}] dropped {} zero-byte unknown/irreversible item(s) (no bytes at \
+             risk, not vetoing): {}",
+            zero_byte_dropped.len(),
+            zero_byte_dropped.join(", ")
+        );
+        println!("{msg}");
+        append_log(&msg)?;
+    }
     if non_reversible_count > 0 {
         facts.outcome = "skipped".into();
         emit_run_ocel(&facts);
@@ -859,11 +882,7 @@ fn run(opts: RunOptions) -> anyhow::Result<()> {
     match snapshot_thin {
         Ok(out) if out.status.success() => {
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let summary_line = stdout
-                .lines()
-                .find(|l| l.starts_with("Deleted "))
-                .unwrap_or("snapshot thin: no summary line")
-                .to_string();
+            let summary_line = first_deleted_line(&stdout).to_string();
             let msg = format!("[autoclean {ts}] snapshot keep-latest: {summary_line}");
             println!("{msg}");
             append_log(&msg)?;
@@ -895,6 +914,15 @@ fn run(opts: RunOptions) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// First stdout line beginning with `Deleted `, else the fallback marker so a
+/// genuinely silent `snapshot delete` child stays visible in the run log. The
+/// no-op path of the delete handler emits `Deleted 0 snapshot(s) successfully
+/// (no matching snapshots ...)` precisely so this parser reports it instead of
+/// the fallback (a no-op is a routine condition, not a skipped step).
+fn first_deleted_line(stdout: &str) -> &str {
+    stdout.lines().find(|l| l.starts_with("Deleted ")).unwrap_or("snapshot thin: no summary line")
+}
+
 // ── Pressure-trigger coordination (used by `monitor --trigger-autoclean`) ─────
 //
 // The monitor may fire the same lawful autoclean pipeline on demand when the
@@ -924,4 +952,33 @@ pub fn write_trigger_stamp(now_unix: i64) -> anyhow::Result<()> {
     }
     std::fs::write(&path, format!("{now_unix}\n"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod snapshot_summary_tests {
+    use super::first_deleted_line;
+
+    #[test]
+    fn no_op_summary_line_is_used_not_fallback() {
+        let stdout =
+            "Deleted 0 snapshot(s) successfully (no matching snapshots for --which keep-latest).\n";
+        assert_eq!(
+            first_deleted_line(stdout),
+            "Deleted 0 snapshot(s) successfully (no matching snapshots for --which keep-latest)."
+        );
+    }
+
+    #[test]
+    fn real_delete_summary_line_is_used() {
+        let stdout = "Free space after:\nDeleted 3 snapshot(s) successfully.\n";
+        assert_eq!(first_deleted_line(stdout), "Deleted 3 snapshot(s) successfully.");
+    }
+
+    #[test]
+    fn garbage_stdout_still_falls_back() {
+        assert_eq!(
+            first_deleted_line("nothing here\nmove along\n"),
+            "snapshot thin: no summary line"
+        );
+    }
 }

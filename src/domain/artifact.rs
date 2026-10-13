@@ -1297,7 +1297,7 @@ pub fn detect_project_from_snapshot(snap: &DirSnapshot) -> Option<ProjectKind> {
 /// // Positive case: "target" dir in snapshot → candidate.
 /// let snap = DirSnapshot {
 ///     children: vec![
-///         EntrySnapshot::new(PathBuf::from("/project/target"), "target".into(), None, EntryKind::Dir),
+///         EntrySnapshot::new("/project/target".into(), "target".into(), None, EntryKind::Dir),
 ///     ],
 /// };
 /// let candidates = artifact_candidates_from_snapshot(root, &project, &args, &snap);
@@ -1808,14 +1808,9 @@ mod lane_build_root_tests {
                     Some("exs".into()),
                     EntryKind::File,
                 ),
+                EntrySnapshot::new("/project/_build".into(), "_build".into(), None, EntryKind::Dir),
                 EntrySnapshot::new(
-                    PathBuf::from("/project/_build"),
-                    "_build".into(),
-                    None,
-                    EntryKind::Dir,
-                ),
-                EntrySnapshot::new(
-                    PathBuf::from("/project/_build-laneW984dj"),
+                    "/project/_build-laneW984dj".into(),
                     "_build-laneW984dj".into(),
                     None,
                     EntryKind::Dir,
@@ -1827,10 +1822,10 @@ mod lane_build_root_tests {
 
         let lane = candidates
             .iter()
-            .find(|c| c.path == PathBuf::from("/project/_build-laneW984dj"))
+            .find(|c| c.path.as_path() == Path::new("/project/_build-laneW984dj"))
             .expect("lane build root must be nominated");
         assert_eq!(lane.reason, "elixir lane build root (fan-out lease)");
-        assert!(candidates.iter().any(|c| c.path == PathBuf::from("/project/_build")));
+        assert!(candidates.iter().any(|c| c.path.as_path() == Path::new("/project/_build")));
     }
 
     /// A rust project root with `target-laneW622` gets the wholesale lane
@@ -1846,14 +1841,9 @@ mod lane_build_root_tests {
                     Some("toml".into()),
                     EntryKind::File,
                 ),
+                EntrySnapshot::new("/project/target".into(), "target".into(), None, EntryKind::Dir),
                 EntrySnapshot::new(
-                    PathBuf::from("/project/target"),
-                    "target".into(),
-                    None,
-                    EntryKind::Dir,
-                ),
-                EntrySnapshot::new(
-                    PathBuf::from("/project/target-laneW622"),
+                    "/project/target-laneW622".into(),
                     "target-laneW622".into(),
                     None,
                     EntryKind::Dir,
@@ -1865,10 +1855,10 @@ mod lane_build_root_tests {
 
         let lane = candidates
             .iter()
-            .find(|c| c.path == PathBuf::from("/project/target-laneW622"))
+            .find(|c| c.path.as_path() == Path::new("/project/target-laneW622"))
             .expect("lane target root must be nominated");
         assert_eq!(lane.reason, "rust lane target root (fan-out lease)");
-        assert!(candidates.iter().any(|c| c.path == PathBuf::from("/project/target")));
+        assert!(candidates.iter().any(|c| c.path.as_path() == Path::new("/project/target")));
     }
 
     /// The ruleset revision was bumped to 7 for the 2026-10-08 disk-scan

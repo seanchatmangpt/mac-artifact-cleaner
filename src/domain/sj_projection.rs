@@ -73,9 +73,7 @@ pub fn from_r_receipt(r: &RReceipt) -> SjWorkOrderRecord {
         .replay
         .commands
         .first()
-        .map(|c: &RCommand| {
-            format!("{}@{}", c.output_sha256, r.replay.durable_location)
-        })
+        .map(|c: &RCommand| format!("{}@{}", c.output_sha256, r.replay.durable_location))
         .unwrap_or_else(|| r.replay.durable_location.clone());
     SjWorkOrderRecord {
         subject: r.identity.subject.clone(),
@@ -203,16 +201,13 @@ mod tests {
     #[test]
     fn fixture_maps_to_expected_record() {
         let rec = from_r_receipt(&fixture_receipt());
-        assert_eq!(rec.subject,  "osx-clnr@aaaaaaa");
+        assert_eq!(rec.subject, "osx-clnr@aaaaaaa");
         assert_eq!(rec.repo, "/src/osx-clnr");
         assert_eq!(rec.base_sha, "a".repeat(40));
         assert_eq!(rec.authority_ceiling, "DO");
         assert_eq!(rec.grant, "plan:approved");
         assert_eq!(rec.actor, "oclnr-cli");
-        assert_eq!(
-            rec.replay_identity,
-            format!("{}@/tmp/clean.r.json", "f".repeat(64))
-        );
+        assert_eq!(rec.replay_identity, format!("{}@/tmp/clean.r.json", "f".repeat(64)));
         assert_eq!(rec.standing, "ALIVE");
         assert_eq!(rec.broken_term, None);
         assert_eq!(rec.work_order, "oclnr-plan:abc123");

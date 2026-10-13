@@ -7,12 +7,24 @@
 - `docker trim --confirm` (5add5ff): data-preserving guest `fstrim` inside the Colima VM so freed guest blocks return to the host; refuses to run without `--confirm`. `docker scan` also reports Colima VM disk images / Docker.raw host-side footprint.
 - `tools git-worktrees` (7c70590): read-only git-worktree standing report (git-health).
 - Pressure-triggered reclaim (6ed9727): `daemon install-pressure-monitor` installs a `com.oclnr.pressure` KeepAlive LaunchAgent running `monitor --watch --reclaim snapshots[,builds]`; new `monitor` flags `--threshold-gb` / `--interval-secs` / `--reclaim` (`--reclaim` and `--trigger-autoclean` are mutually exclusive).
-- Fleet R-projection receipts (acdf150): every native receipt (delete execute, snapshot thin incl. the pressure path) now also emits an `R = receipt(A)` projection at `<stem>.r.json` beside it; `build.rs` stamps `OCLNR_BUILD_SHA` / `OCLNR_BUILD_DIRTY` at compile time.
+- Fleet R-projection receipts (acdf150): every native receipt (delete execute, snapshot thin incl. the pressure path) now also emits an `R = receipt(A)` projection at `<stem>.r.json` beside it; `build.rs` stamps `OCLNR_BUILD_SHA` / `OCLNR_BUILD_DIRTY` at compile time. Schema v2 (010b81a): projections now require `work_order_id`, `origin_authority`, `provider`, and `provider_execution_id`; v1-only projections are refused by `validate_receipt.py`.
+- `delete execute --thin-after` (f755a25): opt-in thinning of local APFS snapshots after deleting and before free space is sampled, so the receipt records released space instead of a snapshot-pinned shortfall; writes a sealed `<receipt>.thin.json`. Off by default, acts only with `--yes`, and a thin failure warns without aborting the receipt write; MCP `delete` gains the matching `thin_after` param.
+- `snapshot thin` iteration (457db83, cee16ce): one `tmutil thinlocalsnapshots` pass can release only some snapshots, so thinning iterates until the target is met, nothing is left, no pass makes progress, or the pass cap is hit; receipts record one `ThinIteration` per pass plus a final `stop_reason` (`iteration_cap` / `nothing_left` / `no_progress` / `target_met`); legacy receipts still parse.
+- Audit candidate sizing (f3d0ee4): `audit run` and the MCP scan summary record per-candidate `bytes` and rank the largest candidates (`largest_candidates`).
 
 ### Changed
 - `daemon install*` hardening (3b3fae4, d5fb783): agents must run an oclnr-owned binary — install refuses a plist the current binary cannot run (no crash-looping cleanup agents); reinstall replaces the running agent, reloads it, and verifies the running program before reporting success.
-- Plan safety filters (ec1f8c1, fbda47f, 079cee9): `plan build` drops any candidate containing git-tracked files and guards `uv-cache` as a package store; installed extensions/plugins/tool caches (`.vscode`/`.cursor` extensions, zcode plugin cache, bun, pre-commit, act caches) are fenced off from nomination (package-store classifier revision 3); the scan cache is namespaced by classifier revision so stale nominations cannot leak across revisions.
+- Plan safety filters (ec1f8c1, fbda47f, 079cee9): `plan build` drops any candidate containing git-tracked files and guards `uv-cache` as a package store; installed extensions/plugins/tool caches (`.vscode`/`.cursor` extensions, zcode plugin cache, bun, pre-commit, act caches) are fenced off from nomination (package-store classifier revision 3); the scan cache is namespaced by classifier revision so stale nominations cannot leak across revisions. `~/.npm/_npx` is now also treated as a package store and nominated whole instead of per-hash `node_modules` sub-paths (d7c421a).
+- Scratch-workspace `.agents` classification (e7b120e): a `.agents` dir under a scratch segment of `~/.zcode/workspace` is classified Reversible by path instead of Unknown, with protected segments (e.g. rotated signing keys) still refused.
 - MCP receipt surface (0bde148): `receipt(action: "verify")` verifies the receipt on disk (not just the in-memory copy); the approve schema adds `acknowledge_unknown_reversibility`; failed deletes are distinguished from live-build recreation.
+- MCP `oclnr` resolution (44ffe7d): `oclnr-mcp` also resolves the `oclnr` binary from cargo's `target/<profile>/` when the running executable sits in a directory literally named `deps` (the test-harness layout), probed before `PATH`, so MCP server tests no longer require `oclnr` on PATH.
+
+### Fixed
+- `receipt verify` (CLI, MCP, GitHub) no longer fails on a snapshot-pinned reclaim shortfall (4fc7aa7): when local snapshots are present the shortfall is classified as an informational `SnapshotPinned` issue instead of a fatal `BytesFreedMismatch`; the MCP tool emits `RECEIPT_VERIFIED_SNAPSHOT_PINNED`.
+- MCP `audit parse` accepts the single pretty-printed OCEL 2.0 document that `audit run --ocel-output` writes (c8f2eda); JSONL remains a fallback path.
+
+### Security
+- cargo-deny repair (44ffe7d): crossbeam-epoch bumped to 0.9.21 (RUSTSEC-2026-0204); `cargo deny check` is clean. Lockfile-only.
 
 ## 26.9.21
 

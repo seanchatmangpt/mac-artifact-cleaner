@@ -16,7 +16,7 @@ cargo test <name> -- --nocapture
 cargo clippy --all-targets -- -D warnings
 cargo fmt -- --check
 cargo run --bin oclnr -- <noun> <verb>
-cargo run --bin oclnr-mcp         # MCP server (7 resource-grouped tools)
+cargo run --bin oclnr-mcp         # MCP server (9 resource-grouped tools)
 
 # Aliases (.cargo/config.toml)
 cargo dx        # all tests
@@ -35,7 +35,7 @@ src/
   domain/      — Pure Rust. Zero std::fs, std::process, or OS calls. Business logic only.
   integration/ — All filesystem, OS, tmutil, Docker, GitHub I/O lives here.
   nouns/       — CLI subcommand handlers. Bridges integration ↔ domain.
-  mcp/         — MCP server (oclnr-mcp): 7 resource-grouped tools exposing the full workflow over JSON-RPC.
+  mcp/         — MCP server (oclnr-mcp): 9 resource-grouped tools exposing the full workflow over JSON-RPC.
 ```
 
 **Workspace members:** `osx-clnr` (root), `cfab-surface` (visualization)  
@@ -71,7 +71,7 @@ src/
 
 ### MCP server (`src/mcp/`)
 
-`oclnr-mcp` exposes 8 resource-grouped tools over JSON-RPC, each dispatched by an `action`
+`oclnr-mcp` exposes 9 resource-grouped tools over JSON-RPC, each dispatched by an `action`
 parameter, for Claude to drive the full workflow:
 
 | Tool | Actions |
@@ -84,6 +84,7 @@ parameter, for Claude to drive the full workflow:
 | `snapshot` | `audit` \| `thin` \| `delete` |
 | `docker` | `scan` \| `plan` \| `prune` (requires `confirm: true`; writes a plain JSON receipt, not affidavit-sealed — Docker/Colima cleanup has no plan/approval concept to bind a seal to) |
 | `emergency_reclaim` | *(no actions — standalone; scans and deletes in one call, kept separate from `delete` deliberately)* |
+| `doctor` | `architecture` \| `substrate` \| `doctests` \| `privacy` \| `domain-purity` \| `scan-delete-separation` (dispatched by a `check` parameter; read-only, non-destructive) |
 
 **When using Claude to clean disk: use MCP tools — not raw `cargo run` or shell commands.**
 This is enforced, not just advisory: `.claude/settings.json` has a `PreToolUse` hook on `Bash`

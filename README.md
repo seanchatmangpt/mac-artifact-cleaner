@@ -33,7 +33,7 @@ Deletion is plan-bound by design:
 2. **Plan proposes:** A dry run generates a reviewable JSON plan identifying cleanup candidates based on age, size, and tool-specific heuristics. Add `--include-global-caches` to nominate regenerable global caches (`.cargo/registry`, `Library/Caches`, etc.). Safety filters: any candidate containing git-tracked files is dropped from the plan, and installed extensions/plugins/tool caches are fenced off as package stores (never nominated).
 3. **Human reviews:** The user inspects the plan or the emitted Object-Centric Event Log (OCEL v2) to verify what will be deleted.
 4. **Delete executes only from a saved plan:** The scanner is disabled during deletion. The utility reads the reviewed plan and strictly deletes only the exact paths listed.
-5. **Receipt records the result:** Progress and consequences are tracked without fresh discovery. Receipt verification (`oclnr receipt verify`) checks that measured volume delta is within tolerance of claimed reclaim — surfacing APFS snapshot pinning if space didn't come back.
+5. **Receipt records the result:** Progress and consequences are tracked without fresh discovery. Receipt verification (`oclnr receipt verify`) checks that measured volume delta is within tolerance of claimed reclaim; a shortfall attributable to APFS snapshot pinning is surfaced as an informational `SnapshotPinned` issue, not a `BytesFreedMismatch` failure.
 
 ### Snapshot Management
 

@@ -19,6 +19,37 @@ use crate::{
     },
 };
 
+/// The one-line stdout summary for a snapshot delete run.
+///
+/// The autoclean runner parses the `snapshot delete` child's stdout for a line
+/// beginning with `Deleted ` to report the thin outcome; a routine empty run
+/// (zero matching snapshots — e.g. `keep-latest` when at most one dated local
+/// snapshot exists) must emit the same shape, or the run log records a silent
+/// "no summary line" and the no-op becomes indistinguishable from a skipped
+/// step.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::nouns::snapshot::deleted_snapshots_summary;
+///
+/// assert_eq!(
+///     deleted_snapshots_summary(2, "keep-latest"),
+///     "Deleted 2 snapshot(s) successfully."
+/// );
+/// assert_eq!(
+///     deleted_snapshots_summary(0, "keep-latest"),
+///     "Deleted 0 snapshot(s) successfully (no matching snapshots for --which keep-latest)."
+/// );
+/// ```
+pub fn deleted_snapshots_summary(count: usize, which: &str) -> String {
+    if count == 0 {
+        format!("Deleted 0 snapshot(s) successfully (no matching snapshots for --which {which}).")
+    } else {
+        format!("Deleted {count} snapshot(s) successfully.")
+    }
+}
+
 /// Seals a [`SnapshotThinReceipt`] into an affidavit core/v1 provenance chain
 /// alongside it, using `event_builder` to pick the truthful event type
 /// (`snapshot_thin_requested` vs `snapshot_delete_requested`) for the
@@ -342,7 +373,7 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
             };
 
             if targets.is_empty() {
-                println!("No matching snapshots to delete for --which {}.", which);
+                println!("{}", deleted_snapshots_summary(0, &which));
                 return Ok(());
             }
 
@@ -376,7 +407,7 @@ pub fn handle(action: SnapshotAction) -> anyhow::Result<()> {
             let receipt_obj =
                 SnapshotThinReceipt::new(mount.clone(), 0, now, before.clone(), after.clone());
 
-            println!("Deleted {} snapshot(s) successfully.", receipt_obj.snapshots_thinned.len());
+            println!("{}", deleted_snapshots_summary(receipt_obj.snapshots_thinned.len(), &which));
 
             if let Some(r_path) = receipt {
                 let serialized = serde_json::to_string_pretty(&receipt_obj)?;

@@ -1325,9 +1325,8 @@ fn test_parent_project_scan_lane_gate_splits_stale_from_fresh() {
     File::create(stale_lane.join("beam")).unwrap();
     // Age the lane root's own dir mtime >1h. The stale lane's INTERIOR file
     // stays fresh — interior freshness must not suppress a lane lease.
-    let _ = std::process::Command::new("touch")
-        .arg("-t").arg("202001010000").arg(&stale_lane)
-        .status();
+    let _ =
+        std::process::Command::new("touch").arg("-t").arg("202001010000").arg(&stale_lane).status();
     // Fresh lane lease: dir mtime is now (just created).
     let fresh_lane = root.join("_build-laneWFRESH");
     fs::create_dir(&fresh_lane).unwrap();
@@ -1347,8 +1346,7 @@ fn test_parent_project_scan_lane_gate_splits_stale_from_fresh() {
 
     scan_root(root, &args, candidates.clone(), stats.clone(), &[], tool_accs, None).unwrap();
 
-    let mut nominated: Vec<PathBuf> =
-        candidates.iter().map(|e| e.value().path.clone()).collect();
+    let mut nominated: Vec<PathBuf> = candidates.iter().map(|e| e.value().path.clone()).collect();
     nominated.sort();
     assert!(
         nominated.contains(&stale_lane),
@@ -1362,10 +1360,8 @@ fn test_parent_project_scan_lane_gate_splits_stale_from_fresh() {
         !nominated.contains(&target),
         "fresh non-lane candidate must keep the project-level suppression rule: {nominated:?}"
     );
-    let stale_cand = candidates
-        .iter()
-        .find(|e| e.value().path == stale_lane)
-        .expect("stale lane present");
+    let stale_cand =
+        candidates.iter().find(|e| e.value().path == stale_lane).expect("stale lane present");
     assert_eq!(stale_cand.value().reason, "elixir lane build root (fan-out lease)");
 
     // Gate off (hours=0): never recently-active — both lanes nominated.
@@ -1376,4 +1372,3 @@ fn test_parent_project_scan_lane_gate_splits_stale_from_fresh() {
     let paths0: Vec<PathBuf> = candidates0.iter().map(|e| e.value().path.clone()).collect();
     assert!(paths0.contains(&stale_lane) && paths0.contains(&fresh_lane));
 }
-
