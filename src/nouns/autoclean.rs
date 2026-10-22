@@ -805,7 +805,7 @@ fn run(opts: RunOptions) -> anyhow::Result<()> {
         .arg(&plan_file)
         .args(["--receipt"])
         .arg(&receipt_file)
-        .arg("--yes")
+        .args(["--yes", "--release-snapshots"])
         .output()?;
     // `delete execute`'s exit code now reflects this session's
     // space-verification-shortfall fix (see `nouns::delete`): it exits 0
@@ -863,50 +863,19 @@ fn run(opts: RunOptions) -> anyhow::Result<()> {
     append_log(&msg)?;
     notify_nonfatal(NOTIFY_TITLE, "unattended cleanup completed — details in autoclean.log");
 
-    // Default posture for every cleaning run: local Time Machine snapshots
-    // are thinned to only the single most recent one. File deletion alone
-    // often shows no visible free-space gain until snapshots pinning the
-    // deleted blocks are cleared too (the user's standing disk-cleanup
-    // rule) — so this runs unconditionally after a successful delete, not
-    // as an opt-in extra step. Deliberately non-fatal: it only ever
-    // touches dated `com.apple.TimeMachine.*` local snapshots (see
-    // `parse_snapshot_date` — OS-update snapshots never match and are left
-    // alone), and a failure here must never make an already-successful,
-    // already-verified file cleanup report as failed.
-    let snapshot_receipt = dir.join(format!("{ts}-snapshot-receipt.jsonocel"));
-    let snapshot_thin = Command::new(&exe)
-        .current_dir(home_ref)
-        .args(["snapshot", "delete", "--which", "keep-latest", "--receipt"])
-        .arg(&snapshot_receipt)
-        .output();
-    match snapshot_thin {
-        Ok(out) if out.status.success() => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let summary_line = first_deleted_line(&stdout).to_string();
-            let msg = format!("[autoclean {ts}] snapshot keep-latest: {summary_line}");
-            println!("{msg}");
-            append_log(&msg)?;
-        }
-        Ok(out) => {
-            let msg = format!(
-                "[autoclean {ts}] snapshot keep-latest FAILED (non-fatal, file cleanup already \
-                 succeeded): {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            eprintln!("{msg}");
-            append_log(&msg)?;
-        }
-        Err(e) => {
-            let msg = format!(
-                "[autoclean {ts}] snapshot keep-latest could not be spawned (non-fatal): {e}"
-            );
-            eprintln!("{msg}");
-            append_log(&msg)?;
-        }
+    // Dated snapshots are released inside `delete execute --release-snapshots`,
+    // before free space is sampled, so the receipt delta is real. Record the
+    // summary line that command prints.
+    let summary_line = first_deleted_line(&exec_stdout);
+    if summary_line.starts_with("Deleted ") {
+        let msg = format!("[autoclean {ts}] snapshot release: {summary_line}");
+        println!("{msg}");
+        append_log(&msg)?;
     }
-
-    // Terminal evidence written last so the snapshot receipt — if the thin
-    // step produced one — is part of the run's OCEL graph.
+    let snapshot_receipt = dir.join(format!(
+        "{}-snapshot-receipt.jsonocel",
+        receipt_file.file_stem().and_then(|s| s.to_str()).unwrap_or(ts.as_str())
+    ));
     if snapshot_receipt.exists() {
         facts.snapshot_receipt_path = Some(snapshot_receipt.display().to_string());
     }

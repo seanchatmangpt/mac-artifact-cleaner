@@ -75,6 +75,7 @@ pub fn handle(path: Option<PathBuf>) -> anyhow::Result<()> {
         max_concurrent: None,
         thin_after: false,
         thin_urgency: 1,
+        release_snapshots: false,
     })?;
 
     println!("\n{}", "=====================================================".green().bold());

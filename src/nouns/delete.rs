@@ -55,6 +55,13 @@ pub enum DeleteAction {
         /// tmutil thinning urgency (1-4) used by `--thin-after`.
         #[arg(long, default_value_t = 1)]
         thin_urgency: u8,
+        /// After deleting, remove every dated local Time Machine snapshot
+        /// BEFORE sampling free space. `keep-latest` leaves the newest
+        /// snapshot, which still pins the blocks just unlinked. OS-update
+        /// snapshots are not dated and are not touched. Writes a sealed
+        /// `<receipt stem>-snapshot-receipt.jsonocel`. Only acts with `--yes`.
+        #[arg(long)]
+        release_snapshots: bool,
     },
 }
 
@@ -91,6 +98,7 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
             max_concurrent,
             thin_after,
             thin_urgency,
+            release_snapshots,
         } => {
             let content = std::fs::read_to_string(&plan_path).map_err(|e| {
                 anyhow::anyhow!(
@@ -517,6 +525,23 @@ pub fn handle(action: DeleteAction) -> anyhow::Result<()> {
                 ) {
                     Ok(_) => println!("Snapshot-thin receipt: {}", thin_receipt.display()),
                     Err(e) => println!("⚠️  --thin-after: snapshot thin failed: {e}"),
+                }
+            }
+
+            // Dated local snapshots pin the extents just unlinked. Drop them
+            // before the free-space sample so the receipt's delta is the
+            // space the volume actually got back. A failure here is a warning:
+            // the file deletion already happened and its receipt must still
+            // be written.
+            if release_snapshots {
+                let snapshot_receipt = receipt_path.with_file_name(format!(
+                    "{}-snapshot-receipt.jsonocel",
+                    receipt_path.file_stem().and_then(|s| s.to_str()).unwrap_or("deletion")
+                ));
+                match crate::nouns::snapshot::release_dated_snapshots("/", Some(&snapshot_receipt))
+                {
+                    Ok(n) => println!("Released {n} dated local snapshot(s)."),
+                    Err(e) => println!("⚠️  --release-snapshots failed: {e}"),
                 }
             }
 

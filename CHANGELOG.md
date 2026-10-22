@@ -1,6 +1,9 @@
 # Changelog
 
-## 26.9.22 (unreleased — `Cargo.toml` still 26.9.21; cut the version bump + `v26.9.22` tag to make this a release)
+## 26.10.22
+
+### Fixed
+- Autoclean frees snapshot-pinned blocks. `delete execute --release-snapshots` removes every dated local Time Machine snapshot before free space is sampled, and `autoclean run` passes it. `keep-latest` left the newest snapshot, which still held the extents just unlinked, so the receipt recorded a `BytesFreedMismatch` and the volume gained almost nothing. OS-update snapshots are not dated and are not touched.
 
 ### Added
 - `dedupe scan` (47291ce): read-only measurement of how many bytes could be reclaimed by replacing duplicate regular files with APFS clones (`clonefile`); measurement-only, never rewrites.

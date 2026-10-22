@@ -181,6 +181,55 @@ pub enum SnapshotAction {
     },
 }
 
+/// Deletes every dated local Time Machine snapshot on `mount` and, when
+/// `receipt` is set, writes and seals the same receipt `snapshot delete
+/// --which all` does. OS-update snapshots never match `parse_snapshot_date`
+/// and are left alone.
+///
+/// This is what actually returns blocks after a file delete. `keep-latest`
+/// retains the newest snapshot, and that snapshot is the one still pointing
+/// at the extents just unlinked, so free space does not move.
+pub fn release_dated_snapshots(mount: &str, receipt: Option<&Path>) -> anyhow::Result<usize> {
+    let before = list_local_snapshots(mount)?;
+    let targets: Vec<String> =
+        before.iter().filter_map(|s| crate::domain::time::parse_snapshot_date(s)).collect();
+    if targets.is_empty() {
+        println!("{}", deleted_snapshots_summary(0, "all"));
+        return Ok(0);
+    }
+
+    println!("Deleting {} snapshot(s) on {}:", targets.len(), mount);
+    for t in &targets {
+        println!("  - {}", t);
+        let out = delete_local_snapshot(t)?;
+        let trimmed = out.trim();
+        if !trimmed.is_empty() {
+            println!("    {}", trimmed);
+        }
+    }
+
+    let after = list_local_snapshots(mount)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let receipt_obj = SnapshotThinReceipt::new(mount.to_string(), 0, now, before, after);
+    let removed = receipt_obj.snapshots_thinned.len();
+    println!("{}", deleted_snapshots_summary(removed, "all"));
+
+    if let Some(r_path) = receipt {
+        let serialized = serde_json::to_string_pretty(&receipt_obj)?;
+        std::fs::write(r_path, serialized)?;
+        println!("Wrote deletion receipt to: {}", r_path.display());
+        seal_snapshot_receipt(
+            &receipt_obj,
+            r_path,
+            crate::domain::affidavit_integration::build_snapshot_delete_affidavit,
+        )?;
+    }
+    Ok(removed)
+}
+
 /// The `snapshot thin` operation as a reusable function: list → `tmutil
 /// thinlocalsnapshots <mount> <bytes> <urgency>` → list, then write and seal
 /// the [`SnapshotThinReceipt`] (affidavit core/v1 sidecar) and optional OCEL

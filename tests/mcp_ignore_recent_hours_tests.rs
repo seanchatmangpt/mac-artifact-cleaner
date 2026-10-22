@@ -112,20 +112,18 @@ fn ignore_recent_hours_zero_disables_recency_guard() {
     );
 }
 
-/// Sanity check on the other side: a caller who does NOT ask to disable the
-/// guard (a window larger than the touch time) must still see the recency
-/// guard suppress the candidate. This proves the fix forwards the flag
-/// faithfully in both directions, not just always-off.
+/// A plain `target/` is regenerable and is not recency-shielded, even when
+/// the caller passes a window far larger than the project's touch time.
+/// Recency shielding applies to fan-out lane roots (`_build-lane*`,
+/// `target-lane*`) only; shielding every build dir under an active repo
+/// permanently hid large `target/` trees from plans (2026-10-10).
 #[test]
-fn nonzero_ignore_recent_hours_still_filters_recent_projects() {
-    // A window (9999h) far larger than the 1h touch time, so the project is
-    // correctly suppressed as "recently active" -- distinguishing a real
-    // non-zero override from the omitted -> CLI-default(168h) case.
+fn nonzero_ignore_recent_hours_still_nominates_plain_target() {
     let candidates = audit_scan_total_candidates(9999);
     assert_eq!(
-        candidates, 0,
-        "a large ignore_recent_hours window should still suppress a project touched \
-         1 hour ago, got {} candidates",
+        candidates, 1,
+        "a plain target/ stays a candidate inside a large ignore_recent_hours \
+         window, got {} candidates",
         candidates
     );
 }
