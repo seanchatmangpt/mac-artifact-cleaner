@@ -7,8 +7,8 @@
 //! continuously (useful when running outside of launchd).
 //!
 //! **Noun layer rule**: this module parses, routes, and formats output only.
-//! The actual `statvfs(2)` call and notification delivery live in
-//! `integration::monitor`.
+//! The actual `statvfs(2)` call lives in `integration::monitor`. The monitor
+//! does not display a desktop banner.
 
 use std::{
     path::{Path, PathBuf},
@@ -20,8 +20,7 @@ use crate::{
     domain::pressure::{decide_reclaim, Decision, ReclaimModes},
     integration::{
         fs::volume_space,
-        monitor::{check_and_notify, DiskPressureCheck},
-        notify::notify_disk_pressure,
+        monitor::DiskPressureCheck,
         pressure::{read_stamp, stamp_path, write_stamp},
     },
     nouns::{autoclean, snapshot},
@@ -30,7 +29,7 @@ use crate::{
 fn report(check: DiskPressureCheck, mount: &str) {
     if check.under_pressure {
         println!(
-            "[oclnr monitor] {}: {:.1} GB free (threshold {:.1} GB) — UNDER PRESSURE, notification sent",
+            "[oclnr monitor] {}: {:.1} GB free (threshold {:.1} GB) — UNDER PRESSURE",
             mount, check.free_gb, check.threshold_gb
         );
     } else {
@@ -147,11 +146,6 @@ fn pressure_tick(mount: &str, threshold_gb: f64, cfg: &ReclaimConfig) -> anyhow:
         threshold_gb,
         under_pressure: free < threshold_bytes,
     };
-    if check.under_pressure {
-        if let Err(e) = notify_disk_pressure(check.free_gb, threshold_gb) {
-            eprintln!("[oclnr monitor] notification failed (non-fatal): {e}");
-        }
-    }
     report(check, mount);
 
     if cfg.modes.snapshots {
@@ -212,8 +206,8 @@ fn pressure_tick(mount: &str, threshold_gb: f64, cfg: &ReclaimConfig) -> anyhow:
         println!("[oclnr monitor] builds decision: {decision:?}");
         if let Decision::Thin { bytes } = decision {
             write_stamp(&stamp, now)?;
-            // Budget = min(deficit + margin, configured per-run cap): never
-            // delete more build output than the pressure calls for.
+            // Budget for non-target build dirs. Rust `target` directories
+            // are admitted in full by autoclean, outside this cap.
             let cap_gb = (bytes as f64 / BYTES_PER_GIB).min(cfg.builds_max_reclaim_gb);
             run_builds_reclaim(cap_gb, cfg.builds_ignore_recent_hours)?;
         }
@@ -223,7 +217,8 @@ fn pressure_tick(mount: &str, threshold_gb: f64, cfg: &ReclaimConfig) -> anyhow:
 
 /// Runs the plan-bound pipeline (`plan build` -> `plan approve` -> `delete
 /// execute` -> `receipt verify`) via `autoclean run`, restricted to
-/// regenerable build dirs with the live-cwd and recency exclusions.
+/// regenerable build dirs. Rust `target` directories are kept in the plan
+/// even when a live cwd or a fresh mtime would exclude another build dir.
 fn run_builds_reclaim(max_reclaim_gb: f64, ignore_recent_hours: u64) -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
@@ -287,10 +282,10 @@ pub fn handle(
         }
     }
 
-    // One pass: notify (as always), then — only when explicitly enabled and
-    // outside the cooldown — fire the capped autoclean pipeline.
+    // One pass: announce pressure once per dip, then — only when explicitly
+    // enabled and outside the cooldown — fire the capped autoclean pipeline.
     let check_once = |mount_path: &Path| -> anyhow::Result<()> {
-        let check = check_and_notify(mount_path, threshold_gb)?;
+        let check = crate::integration::monitor::check_disk_pressure(mount_path, threshold_gb)?;
         report(check, &mount);
         if trigger_autoclean {
             let now = chrono::Utc::now().timestamp();
@@ -304,7 +299,7 @@ pub fn handle(
                     .unwrap_or_else(|| "never".to_string());
                 println!(
                     "[oclnr monitor] under pressure but autoclean trigger is in cooldown \
-                     (last: {last_display}, cooldown: {cooldown_hours}h) — notifying only"
+                     (last: {last_display}, cooldown: {cooldown_hours}h)"
                 );
             }
         }
@@ -340,5 +335,5 @@ pub fn handle(
 /// Exposed for tests / callers that already have a `Path`.
 #[allow(dead_code)]
 pub fn check_once(mount: &Path, threshold_gb: f64) -> anyhow::Result<DiskPressureCheck> {
-    check_and_notify(mount, threshold_gb)
+    crate::integration::monitor::check_disk_pressure(mount, threshold_gb)
 }

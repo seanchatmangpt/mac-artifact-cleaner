@@ -55,7 +55,8 @@ pub enum DaemonAction {
     /// Install `oclnr monitor --watch --reclaim ...` as a long-running
     /// launchd LaunchAgent (`com.oclnr.pressure`): samples free space every
     /// `--interval-secs` and, below `--threshold-gb`, thins local snapshots
-    /// (and optionally reclaims build dirs) through the receipted paths.
+    /// and reclaims build dirs through the receipted paths. Rust `target`
+    /// directories are included even when a compile is in progress.
     InstallPressureMonitor {
         /// Free-space threshold in GB that triggers reclaim
         #[arg(long)]
@@ -63,8 +64,9 @@ pub enum DaemonAction {
         /// Sample interval in seconds
         #[arg(long, default_value = "60")]
         interval_secs: u64,
-        /// Reclaim strategies: `snapshots` or `snapshots,builds`
-        #[arg(long, default_value = "snapshots", value_parser = parse_reclaim_value)]
+        /// Reclaim strategies. Default is both: thin local snapshots, and
+        /// delete rust `target` directories (a rebuild restores them).
+        #[arg(long, default_value = "snapshots,builds", value_parser = parse_reclaim_value)]
         reclaim: String,
         /// Skip the confirmation prompt and load the LaunchAgent immediately
         #[arg(long)]
@@ -563,7 +565,8 @@ pub fn handle(action: DaemonAction) -> anyhow::Result<()> {
                     .with_prompt(format!(
                         "Load LaunchAgent '{}' now via `launchctl load -w`? This will run \
                          `oclnr autoclean run` daily at {:02}:{:02} and CAN DELETE FILES \
-                         (capped at {} GB/run, never touches unknown/irreversible items).",
+                         (non-target items capped at {} GB/run; rust target dirs are always \
+                         deleted; unknown/irreversible items are left in place).",
                         AUTOCLEAN_PLIST_LABEL, hour, minute, max_reclaim_gb
                     ))
                     .default(false)

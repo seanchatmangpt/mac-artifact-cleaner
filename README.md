@@ -96,11 +96,17 @@ item is skipped rather than overridden; `--ignore-recent-hours` defaults to 24h;
 touches Docker/Colima or wholesale `~/Library/Caches`. Every run's plan/receipt files and
 a one-line summary are logged to `~/Library/Logs/oclnr/autoclean.log`.
 
+The chained `delete execute` runs with `--release-snapshots`: every dated local Time
+Machine snapshot is removed before free space is sampled, so the newest snapshot cannot
+keep pinning the extents just unlinked (`keep-latest` used to leave a `BytesFreedMismatch`
+receipt and a volume that gained almost nothing). OS-update snapshots are not dated and
+are never touched.
+
 To run this daily and unattended via `launchd`:
 
 ```bash
 oclnr daemon install-autoclean    # installs com.oclnr.autoclean, daily at 04:15 local
-oclnr daemon install-pressure-monitor --threshold-gb 20
+oclnr daemon install-pressure-monitor --threshold-gb 50
                                    # installs com.oclnr.pressure (KeepAlive): oclnr monitor --watch
                                    # --reclaim snapshots[,builds] — reclaims when free space drops
                                    # below --threshold-gb (required, no default; pass it explicitly),

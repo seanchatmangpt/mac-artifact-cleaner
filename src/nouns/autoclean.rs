@@ -18,12 +18,13 @@
 //!   defers to the next scheduled run), and a plan whose *single largest item*
 //!   exceeds the cap is refused outright — the backstop against a detection
 //!   bug nominating something huge.
-//! - A plan containing any Unknown/Irreversible-reversibility item is never
-//!   approved unattended (unlike an interactive session, which can pass
-//!   `--acknowledge-unknown-reversibility` after a human looks) — it is
-//!   skipped and logged for manual review instead.
-//! - `--ignore-recent-hours` defaults to 24h, so anything touched in the
-//!   last day (active work) is left alone.
+//! - Unknown/Irreversible items are deferred and left on disk. They do not
+//!   cancel the run. Rust `target` directories are always admitted: a build
+//!   can be rerun. Interactive `plan approve` still requires
+//!   `--acknowledge-unknown-reversibility` before a human can delete those
+//!   deferred items.
+//! - `--ignore-recent-hours` defaults to 24h for lane build roots. Plain
+//!   rust `target` directories are not recency-shielded.
 //! - Every run's plan/receipt files and a one-line summary are appended to
 //!   `~/Library/Logs/oclnr/autoclean.log`, so a run nobody watched is still
 //!   fully auditable afterward.
@@ -474,14 +475,9 @@ fn print_status() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Sends a macOS notification about a run outcome. Non-fatal by contract: a
-/// notification failure must never turn an already-logged outcome into a
-/// run failure — the log line is the durable record, the banner is a
-/// convenience.
+/// Run outcomes are recorded in `autoclean.log`. No desktop banner.
 fn notify_nonfatal(title: &str, body: &str) {
-    if let Err(e) = crate::integration::notify::send_notification(title, body) {
-        eprintln!("[autoclean] notification failed (non-fatal): {e}");
-    }
+    let _ = (title, body);
 }
 
 const NOTIFY_TITLE: &str = "osx-clnr autoclean";
@@ -499,20 +495,42 @@ pub struct RunOptions {
 }
 
 /// Narrows a freshly built plan for the pressure path: keep only regenerable
-/// build dirs, then drop anything touching a live process cwd, then drop
-/// anything whose own tree is younger than `ignore_recent_hours`. Returns a
-/// human summary of what was dropped, for the log.
+/// build dirs, including Cargo fan-out leases (`target-*`, `doctor-target`,
+/// `_t-*`), then drop anything touching a live process cwd. Plain rust
+/// `target` dirs are put back even when that cwd is live. An idle fan-out
+/// lease is put back when the cwd is only the project root; a cwd inside the
+/// lease keeps it. Then drop anything whose own tree is younger than
+/// `ignore_recent_hours`. Rust `target` dirs are restored after that recency
+/// cut too. Leases are not: a fresh directory mtime means a compile is using
+/// them. Returns a human summary of what was dropped, for the log.
 fn narrow_plan_items(
     items: Vec<crate::domain::plan::PlanItem>,
     opts: &RunOptions,
 ) -> anyhow::Result<(Vec<crate::domain::plan::PlanItem>, String)> {
     use crate::domain::pressure::{
-        exclude_live_cwds, exclude_recent, retain_regenerable_build_dirs, significant_cwds,
+        exclude_live_cwds, exclude_recent, restore_unbusy_fanout_leases,
+        retain_regenerable_build_dirs, significant_cwds,
     };
     let mut notes = Vec::new();
     let mut items = items;
     if opts.builds_only {
         let (kept, dropped) = retain_regenerable_build_dirs(items);
+        let lease = |items: &[crate::domain::plan::PlanItem]| {
+            items.iter().filter(|i| crate::domain::pressure::is_fanout_lease_item(i)).count()
+        };
+        // #region agent log
+        crate::integration::fs::agent_debug_log(
+            "B",
+            "nouns/autoclean.rs:narrow_plan_items",
+            "builds-only lease admission",
+            serde_json::json!({
+                "leases_kept": lease(&kept),
+                "leases_dropped": lease(&dropped),
+                "kept": kept.len(),
+                "dropped": dropped.len(),
+            }),
+        );
+        // #endregion
         notes.push(format!("{} non-build item(s) dropped", dropped.len()));
         items = kept;
     }
@@ -520,8 +538,22 @@ fn narrow_plan_items(
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
         let cwds = significant_cwds(crate::integration::pressure::live_process_cwds()?, &home);
         let (kept, excluded) = exclude_live_cwds(items, &cwds);
+        let (kept, excluded) = crate::domain::pressure::reclaim_rust_targets(kept, excluded);
+        let (kept, excluded) = restore_unbusy_fanout_leases(kept, excluded, &cwds);
+        // #region agent log
+        crate::integration::fs::agent_debug_log(
+            "C",
+            "nouns/autoclean.rs:narrow_plan_items",
+            "idle fan-out leases restored after live-cwd exclusion",
+            serde_json::json!({
+                "leases_kept": kept.iter().filter(|i| crate::domain::pressure::is_fanout_lease_item(i)).count(),
+                "leases_still_excluded": excluded.iter().filter(|i| crate::domain::pressure::is_fanout_lease_item(i)).count(),
+                "significant_cwds": cwds.len(),
+            }),
+        );
+        // #endregion
         notes.push(format!(
-            "{} item(s) excluded as live-cwd related ({} significant cwds)",
+            "{} item(s) excluded as live-cwd related ({} significant cwds); rust target dirs kept, idle fan-out leases restored",
             excluded.len(),
             cwds.len()
         ));
@@ -532,8 +564,9 @@ fn narrow_plan_items(
         let now = chrono::Utc::now().timestamp();
         let (kept, recent) =
             exclude_recent(kept, &mtimes, now, opts.ignore_recent_hours.saturating_mul(3600));
+        let (kept, recent) = crate::domain::pressure::reclaim_rust_targets(kept, recent);
         notes.push(format!(
-            "{} item(s) excluded as modified within {}h",
+            "{} item(s) excluded as modified within {}h; rust target dirs kept",
             recent.len(),
             opts.ignore_recent_hours
         ));
@@ -543,6 +576,8 @@ fn narrow_plan_items(
 }
 
 fn run(opts: RunOptions) -> anyhow::Result<()> {
+    use crate::domain::pressure::{is_rust_target_item, split_unattended_items};
+
     let RunOptions { max_reclaim_gb, ignore_recent_hours, yes, .. } = opts;
     if !yes {
         anyhow::bail!(
@@ -644,146 +679,140 @@ fn run(opts: RunOptions) -> anyhow::Result<()> {
             }
         }
     }
-    let total_bytes: u64 = plan.items.iter().map(|i| i.bytes).sum();
-    facts.plan_path = Some(plan_file.display().to_string());
-
-    if plan.items.is_empty() {
-        facts.outcome = "nothing_to_do".into();
-        emit_run_ocel(&facts);
-        let msg = format!("[autoclean {ts}] nothing to clean this run.");
+    // Unknown/Irreversible items stay on disk. They used to veto the whole
+    // run, so two erlang crash dumps (17 MB) blocked every reversible
+    // `target/` on the machine (2026-10-13..22). Rust target dirs are
+    // admitted even if mislabeled: deleting one costs a rebuild.
+    let (admitted, fenced) = split_unattended_items(std::mem::take(&mut plan.items));
+    if !fenced.is_empty() {
+        let msg = format!(
+            "[autoclean {ts}] deferred {} unknown/irreversible item(s) (left in place; they do \
+             not block reversible cleanup): {}",
+            fenced.len(),
+            fenced.iter().map(|i| i.path.display().to_string()).collect::<Vec<_>>().join(", ")
+        );
         println!("{msg}");
         append_log(&msg)?;
-        return Ok(());
     }
+    let (targets, rest): (Vec<_>, Vec<_>) = admitted.into_iter().partition(is_rust_target_item);
+    facts.plan_path = Some(plan_file.display().to_string());
 
-    if exceeds_cap(total_bytes, max_reclaim_gb) {
-        // Cap as budget, not veto: a machine that genuinely accumulated more
-        // rebuildable artifacts than one run's cap (the machine this was
-        // diagnosed on: 106 GB plan vs 50 GB default cap) used to get NO
-        // cleanup at all — the whole run was refused. Instead, execute the
-        // largest-first subset that fits the cap and defer the rest to the
-        // next scheduled run. If nothing fits (a single item larger than the
-        // whole cap — the runaway-detection backstop), keep the original
-        // refuse-and-log behavior.
-        let (kept, deferred) =
-            trim_plan_items_to_cap(std::mem::take(&mut plan.items), max_reclaim_gb);
-        if kept.is_empty() {
-            facts.outcome = "refused".into();
+    if targets.is_empty() && rest.is_empty() {
+        if fenced.is_empty() {
+            facts.outcome = "nothing_to_do".into();
+            emit_run_ocel(&facts);
+            let msg = format!("[autoclean {ts}] nothing to clean this run.");
+            println!("{msg}");
+            append_log(&msg)?;
+        } else {
+            facts.outcome = "skipped".into();
             emit_run_ocel(&facts);
             let msg = format!(
-                "[autoclean {ts}] REFUSED: single plan item exceeds the {} GB safety cap — not \
-                 approving. Review manually: oclnr plan inspect --plan {}",
-                max_reclaim_gb,
+                "[autoclean {ts}] SKIPPED: deferred {} unknown/irreversible item(s) and no \
+                 reversible items remained. Review manually: oclnr plan inspect --plan {}",
+                fenced.len(),
                 plan_file.display()
             );
             eprintln!("{msg}");
             append_log(&msg)?;
             notify_nonfatal(
                 NOTIFY_TITLE,
-                "run REFUSED: single plan item exceeds the safety cap — review needed",
+                "run SKIPPED: only unknown-reversibility items remained — see autoclean.log",
             );
-            return Ok(());
         }
-        let kept_bytes: u64 = kept.iter().map(|i| i.bytes).sum();
-        let deferred_bytes: u64 = deferred.iter().map(|i| i.bytes).sum();
-        plan.items = kept;
-        facts.items_approved = plan.items.len() as i64;
-        facts.deferred_items = deferred.len() as i64;
-        facts.planned_bytes = kept_bytes as i64;
-        std::fs::write(&plan_file, serde_json::to_string_pretty(&plan)?)?;
-        let msg = format!(
-            "[autoclean {ts}] plan claims {} which exceeds the {} GB cap — executing largest-first \
-             {} ({} items) this run, deferring {} items ({}) to future runs",
-            crate::integration::progress::human_bytes(total_bytes),
-            max_reclaim_gb,
-            crate::integration::progress::human_bytes(kept_bytes),
-            plan.items.len(),
-            deferred.len(),
-            crate::integration::progress::human_bytes(deferred_bytes),
-        );
-        println!("{msg}");
-        append_log(&msg)?;
-    }
-    // Under-cap path: the facts weren't touched by the trim branch, so
-    // record the whole approved plan.
-    if facts.planned_bytes == 0 {
-        facts.items_approved = plan.items.len() as i64;
-        facts.planned_bytes = total_bytes as i64;
+        return Ok(());
     }
 
-    // Never proceed past an Unknown/Irreversible item unattended — an
-    // autonomous job must be strictly more conservative than an interactive
-    // session (which can pass --acknowledge-unknown-reversibility after a
-    // human actually looks). Skip and log instead of overriding it here.
-    //
-    // Exception: a 0-byte unknown/irreversible item carries no bytes at
-    // risk, so it cannot be the thing the veto exists to protect. Such
-    // items are dropped from the plan (and logged) rather than allowed to
-    // veto the run — a 0-byte `/tmp` leftover classifying as Unknown used
-    // to silence multi-GB runs for days (2026-10-06..09 autoclean.log).
-    let (non_reversible_count, zero_byte_dropped): (usize, Vec<String>) = {
-        let non_reversible = |i: &&crate::domain::plan::PlanItem| {
-            matches!(
-                i.reversibility,
-                crate::domain::dcm::Reversibility::Unknown
-                    | crate::domain::dcm::Reversibility::Irreversible
-            )
-        };
-        let zeros: Vec<String> = plan
-            .items
-            .iter()
-            .filter(|i| i.bytes == 0 && non_reversible(i))
-            .map(|i| i.path.display().to_string())
-            .collect();
-        let vetoed_count = plan.items.iter().filter(|i| i.bytes > 0 && non_reversible(i)).count();
-        plan.items.retain(|i| !(i.bytes == 0 && non_reversible(&i)));
-        (vetoed_count, zeros)
+    let rest_bytes: u64 = rest.iter().map(|i| i.bytes).sum();
+    let (kept_rest, deferred) = if exceeds_cap(rest_bytes, max_reclaim_gb) {
+        // Cap as budget for everything that is not a rust target. A rust
+        // target is outside that budget: it is one rebuildable directory,
+        // and a single target larger than the cap used to refuse the run
+        // that would have deleted it.
+        trim_plan_items_to_cap(rest, max_reclaim_gb)
+    } else {
+        (rest, Vec::new())
     };
-    if !zero_byte_dropped.is_empty() {
-        let msg = format!(
-            "[autoclean {ts}] dropped {} zero-byte unknown/irreversible item(s) (no bytes at \
-             risk, not vetoing): {}",
-            zero_byte_dropped.len(),
-            zero_byte_dropped.join(", ")
-        );
-        println!("{msg}");
-        append_log(&msg)?;
-    }
-    if non_reversible_count > 0 {
-        facts.outcome = "skipped".into();
+
+    if kept_rest.is_empty() && targets.is_empty() {
+        facts.outcome = "refused".into();
         emit_run_ocel(&facts);
         let msg = format!(
-            "[autoclean {ts}] SKIPPED: plan contains {non_reversible_count} unknown/irreversible-\
-             reversibility item(s) — autoclean never overrides that unattended. Review manually: \
-             oclnr plan inspect --plan {}",
+            "[autoclean {ts}] REFUSED: single plan item exceeds the {} GB safety cap — not \
+             approving. Review manually: oclnr plan inspect --plan {}",
+            max_reclaim_gb,
             plan_file.display()
         );
         eprintln!("{msg}");
         append_log(&msg)?;
         notify_nonfatal(
             NOTIFY_TITLE,
-            "run SKIPPED: unknown-reversibility items need human review — see autoclean.log",
+            "run REFUSED: single plan item exceeds the safety cap — review needed",
         );
         return Ok(());
     }
 
+    let target_bytes: u64 = targets.iter().map(|i| i.bytes).sum();
+    if !targets.is_empty() {
+        let msg = format!(
+            "[autoclean {ts}] admitting {} rust target dir(s) ({}) outside the {} GB cap",
+            targets.len(),
+            crate::integration::progress::human_bytes(target_bytes),
+            max_reclaim_gb,
+        );
+        println!("{msg}");
+        append_log(&msg)?;
+    }
+    if !deferred.is_empty() {
+        let deferred_bytes: u64 = deferred.iter().map(|i| i.bytes).sum();
+        let kept_bytes: u64 = kept_rest.iter().map(|i| i.bytes).sum();
+        let msg = format!(
+            "[autoclean {ts}] non-target plan claims {} which exceeds the {} GB cap — executing \
+             largest-first {} ({} items) this run, deferring {} items ({}) to future runs",
+            crate::integration::progress::human_bytes(rest_bytes),
+            max_reclaim_gb,
+            crate::integration::progress::human_bytes(kept_bytes),
+            kept_rest.len(),
+            deferred.len(),
+            crate::integration::progress::human_bytes(deferred_bytes),
+        );
+        println!("{msg}");
+        append_log(&msg)?;
+    }
+
+    plan.items = targets;
+    plan.items.extend(kept_rest);
+    let approved_bytes: u64 = plan.items.iter().map(|i| i.bytes).sum();
+    facts.items_approved = plan.items.len() as i64;
+    facts.deferred_items = deferred.len() as i64;
+    facts.planned_bytes = approved_bytes as i64;
+    std::fs::write(&plan_file, serde_json::to_string_pretty(&plan)?)?;
+
     println!(
         "[autoclean {ts}] approving plan ({} items, {})...",
         plan.items.len(),
-        crate::integration::progress::human_bytes(total_bytes)
+        crate::integration::progress::human_bytes(approved_bytes)
     );
-    let approve = Command::new(&exe)
-        .current_dir(home_ref)
-        .args(["plan", "approve", "--plan"])
-        .arg(&plan_file)
-        .args([
-            "--approver",
-            "oclnr-autoclean",
-            "--reason",
-            "recurring unattended safe cleanup (launchd, under safety cap, all-reversible)",
-            "--yes",
-        ])
-        .output()?;
+    let mut approve_cmd = Command::new(&exe);
+    approve_cmd.current_dir(home_ref).args(["plan", "approve", "--plan"]).arg(&plan_file).args([
+        "--approver",
+        "oclnr-autoclean",
+        "--reason",
+        "recurring unattended cleanup: rust target dirs always admitted, other unknown/irreversible items deferred",
+        "--yes",
+    ]);
+    // After the split, an Unknown/Irreversible item that is still here is a
+    // rust target the policy admitted on purpose.
+    if plan.items.iter().any(|i| {
+        matches!(
+            i.reversibility,
+            crate::domain::dcm::Reversibility::Unknown
+                | crate::domain::dcm::Reversibility::Irreversible
+        )
+    }) {
+        approve_cmd.arg("--acknowledge-unknown-reversibility");
+    }
+    let approve = approve_cmd.output()?;
     if !approve.status.success() {
         facts.outcome = "failed".into();
         facts.stage_failed = "plan_approve".into();

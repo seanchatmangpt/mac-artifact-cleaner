@@ -209,8 +209,10 @@ pub enum Command {
         autoclean_cooldown_hours: u64,
         /// Pressure-triggered reclaim strategies: `snapshots` (thin local
         /// APFS snapshots via the receipted `snapshot thin` path) and/or
-        /// `builds` (plan-bound pipeline over regenerable build dirs, live
-        /// cwds and recently-modified dirs excluded). Comma-separated.
+        /// `builds` (plan-bound pipeline over regenerable build dirs).
+        /// Rust `target` directories are deleted even when a compile is
+        /// running or the directory is recent. Other build dirs still
+        /// honor the live-cwd and recency exclusions. Comma-separated.
         #[arg(long, value_parser = parse_reclaim_arg)]
         reclaim: Option<crate::domain::pressure::ReclaimModes>,
         /// Headroom above the threshold to reclaim toward (hysteresis)

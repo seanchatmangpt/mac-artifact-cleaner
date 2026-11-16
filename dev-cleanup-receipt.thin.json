@@ -1,0 +1,37 @@
+{
+  "volume": "/",
+  "requested_bytes": 85757698048,
+  "timestamp_unix": 1792382932,
+  "snapshots_before": [
+    "com.apple.TimeMachine.2026-10-18-125705.local",
+    "com.apple.TimeMachine.2026-10-18-135719.local",
+    "com.apple.TimeMachine.2026-10-18-150247.local",
+    "com.apple.TimeMachine.2026-10-18-161753.local",
+    "com.apple.TimeMachine.2026-10-18-172007.local",
+    "com.apple.TimeMachine.2026-10-18-182157.local",
+    "com.apple.TimeMachine.2026-10-18-192711.local",
+    "com.apple.TimeMachine.2026-10-18-202734.local"
+  ],
+  "snapshots_after": [
+    "com.apple.TimeMachine.2026-10-18-192711.local",
+    "com.apple.TimeMachine.2026-10-18-202734.local"
+  ],
+  "snapshots_thinned": [
+    "com.apple.TimeMachine.2026-10-18-125705.local",
+    "com.apple.TimeMachine.2026-10-18-135719.local",
+    "com.apple.TimeMachine.2026-10-18-150247.local",
+    "com.apple.TimeMachine.2026-10-18-161753.local",
+    "com.apple.TimeMachine.2026-10-18-172007.local",
+    "com.apple.TimeMachine.2026-10-18-182157.local"
+  ],
+  "iterations": [
+    {
+      "iteration": 1,
+      "snapshots_before_count": 8,
+      "snapshots_after_count": 2,
+      "free_bytes_before": 30261469184,
+      "free_bytes_after": 134434025472,
+      "stop_reason": "target_met"
+    }
+  ]
+}

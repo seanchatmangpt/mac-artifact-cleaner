@@ -11,7 +11,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::domain::plan::PlanItem;
+use crate::domain::{
+    artifact::{
+        is_extended_cargo_target_name, is_lane_build_root_name, is_rust_fanout_target_name,
+    },
+    plan::PlanItem,
+};
 
 /// Which reclaim strategies a pressure monitor may use, parsed from
 /// `--reclaim snapshots[,builds]`.
@@ -294,6 +299,26 @@ pub fn exclude_live_cwds(
 /// // Refusal: reason and leaf name must agree.
 /// assert!(!is_regenerable_build_dir(Path::new("/h/.npm/_cacache"), "node dependencies"));
 /// assert!(!is_regenerable_build_dir(Path::new("/d/app/target"), "elixir build"));
+///
+/// // Positive: Cargo fan-out leases, including names that are not `target-lane*`.
+/// assert!(is_regenerable_build_dir(
+///     Path::new("/d/app/target-m10"),
+///     "rust lane target root (fan-out lease)"
+/// ));
+/// assert!(is_regenerable_build_dir(
+///     Path::new("/d/app/doctor-target"),
+///     "rust lane target root (fan-out lease)"
+/// ));
+/// assert!(is_regenerable_build_dir(
+///     Path::new("/d/app/_t-fix"),
+///     "rust lane target root (fan-out lease)"
+/// ));
+///
+/// // Refusal: the lease reason does not make an arbitrary directory regenerable.
+/// assert!(!is_regenerable_build_dir(
+///     Path::new("/d/app/src"),
+///     "rust lane target root (fan-out lease)"
+/// ));
 /// ```
 pub fn is_regenerable_build_dir(path: &Path, reason: &str) -> bool {
     let Some(leaf) = path.file_name().and_then(|n| n.to_str()) else {
@@ -307,8 +332,54 @@ pub fn is_regenerable_build_dir(path: &Path, reason: &str) -> bool {
         "elixir dependencies" => leaf == "deps",
         "node dependencies" => leaf == "node_modules",
         "python virtualenv" => leaf == ".venv",
+        "rust lane target root (fan-out lease)"
+        | "elixir lane build root (fan-out lease)"
+        | "erlang lane build root (fan-out lease)"
+        | "lane build root (fan-out lease)" => is_fanout_lease_leaf(leaf),
         _ => false,
     }
+}
+
+fn is_fanout_lease_leaf(leaf: &str) -> bool {
+    is_lane_build_root_name(leaf)
+        || is_rust_fanout_target_name(leaf)
+        || is_extended_cargo_target_name(leaf)
+}
+
+/// A plan item the fan-out lease rule may reclaim once it is stale and no
+/// process is working inside it. This is not a plain `target/` directory:
+/// those are deleted even while a build is running.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::pressure::is_fanout_lease_item;
+/// use osx_clnr::domain::plan::{PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
+/// use std::path::PathBuf;
+///
+/// let item = |p: &str, r: &str| PlanItem {
+///     path: PathBuf::from(p),
+///     kind: PlanItemKind::Dir,
+///     reason: r.into(),
+///     bytes: 1,
+///     reversibility: Reversibility::Reversible,
+/// };
+///
+/// assert!(is_fanout_lease_item(&item("/d/app/target-m10", "rust lane target root (fan-out lease)")));
+/// assert!(is_fanout_lease_item(&item("/d/app/_t-fix", "rust lane target root (fan-out lease)")));
+/// assert!(!is_fanout_lease_item(&item("/d/app/target", "rust target")));
+/// assert!(!is_fanout_lease_item(&item("/d/app/src", "rust lane target root (fan-out lease)")));
+/// ```
+pub fn is_fanout_lease_item(item: &PlanItem) -> bool {
+    is_regenerable_build_dir(&item.path, &item.reason)
+        && matches!(
+            item.reason.as_str(),
+            "rust lane target root (fan-out lease)"
+                | "elixir lane build root (fan-out lease)"
+                | "erlang lane build root (fan-out lease)"
+                | "lane build root (fan-out lease)"
+        )
 }
 
 /// Splits items into `(kept, dropped)` by [`is_regenerable_build_dir`].
@@ -338,6 +409,215 @@ pub fn is_regenerable_build_dir(path: &Path, reason: &str) -> bool {
 /// ```
 pub fn retain_regenerable_build_dirs(items: Vec<PlanItem>) -> (Vec<PlanItem>, Vec<PlanItem>) {
     items.into_iter().partition(|i| is_regenerable_build_dir(&i.path, &i.reason))
+}
+
+/// True when the plan item is a detector-confirmed Rust build directory
+/// (`target` or `target_*` with a `rust target` reason). Both signals must
+/// agree, same as [`is_regenerable_build_dir`].
+///
+/// ```
+/// use osx_clnr::domain::pressure::is_rust_target_item;
+/// use osx_clnr::domain::plan::{PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
+/// use std::path::PathBuf;
+///
+/// let item = |p: &str, r: &str| PlanItem {
+///     path: PathBuf::from(p),
+///     kind: PlanItemKind::Dir,
+///     reason: r.into(),
+///     bytes: 1,
+///     reversibility: Reversibility::Reversible,
+/// };
+///
+/// // Positive: cargo output, including named target profiles.
+/// assert!(is_rust_target_item(&item("/d/app/target", "rust target")));
+/// assert!(is_rust_target_item(&item("/d/app/target_wasm", "rust target (target_wasm)")));
+///
+/// // Negative: another regenerable build dir is not a rust target.
+/// assert!(!is_rust_target_item(&item("/d/web/node_modules", "node dependencies")));
+///
+/// // Refusal: the leaf and the reason must agree.
+/// assert!(!is_rust_target_item(&item("/d/app/target", "elixir build")));
+///
+/// // Refusal: a fan-out lease is not the always-reclaim `target/` class.
+/// // A live compile inside it, or a fresh directory mtime, must still hold.
+/// assert!(!is_rust_target_item(&item(
+///     "/d/app/target-m10",
+///     "rust lane target root (fan-out lease)"
+/// )));
+/// ```
+pub fn is_rust_target_item(item: &PlanItem) -> bool {
+    let reason = item.reason.as_str();
+    (reason == "rust target" || reason.starts_with("rust target ("))
+        && is_regenerable_build_dir(&item.path, reason)
+}
+
+/// Puts Rust `target` directories back into the kept set.
+///
+/// Disk pressure may delete any of them. A live `cargo` cwd or a fresh
+/// mtime is not a reason to leave the directory: the build can be rerun.
+/// Other excluded items stay excluded.
+///
+/// ```
+/// use osx_clnr::domain::pressure::{exclude_live_cwds, reclaim_rust_targets};
+/// use osx_clnr::domain::plan::{PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
+/// use std::path::PathBuf;
+///
+/// let item = |p: &str, r: &str| PlanItem {
+///     path: PathBuf::from(p),
+///     kind: PlanItemKind::Dir,
+///     reason: r.into(),
+///     bytes: 1,
+///     reversibility: Reversibility::Reversible,
+/// };
+/// let items = vec![
+///     item("/d/app/target", "rust target"),
+///     item("/d/web/node_modules", "node dependencies"),
+/// ];
+/// let (kept, excluded) = exclude_live_cwds(
+///     items,
+///     &[PathBuf::from("/d/app"), PathBuf::from("/d/web")],
+/// );
+/// let (kept, excluded) = reclaim_rust_targets(kept, excluded);
+///
+/// // Positive: the live project's target dir comes back.
+/// assert_eq!(kept.len(), 1);
+/// assert_eq!(kept[0].path, PathBuf::from("/d/app/target"));
+/// // Negative: node_modules under a live cwd stays excluded.
+/// assert_eq!(excluded.len(), 1);
+/// assert_eq!(excluded[0].path, PathBuf::from("/d/web/node_modules"));
+///
+/// // Refusal: nothing excluded stays nothing reclaimed.
+/// let (kept, excluded) = reclaim_rust_targets(vec![item("/d/app/target", "rust target")], vec![]);
+/// assert_eq!(kept.len(), 1);
+/// assert!(excluded.is_empty());
+/// ```
+pub fn reclaim_rust_targets(
+    mut kept: Vec<PlanItem>,
+    excluded: Vec<PlanItem>,
+) -> (Vec<PlanItem>, Vec<PlanItem>) {
+    let (targets, still_excluded) = excluded.into_iter().partition(is_rust_target_item);
+    kept.extend(targets);
+    (kept, still_excluded)
+}
+
+/// Puts idle fan-out lease directories back after a project-wide live-cwd
+/// exclusion.
+///
+/// A shell sitting in `~/graphlaw` must not protect `~/graphlaw/target-m10`.
+/// A process whose cwd is that directory, or inside it, still protects it.
+/// Recency is a separate gate and is not undone here.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::pressure::restore_unbusy_fanout_leases;
+/// use osx_clnr::domain::plan::{PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
+/// use std::path::PathBuf;
+///
+/// let item = |p: &str, r: &str| PlanItem {
+///     path: PathBuf::from(p),
+///     kind: PlanItemKind::Dir,
+///     reason: r.into(),
+///     bytes: 1,
+///     reversibility: Reversibility::Reversible,
+/// };
+/// let excluded = vec![
+///     item("/d/app/target-m10", "rust lane target root (fan-out lease)"),
+///     item("/d/app/target-s1", "rust lane target root (fan-out lease)"),
+///     item("/d/web/node_modules", "node dependencies"),
+/// ];
+/// let (kept, still) = restore_unbusy_fanout_leases(
+///     vec![],
+///     excluded,
+///     &[PathBuf::from("/d/app"), PathBuf::from("/d/app/target-s1/debug")],
+/// );
+///
+/// // Positive: the project cwd does not keep the idle lease excluded.
+/// assert_eq!(kept.len(), 1);
+/// assert_eq!(kept[0].path, PathBuf::from("/d/app/target-m10"));
+/// // Positive: a compile inside target-s1 keeps that lease excluded.
+/// assert!(still.iter().any(|i| i.path == PathBuf::from("/d/app/target-s1")));
+/// // Negative: node_modules is not a lease and stays excluded.
+/// assert!(still.iter().any(|i| i.path == PathBuf::from("/d/web/node_modules")));
+///
+/// // Refusal: an empty exclusion stays empty.
+/// let (kept, still) = restore_unbusy_fanout_leases(vec![], vec![], &[]);
+/// assert!(kept.is_empty() && still.is_empty());
+/// ```
+pub fn restore_unbusy_fanout_leases(
+    mut kept: Vec<PlanItem>,
+    excluded: Vec<PlanItem>,
+    cwds: &[PathBuf],
+) -> (Vec<PlanItem>, Vec<PlanItem>) {
+    let (still_excluded, restore): (Vec<_>, Vec<_>) = excluded.into_iter().partition(|item| {
+        !is_fanout_lease_item(item) || cwds.iter().any(|cwd| cwd.starts_with(&item.path))
+    });
+    kept.extend(restore);
+    (kept, still_excluded)
+}
+
+/// Splits a plan for an unattended run.
+///
+/// The admitted set is what the run may delete. Rust `target` directories
+/// are always admitted. Every other `Reversible` or `Compensatable` item is
+/// admitted. `Unknown` and `Irreversible` items are deferred: they stay on
+/// disk, and they do not cancel the admitted set.
+///
+/// ```
+/// use osx_clnr::domain::pressure::split_unattended_items;
+/// use osx_clnr::domain::plan::{PlanItem, PlanItemKind};
+/// use osx_clnr::domain::dcm::Reversibility;
+/// use std::path::PathBuf;
+///
+/// let item = |p: &str, kind: PlanItemKind, r: &str, rev: Reversibility| PlanItem {
+///     path: PathBuf::from(p),
+///     kind,
+///     reason: r.into(),
+///     bytes: 1,
+///     reversibility: rev,
+/// };
+/// let (admitted, deferred) = split_unattended_items(vec![
+///     item("/tmp/probe/target", PlanItemKind::Dir, "rust target", Reversibility::Reversible),
+///     item(
+///         "/h/proj/erl_crash.dump",
+///         PlanItemKind::File,
+///         "erlang crash dump (repo root)",
+///         Reversibility::Unknown,
+///     ),
+///     item("/d/web/node_modules", PlanItemKind::Dir, "node dependencies", Reversibility::Reversible),
+/// ]);
+///
+/// // Positive: the target dir and the other reversible item proceed.
+/// assert_eq!(admitted.len(), 2);
+/// // Negative: the unknown crash dump is deferred, not a veto of the run.
+/// assert_eq!(deferred.len(), 1);
+/// assert_eq!(deferred[0].path, PathBuf::from("/h/proj/erl_crash.dump"));
+///
+/// // Positive: a rust target stays admitted even if its label is Unknown.
+/// let (admitted, deferred) = split_unattended_items(vec![item(
+///     "/d/app/target",
+///     PlanItemKind::Dir,
+///     "rust target",
+///     Reversibility::Unknown,
+/// )]);
+/// assert_eq!(admitted.len(), 1);
+/// assert!(deferred.is_empty());
+///
+/// // Refusal: an empty plan stays empty.
+/// assert!(split_unattended_items(vec![]).0.is_empty());
+/// ```
+pub fn split_unattended_items(items: Vec<PlanItem>) -> (Vec<PlanItem>, Vec<PlanItem>) {
+    items.into_iter().partition(|item| {
+        is_rust_target_item(item)
+            || !matches!(
+                item.reversibility,
+                crate::domain::dcm::Reversibility::Unknown
+                    | crate::domain::dcm::Reversibility::Irreversible
+            )
+    })
 }
 
 /// Splits items into `(kept, excluded)`, excluding any item whose newest

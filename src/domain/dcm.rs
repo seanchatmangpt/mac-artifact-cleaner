@@ -129,7 +129,7 @@ impl Reversibility {
 /// // Positive: the artifact detector's dependency reasons ("node
 /// // dependencies", "elixir dependencies", …) are emitted only for
 /// // tool-regenerable dependency trees — they must classify Reversible, or
-/// // `autoclean` (which skips any plan containing an Unknown item) can
+/// // `autoclean` (which defers Unknown items and continues with the rest) can
 /// // never clean a real machine: on the machine this was diagnosed on,
 /// // 266 of 330 plan items were Unknown purely from this vocabulary gap.
 /// assert_eq!(
@@ -210,7 +210,7 @@ pub fn classify_reversibility(kind: PlanItemKind, reason: &str) -> Reversibility
             // tool-regenerable dependency tree, build output, or download
             // cache belongs here. When a new detector reason is added, its
             // signal must be added in the same change or `autoclean`
-            // (which refuses plans containing Unknown items) silently
+            // (which defers Unknown items instead of deleting them) silently
             // loses the ability to clean it.
             const REGENERABLE_SIGNALS: &[&str] = &[
                 "target",

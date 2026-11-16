@@ -244,9 +244,11 @@ execute` -> `receipt verify` as subprocesses of the running binary, bounded
 by a hard `--max-reclaim-gb` cap (default 50; a plan claiming more is
 trimmed largest-first to fit the cap — the remainder defers to the next
 scheduled run — and a plan whose single largest item alone exceeds the cap
-is refused and logged, never deleted), skips any plan containing an
-`Unknown`/`Irreversible`-reversibility item, defaults `--ignore-recent-hours`
-to 24, and never touches Docker/Colima or wholesale `~/Library/Caches`. Each
+is refused and logged, never deleted). Rust `target` directories are
+outside that cap and are always deleted: a build can be rerun. Other
+`Unknown`/`Irreversible` items are deferred and left on disk; they do not
+cancel the run. `--ignore-recent-hours` defaults to 24, and the job never
+touches Docker/Colima or wholesale `~/Library/Caches`. Each
 run logs its plan/receipt files and a one-line summary to
 `~/Library/Logs/oclnr/autoclean.log`.
 
@@ -269,10 +271,7 @@ silently-dead job), and shows the autoclean standing from the run log.
 
 Autoclean autonomy surface: every run appends a structured line to
 `~/Library/Logs/oclnr/autoclean.log` (including a `freed:` figure parsed
-from the measured delete output) and sends a macOS notification on every
-consequential outcome — success, skip (unknown-reversibility items), cap
-refusal, or stage failure; "nothing to clean" stays log-only to avoid
-alarm fatigue. `autoclean status` renders the run history (last outcome,
+from the measured delete output). No desktop banner is shown. `autoclean status` renders the run history (last outcome,
 last reclaim, consecutive-failure streak, 7-day count) without reading
 raw logs. All autoclean subprocesses are anchored to `$HOME`, so the
 workspace-relative `.oclnr-cache` scan cache works under launchd (whose
@@ -751,9 +750,9 @@ relevant receipts emitted or validated
 ### 12.6 Post-Session Self-Clean
 
 The repo's own `target/` is a recurring disk whale (measured 2026-10-03: 16 GB,
-regrowing ~12 GB in five days of builds). The live-cwd guard correctly keeps
-unattended jobs from touching it while a session is active — so leaving it behind
-is a hand-delete responsibility:
+regrowing ~12 GB in five days of builds). Disk-pressure reclaim deletes rust
+`target/` directories even while a session is active; a rebuild restores them.
+`oclnr dev` is the path that cleans only this checkout:
 
 - After heavy builds, before leaving the repo, run `oclnr dev` (first-party,
   receipted cleanup for the current directory's `target/`).

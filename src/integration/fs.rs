@@ -27,14 +27,62 @@ use crate::{
     domain::{
         artifact::{
             artifact_candidates_from_snapshot, cache_hit, detect_project_from_snapshot,
-            is_global_cache, is_lane_build_root_name, is_macos_os_dir, is_traversal_barrier_name,
-            ArgsSnapshot, CachedDirEntry, Candidate, DirSnapshot, EntryKind, EntrySnapshot,
+            is_extended_cargo_target_name, is_global_cache, is_lane_build_root_name,
+            is_macos_os_dir, is_rust_fanout_target_name, is_traversal_barrier_name, ArgsSnapshot,
+            CachedDirEntry, Candidate, DirSnapshot, EntryKind, EntrySnapshot,
         },
         audit::Stats,
         tool_roots::{ToolRootAcc, ToolRootDef},
     },
     integration::scan_cache::{child_names_hash, ScanCache},
 };
+
+// #region agent log
+pub(crate) fn agent_debug_log(
+    hypothesis_id: &str,
+    location: &str,
+    message: &str,
+    data: serde_json::Value,
+) {
+    let payload = serde_json::json!({
+        "sessionId": "868d65",
+        "runId": "post-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": chrono::Utc::now().timestamp_millis(),
+    });
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/Users/sac/osx-clnr/.cursor/debug-868d65.log")
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "{payload}");
+    }
+}
+// #endregion
+
+fn cargo_cache_tag(path: &Path) -> bool {
+    std::fs::read_to_string(path.join("CACHEDIR.TAG"))
+        .map(|text| text.contains("created by cargo"))
+        .unwrap_or(false)
+}
+
+/// `target-m10`, `doctor-target`, and `_t-fix` are cargo leases only when
+/// cargo wrote the cache tag. Historical `target-lane*` / `_build-lane*`
+/// names stay name-gated.
+fn needs_cargo_tag(name: &str) -> bool {
+    is_extended_cargo_target_name(name)
+        || (is_rust_fanout_target_name(name) && !name.starts_with("target-lane"))
+}
+
+fn is_shielded_lease_name(name: &str) -> bool {
+    is_lane_build_root_name(name)
+        || is_rust_fanout_target_name(name)
+        || is_extended_cargo_target_name(name)
+}
 
 // ── DirSnapshot builder ────────────────────────────────────────────────────────
 
@@ -394,9 +442,30 @@ pub fn scan_root(
     // `ignore_recent_hours` recency window the fan-out cleanup law's
     // 60-minute-stale rule maps to, so a LIVE lane's root is never nominated.
     if let Some(name) = root.file_name().and_then(|s| s.to_str()) {
-        if is_lane_build_root_name(name) {
+        if is_shielded_lease_name(name) {
+            let tagged = cargo_cache_tag(root);
+            let blocked_untagged = needs_cargo_tag(name) && !tagged;
             let recently_active = is_lane_root_recently_active(root, args.ignore_recent_hours);
-            if !recently_active {
+            // #region agent log
+            agent_debug_log(
+                if blocked_untagged {
+                    "A"
+                } else if recently_active {
+                    "D"
+                } else {
+                    "A"
+                },
+                "integration/fs.rs:scan_root",
+                "scan root lease decision",
+                serde_json::json!({
+                    "name": name,
+                    "blocked_untagged": blocked_untagged,
+                    "recently_active": recently_active,
+                    "nominated": !blocked_untagged && !recently_active,
+                }),
+            );
+            // #endregion
+            if !blocked_untagged && !recently_active {
                 let cand = Candidate {
                     path: root.to_path_buf(),
                     reason: "lane build root (fan-out lease)".to_string(),
@@ -478,7 +547,8 @@ pub fn scan_root(
         }
 
         if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-            if is_traversal_barrier_name(name) {
+            let tagged_fanout = needs_cargo_tag(name) && cargo_cache_tag(path);
+            if is_traversal_barrier_name(name) || tagged_fanout {
                 stats_for_filter.pruned_dirs.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
@@ -627,17 +697,37 @@ pub fn scan_root(
                     // worst case of cleaning one under an active project
                     // is one forced rebuild, never data loss.
                     for c in found {
-                        let suppressed = c
-                            .path
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .map(crate::domain::artifact::is_lane_build_root_name)
-                            .unwrap_or(false)
+                        let name = c.path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                        let shielded = is_shielded_lease_name(name);
+                        let blocked_untagged = needs_cargo_tag(name) && !cargo_cache_tag(&c.path);
+                        let recently_active = shielded
                             && is_lane_root_recently_active(
                                 &c.path,
                                 args_snapshot.ignore_recent_hours,
                             );
-                        if suppressed {
+                        if shielded {
+                            // #region agent log
+                            agent_debug_log(
+                                if blocked_untagged {
+                                    "A"
+                                } else if recently_active {
+                                    "D"
+                                } else {
+                                    "A"
+                                },
+                                "integration/fs.rs:candidate",
+                                "fan-out lease nomination",
+                                serde_json::json!({
+                                    "name": name,
+                                    "reason": c.reason,
+                                    "blocked_untagged": blocked_untagged,
+                                    "recently_active": recently_active,
+                                    "nominated": !blocked_untagged && !recently_active,
+                                }),
+                            );
+                            // #endregion
+                        }
+                        if blocked_untagged || recently_active {
                             continue;
                         }
                         candidates.insert(c.path.clone(), c.clone());

@@ -323,7 +323,11 @@ pub struct ArgsSnapshot {
 /// (`dotslash`, `BytecodeAlliance.wasmtime`, `node-gyp`, `pyinstaller`,
 /// `*-updater`, `.terraform/providers`). Full class set (including
 /// operator-call nominate-only classes) lives in `domain::disk_scan`.
-pub const CLASSIFIER_REVISION: u32 = 7;
+/// v8 (2026-10-22): Cargo fan-out roots that are not spelled `target-lane*`
+/// (`target-m10`, `target-shared`, `doctor-target`, `_t-fix`) are the same
+/// kind of lease. The integration layer still requires a cargo
+/// `CACHEDIR.TAG` before those extended names are nominated.
+pub const CLASSIFIER_REVISION: u32 = 8;
 
 /// Namespace for the persistent scan cache: every input that changes what a
 /// directory's cached `candidates_list` would contain.
@@ -949,10 +953,66 @@ pub fn merge_global_cache_candidates(
 /// assert!(!is_lane_build_root_name("_build"));
 /// assert!(!is_lane_build_root_name("target"));
 /// assert!(!is_lane_build_root_name("target_wasm32"));
+/// assert!(!is_lane_build_root_name("target-m10"));
 /// assert!(!is_lane_build_root_name("src"));
 /// ```
 pub fn is_lane_build_root_name(name: &str) -> bool {
     name.starts_with("_build-lane") || name.starts_with("target-lane")
+}
+
+/// A Cargo `CARGO_TARGET_DIR` whose name starts with `target-`.
+///
+/// Covers the historical `target-lane*` lease and the names actually used
+/// on this machine (`target-m10`, `target-q1`, `target-shared`,
+/// `target-countgate`). Plain `target` and `target_*` stay on their own
+/// rules. Names other than `target-lane*` still need a cargo `CACHEDIR.TAG`
+/// before the integration layer will nominate them.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::is_rust_fanout_target_name;
+///
+/// assert!(is_rust_fanout_target_name("target-laneW622"));
+/// assert!(is_rust_fanout_target_name("target-m10"));
+/// assert!(is_rust_fanout_target_name("target-shared"));
+/// assert!(is_rust_fanout_target_name("target-q1"));
+///
+/// assert!(!is_rust_fanout_target_name("target"));
+/// assert!(!is_rust_fanout_target_name("target_wasm"));
+/// assert!(!is_rust_fanout_target_name("target-"));
+/// assert!(!is_rust_fanout_target_name("doctor-target"));
+/// ```
+pub fn is_rust_fanout_target_name(name: &str) -> bool {
+    name.starts_with("target-") && name.len() > "target-".len()
+}
+
+/// Cargo build-root spellings that do not start with `target-`.
+///
+/// Witnessed next to real `CACHEDIR.TAG` files: `doctor-target`, `_t-fix`,
+/// `_t-gh`, `_t-u5`. The integration layer refuses these unless that tag
+/// says cargo created the directory.
+///
+/// # Examples
+///
+/// ```
+/// use osx_clnr::domain::artifact::is_extended_cargo_target_name;
+///
+/// assert!(is_extended_cargo_target_name("doctor-target"));
+/// assert!(is_extended_cargo_target_name("_t-fix"));
+/// assert!(is_extended_cargo_target_name("_t-gh"));
+///
+/// assert!(!is_extended_cargo_target_name("target"));
+/// assert!(!is_extended_cargo_target_name("target-m10"));
+/// assert!(!is_extended_cargo_target_name("_t-"));
+/// assert!(!is_extended_cargo_target_name("_t"));
+/// assert!(!is_extended_cargo_target_name("src"));
+/// ```
+pub fn is_extended_cargo_target_name(name: &str) -> bool {
+    let suffix_target =
+        name.ends_with("-target") && !name.starts_with("target") && name.len() > "-target".len();
+    let scratch = name.starts_with("_t-") && name.len() > "_t-".len();
+    suffix_target || scratch
 }
 
 /// Returns true when a directory name should be treated as a rebuildable
@@ -973,7 +1033,10 @@ pub fn is_lane_build_root_name(name: &str) -> bool {
 /// assert!(!is_artifact_leaf_name("src"));
 /// ```
 pub fn is_artifact_leaf_name(name: &str) -> bool {
-    if is_lane_build_root_name(name) {
+    if is_lane_build_root_name(name)
+        || is_rust_fanout_target_name(name)
+        || is_extended_cargo_target_name(name)
+    {
         return true;
     }
     if name.starts_with("target_") {
@@ -1447,7 +1510,11 @@ pub fn artifact_candidates_from_snapshot(
                 // convention). Covered as whole roots: the barrier/leaf rules
                 // keep the walker from descending, so an inner `target/` is
                 // reclaimed by containment, not by its own nomination.
-                for e in snap.dirs_with_prefix("target-lane") {
+                for e in snap.children.iter().filter(|e| {
+                    e.is_dir()
+                        && (is_rust_fanout_target_name(&e.file_name)
+                            || is_extended_cargo_target_name(&e.file_name))
+                }) {
                     out.push(Candidate {
                         path: e.path.clone(),
                         reason: "rust lane target root (fan-out lease)".to_string(),
@@ -1790,6 +1857,11 @@ mod lane_build_root_tests {
         assert!(is_lane_build_root_name("_build-laneboogus")); // any suffix after the prefix matches
         assert!(!is_lane_build_root_name("build-laneX"));
         assert!(!is_lane_build_root_name("_build_laneX"));
+        assert!(!is_lane_build_root_name("target-m10"));
+        assert!(is_rust_fanout_target_name("target-m10"));
+        assert!(is_extended_cargo_target_name("doctor-target"));
+        assert!(is_artifact_leaf_name("target-m10"));
+        assert!(is_artifact_leaf_name("_t-fix"));
     }
 
     /// An elixir project root with a `_build-laneW984dj` sibling dir gets the
@@ -1861,12 +1933,53 @@ mod lane_build_root_tests {
         assert!(candidates.iter().any(|c| c.path.as_path() == Path::new("/project/target")));
     }
 
-    /// The ruleset revision was bumped to 7 for the 2026-10-08 disk-scan
-    /// classes, so scan caches written under revision 6 (or earlier) can
-    /// never be mistaken for current.
+    /// Alternate Cargo target spellings are nominated as the same lease.
     #[test]
-    fn classifier_revision_is_7() {
-        assert_eq!(CLASSIFIER_REVISION, 7);
-        assert!(scan_cache_revision_prefix().starts_with("scan-r7-"));
+    fn rust_project_nominates_alternate_cargo_target_dirs() {
+        let root = Path::new("/project");
+        let snap = DirSnapshot {
+            children: vec![
+                EntrySnapshot::new(
+                    PathBuf::from("/project/Cargo.toml"),
+                    "Cargo.toml".into(),
+                    Some("toml".into()),
+                    EntryKind::File,
+                ),
+                EntrySnapshot::new(
+                    "/project/target-m10".into(),
+                    "target-m10".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+                EntrySnapshot::new(
+                    "/project/doctor-target".into(),
+                    "doctor-target".into(),
+                    None,
+                    EntryKind::Dir,
+                ),
+                EntrySnapshot::new("/project/_t-fix".into(), "_t-fix".into(), None, EntryKind::Dir),
+                EntrySnapshot::new("/project/src".into(), "src".into(), None, EntryKind::Dir),
+            ],
+        };
+        let project = detect_project_from_snapshot(&snap).expect("Cargo.toml detected as rust");
+        let candidates = artifact_candidates_from_snapshot(root, &project, &args(false), &snap);
+        for name in ["target-m10", "doctor-target", "_t-fix"] {
+            let item = candidates
+                .iter()
+                .find(|c| c.path.file_name().and_then(|n| n.to_str()) == Some(name))
+                .unwrap_or_else(|| panic!("{name} must be nominated"));
+            assert_eq!(item.reason, "rust lane target root (fan-out lease)");
+        }
+        assert!(candidates
+            .iter()
+            .all(|c| c.path.file_name().and_then(|n| n.to_str()) != Some("src")));
+    }
+
+    /// The ruleset revision was bumped to 8 when alternate Cargo target
+    /// directory names became leases, so an r7 scan cache cannot hide them.
+    #[test]
+    fn classifier_revision_is_8() {
+        assert_eq!(CLASSIFIER_REVISION, 8);
+        assert!(scan_cache_revision_prefix().starts_with("scan-r8-"));
     }
 }

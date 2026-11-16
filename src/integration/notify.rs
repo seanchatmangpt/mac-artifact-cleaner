@@ -1,30 +1,12 @@
-//! macOS user notification delivery via osascript.
+//! Notification entry point. Banners are off: cleanup records itself in the
+//! log and the receipt, and a desktop banner is not part of that record.
 
 use anyhow::Result;
 
-/// Send a macOS user notification banner.
-///
-/// Escaping is minimal: only `"` is replaced with `'` in `title`/`body` before
-/// interpolation into the AppleScript string. Backslashes and other
-/// AppleScript-significant characters are not escaped. Callers must not pass
-/// untrusted or arbitrary text — only pre-sanitized/internally-formatted strings.
+/// Does not display a banner. The log and the receipt are the record.
 pub fn send_notification(title: &str, body: &str) -> Result<()> {
-    let script = format!(
-        "display notification \"{}\" with title \"{}\"",
-        body.replace('"', "'"),
-        title.replace('"', "'")
-    );
-    let status = std::process::Command::new("osascript").args(["-e", &script]).status()?;
-    if !status.success() {
-        anyhow::bail!("osascript notification failed");
-    }
+    let _ = (title, body);
     Ok(())
-}
-
-/// Send a disk pressure notification.
-pub fn notify_disk_pressure(free_gb: f64, threshold_gb: f64) -> Result<()> {
-    let body = format!("Free space {:.1} GB is below threshold {:.1} GB", free_gb, threshold_gb);
-    send_notification("osx-clnr: Disk Pressure", &body)
 }
 
 #[cfg(test)]

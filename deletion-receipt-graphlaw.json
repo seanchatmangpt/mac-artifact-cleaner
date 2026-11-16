@@ -1,0 +1,268 @@
+{
+  "execution_record": {
+    "version": 1,
+    "plan_created_unix": 1793230866,
+    "execution_started_unix": 1793230871,
+    "execution_completed_unix": 1793230998,
+    "results": [
+      {
+        "path": "/Users/sac/graphlaw/target-final",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 30151282688,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P08-sieve-0",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 12549455872,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P07-shacl-1",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 12350246912,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-P08-sieve",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 12157140992,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P07-shacl-0",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 12058976256,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-P01-proof",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 11700932608,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-W0-vector-pin",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 11592564736,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-P03-wasm",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 11520987136,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P08-sieve-1",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 11333238784,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P01-proof-1",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 10765172736,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P01-proof-0",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 10734792704,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P14-halt-0",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 9137897472,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P04-det-0",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 9125842944,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-P04-det",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 9099767808,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-P14-halt",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 9073192960,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-wc2",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8968568832,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-acc",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8599191552,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-fin",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8479911936,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-wc",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8470683648,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-sql",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8243453952,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-f1",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8232824832,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-P17-wire",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8118386688,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P17-wire-0",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8113627136,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P15-isolation-0",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8110157824,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-skv-P16-transition-0",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8093843456,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-P16-transition",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8092839936,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-arr-P15-isolation",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8084058112,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-pin",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 8090185728,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-wasm",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 1730256896,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-spc",
+        "status": "failed",
+        "error": "Could not remove /Users/sac/graphlaw/target-lane-spc. Some entries may be root-owned — try: sudo rm -rf /Users/sac/graphlaw/target-lane-spc (partial deletion: 1.90 GB reclaimed before failure)",
+        "blake3_hash": null,
+        "bytes_freed": 1904680960,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-clippy",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 807309312,
+        "reversibility": "reversible"
+      },
+      {
+        "path": "/Users/sac/graphlaw/target-lane-clippy2",
+        "status": "deleted",
+        "error": null,
+        "blake3_hash": null,
+        "bytes_freed": 806445056,
+        "reversibility": "reversible"
+      }
+    ],
+    "available_before": 38437011456,
+    "available_after": 286123499520
+  }
+}

@@ -6,7 +6,6 @@ use crate::{
     domain::{ocl::OclArtifact, time::system_time_to_unix},
     integration::{
         fs::{generate_manifest, volume_space},
-        notify::notify_disk_pressure,
         ocl_store::OclDatabase,
     },
 };
@@ -137,13 +136,8 @@ pub fn check_disk_pressure(mount: &Path, threshold_gb: f64) -> anyhow::Result<Di
     Ok(DiskPressureCheck { free_gb, threshold_gb, under_pressure: free_gb < threshold_gb })
 }
 
-/// Runs [`check_disk_pressure`] and, if the volume is under pressure, fires a
-/// desktop notification via [`crate::integration::notify::notify_disk_pressure`].
-/// Returns the check outcome either way so callers can report it.
+/// Runs [`check_disk_pressure`] and returns the result. Does not display a
+/// banner; the caller logs the outcome.
 pub fn check_and_notify(mount: &Path, threshold_gb: f64) -> anyhow::Result<DiskPressureCheck> {
-    let check = check_disk_pressure(mount, threshold_gb)?;
-    if check.under_pressure {
-        notify_disk_pressure(check.free_gb, threshold_gb)?;
-    }
-    Ok(check)
+    check_disk_pressure(mount, threshold_gb)
 }
