@@ -1,5 +1,13 @@
 # Changelog
 
+## 26.9.22 (unreleased — `Cargo.toml` still 26.9.21; cut the version bump + `v26.9.22` tag to make this a release)
+
+### Security
+- Supply-chain floor (44ffe7d): `crossbeam-epoch` bumped 0.9.18 → 0.9.21 in `Cargo.lock` (RUSTSEC-2026-0204); `cargo deny check` (advisories v2, vulnerabilities always denied) is clean, and the new lockfile admission guard (`tests/lockfile_supply_chain.rs`) refuses any lock regressing below the observed advisory floor (crossbeam-epoch ≥ 0.9.20).
+
+### Changed
+- `oclnr` resolution order extension (44ffe7d): `oclnr-mcp` also probes a cargo-built `oclnr` in `target/<profile>/` (the parent of a `deps/` test-harness directory) before falling back to `PATH`, so MCP server tests no longer require `oclnr` on PATH and a stale PATH install cannot shadow the built binary.
+
 ## 26.9.21
 
 ### Added
